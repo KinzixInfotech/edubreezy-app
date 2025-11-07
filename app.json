@@ -2,13 +2,14 @@
   "expo": {
     "name": "Edubreezy",
     "slug": "Edubreezy",
+    "scheme": "edubreezy",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
@@ -20,10 +21,19 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "googleServicesFile": "./google-services.json",
+      "plugins": [
+        "@react-native-firebase/app",
+        "@react-native-firebase/messaging"
+      ],
+      "edgeToEdgeEnabled": true,
+      "package": "com.kinzix.edubreezy"
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-font"
+    ]
   }
 }

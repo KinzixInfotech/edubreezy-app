@@ -32,9 +32,9 @@ export const dataUi = {
     "parent": {
       "title": "{name}",
       "subtitle": [
-        { "text": "Parent", "type": "static" },
-        { "text": "|", "type": "separator" },
-        { "text": "{child.class}", "type": "childClass" }
+        // { "text": "Parent", "type": "static" },
+        // { "text": "|", "type": "separator" },
+        { "text": "{emailparent}", "type": "static" }
       ],
       "icons": ["bell"]
     }

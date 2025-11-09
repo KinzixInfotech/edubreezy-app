@@ -335,7 +335,7 @@ export default function LoginScreen() {
             await SecureStore.setItemAsync("user", JSON.stringify(user));
             await SecureStore.setItemAsync("userRole", JSON.stringify(user?.role?.name));
             
-            router.replace('/(tabs)/home');
+            router.replace('/(screens)/greeting');
         } catch (err) {
             // error handling same as before
         } finally {

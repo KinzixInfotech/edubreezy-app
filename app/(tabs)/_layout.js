@@ -59,7 +59,7 @@ export default function TabsLayout() {
         name="noticeboard"
         options={{
           title: 'Notice Board',
-          href: isStudent ? '/noticeboard' : null,
+          // href: isStudent ? '/noticeboard' : null,
           tabBarBadge: noticeBadgeCount > 0 ? noticeBadgeCount : undefined, // Show badge
           tabBarIcon: ({ focused, color, size }) => (
             <Ionicons

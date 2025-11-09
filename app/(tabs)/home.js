@@ -1,17 +1,19 @@
 import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Dimensions, RefreshControl } from 'react-native';
 import { Link, router } from 'expo-router';
-import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings } from 'lucide-react-native';
+import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings, Plus, CheckCircle2 } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../components/HapticTouch';
 import { useEffect, useMemo, useState, useCallback, act } from 'react';
 import Animated, { FadeInDown, FadeInRight, FadeInUp } from 'react-native-reanimated';
 import { dataUi } from '../data/uidata';
+
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../../lib/api';
 import GlowingStatusBar from '../components/GlowingStatusBar';
+import AddChildModal from '../components/AddChildModal';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const isSmallDevice = SCREEN_WIDTH < 375;
@@ -22,6 +24,8 @@ const IconMap = {
     bell: Bell,
     settings: Settings,
 };
+
+
 
 // ============================================
 // CENTRALIZED QUERY KEYS
@@ -43,6 +47,7 @@ export default function HomeScreen() {
 
     useEffect(() => {
         loadUser();
+        // router.replace('/(screens)/greeting')
     }, []);
 
     const loadUser = async () => {
@@ -209,6 +214,20 @@ export default function HomeScreen() {
                 </HapticTouchable>
             );
         });
+        function getGreeting() {
+            // Get current time in IST
+            const now = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+            const hour = new Date(now).getHours();
+
+            if (hour < 12) {
+                return "Good Morning";
+            } else if (hour < 18) {
+                return "Good Afternoon";
+            } else {
+                return "Good Evening";
+            }
+        }
+
 
         return (
             <Animated.View entering={FadeInUp.duration(600)} style={styles.header}>
@@ -227,7 +246,7 @@ export default function HomeScreen() {
                         )}
                     </HapticTouchable>
                     <View style={styles.headerInfo}>
-                        <Text style={styles.welcomeText}>Welcome Back,</Text>
+                        <Text style={styles.welcomeText}>{getGreeting()},</Text>
                         <Text style={styles.name} numberOfLines={1}>{title}</Text>
                         <View style={styles.parentEmail}>{subtitle}</View>
                     </View>
@@ -396,8 +415,73 @@ export default function HomeScreen() {
         </ScrollView>
     );
 
-    // === PARENT VIEW ===
+
+
+    // / Complete ParentView Component
     const ParentView = ({ schoolId, parentId, refreshing, onRefresh }) => {
+        const [showAddChildModal, setShowAddChildModal] = useState(false);
+        const [selectedChild, setSelectedChild] = useState(null);
+        const queryClient = useQueryClient();
+        const {
+            data: recentNotices,
+            isFetching,
+            isLoading,
+            refetch,
+        } = useQuery({
+            queryKey: ['notices', schoolId, userId],
+            queryFn: async () => {
+                if (!schoolId || !userId) return { notices: [], pagination: {} };
+
+                const cat = 'All';
+                const unread = '';
+
+                const res = await api.get(
+                    `/notices/${schoolId}?userId=${userId}&${cat}&${unread}&limit=4&page=1`
+                );
+                return res.data; // { notices: [], pagination: { totalPages, currentPage } }
+            },
+            enabled: !!schoolId && !!userId,
+            keepPreviousData: true,
+            staleTime: 0,               // ← force fresh data on mount / category change
+        });
+        // console.log(recentNotices);
+        const notices = recentNotices?.notices?.map((n) => ({
+            id: n.id,
+            title: n.title,
+            time: new Date(n.createdAt).toLocaleString(), // or format like "2 hours ago"
+            unread: !n.read,
+        })) || [];
+        // qucik access for parent
+        const actionGroups = [
+            {
+                title: 'Quick Actions',
+                actions: [
+                    { icon: TrendingUp, label: 'Performance', color: '#0469ff', bgColor: '#E3F2FD', href: "/payfees" },
+                    { icon: Calendar, label: 'Attendance', color: '#4ECDC4', bgColor: '#E0F7F4', href: "/payfees" },
+                    { icon: MessageCircle, label: 'Messages', color: '#9C27B0', bgColor: '#F3E5F5', href: "/payfees" },
+                ],
+            },
+            {
+                title: 'Examination',
+                actions: [
+                    { icon: FileText, label: 'Report Card', color: '#FFD93D', bgColor: '#FFF9E0', href: "/payfees" },
+                    { icon: BookOpen, label: 'Assignments', color: '#FF9800', bgColor: '#FFF3E0', href: "/payfees" },
+                ],
+            },
+            {
+                title: 'Fee Management',
+                actions: [
+                    {
+                        icon: DollarSign,
+                        label: 'Pay Fees',
+                        color: '#FF6B6B',
+                        bgColor: '#FFE9E9',
+                        href: "/(screens)/payfees",
+                        params: { childData: JSON.stringify(selectedChild) },
+                    },
+                ],
+            },
+        ];
         const { data, isPending } = useQuery({
             queryKey: QUERY_KEYS.parentChildren(schoolId, parentId),
             queryFn: async () => {
@@ -408,12 +492,11 @@ export default function HomeScreen() {
             placeholderData: { parent: null, children: [] },
             staleTime: 1000 * 60,
         });
-        // console.log(data, 'data from here');
 
         const uiChildren = useMemo(() =>
-            data?.children?.map((child, index) => ({
+            data?.children?.map((child) => ({
                 id: child.studentId,
-                studentId:child.studentId,
+                studentId: child.studentId,
                 name: child.name,
                 class: child.class,
                 section: child.section,
@@ -427,7 +510,7 @@ export default function HomeScreen() {
             [data]);
 
         const parentData = useMemo(() => ({
-            name: "Sarah Johnsonn",
+            name: "Sarah Johnson",
             email: "sarah.johnson@email.com",
             phone: "+91 9876543210",
             upcomingEvents: [
@@ -442,23 +525,99 @@ export default function HomeScreen() {
             ]
         }), []);
 
-        const [selectedChild, setSelectedChild] = useState(null);
-
         useEffect(() => {
             if (uiChildren.length > 0 && !selectedChild) {
                 setSelectedChild(uiChildren[0]);
             }
         }, [uiChildren, selectedChild]);
 
-        if (isPending || uiChildren.length === 0) {
+        const handleAddChildSuccess = useCallback(async () => {
+            try {
+                // Refresh the children list
+                await queryClient.invalidateQueries(QUERY_KEYS.parentChildren(schoolId, parentId));
+                // Trigger parent refresh
+                if (onRefresh && typeof onRefresh === 'function') {
+                    onRefresh();
+                }
+            } catch (error) {
+                console.error('Failed to refresh after adding child:', error);
+            }
+        }, [queryClient, schoolId, parentId, onRefresh]);
+
+        // Loading state
+        if (isPending) {
             return (
                 <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
                     <ActivityIndicator size="large" color="#0469ff" />
                 </View>
             );
         }
-        console.log(selectedChild);
 
+        // Empty state - No children added yet
+        if (!isPending && uiChildren.length === 0) {
+            return (
+                <View style={styles.container}>
+                    <ScrollView
+                        contentContainerStyle={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}
+                        refreshControl={
+                            <RefreshControl
+                                refreshing={refreshing}
+                                onRefresh={onRefresh}
+                                tintColor="#0469ff"
+                                colors={['#0469ff']}
+                            />
+                        }
+                    >
+                        <View style={{ alignItems: 'center' }}>
+                            <View style={{
+                                width: 120,
+                                height: 120,
+                                borderRadius: 60,
+                                backgroundColor: '#E3F2FD',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                marginBottom: 24
+                            }}>
+                                <Users size={48} color="#0469ff" />
+                            </View>
+                            <Text style={{ fontSize: 20, fontWeight: '700', color: '#111', marginBottom: 8 }}>
+                                No Children Added
+                            </Text>
+                            <Text style={{ fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 32, lineHeight: 20, paddingHorizontal: 16 }}>
+                                Add your child to view their information and stay connected with their education
+                            </Text>
+                            <HapticTouchable onPress={() => setShowAddChildModal(true)}>
+                                <View style={{
+                                    backgroundColor: '#0469ff',
+                                    paddingHorizontal: 32,
+                                    paddingVertical: 16,
+                                    borderRadius: 12,
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    gap: 8
+                                }}>
+                                    <Plus size={20} color="#fff" />
+                                    <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>
+                                        Add Your Child
+                                    </Text>
+                                </View>
+                            </HapticTouchable>
+                        </View>
+                    </ScrollView>
+
+                    {/* Add Child Modal */}
+                    <AddChildModal
+                        visible={showAddChildModal}
+                        onClose={() => setShowAddChildModal(false)}
+                        parentId={parentId}
+                        schoolId={schoolId}
+                        onSuccess={handleAddChildSuccess}
+                    />
+                </View>
+            );
+        }
+
+        // Main view with children
         return (
             <ScrollView
                 style={styles.container}
@@ -475,9 +634,17 @@ export default function HomeScreen() {
                 {/* Children Selector */}
                 <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.section}>
                     <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>Your Children</Text>
-                        <Text style={styles.childrenCount}>{uiChildren?.length || 0}</Text>
+                        <View>
+                            <Text style={styles.sectionTitle}>Your Children</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', gap: 6 }}>
+                            <Text style={styles.childrenCount}>{uiChildren?.length || 0}</Text>
+                            <HapticTouchable onPress={() => setShowAddChildModal(true)}>
+                                <Plus style={styles.childrenCount} color={'#0469ff'} strokeWidth={0.9} />
+                            </HapticTouchable>
+                        </View>
                     </View>
+
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.childrenScroll}>
                         {uiChildren.map((child, index) => (
                             <Animated.View key={child.id} entering={FadeInRight.delay(200 + index * 100).duration(500)}>
@@ -542,49 +709,46 @@ export default function HomeScreen() {
                         </LinearGradient>
                     </View>
                 </Animated.View>
-
                 {/* Quick Actions */}
-                <Animated.View entering={FadeInDown.delay(400).duration(600)} style={styles.section}>
-                    <Text style={styles.sectionTitle}>Quick Actions</Text>
-                    <View style={styles.actionsGrid}>
-                        {[
-                            { icon: TrendingUp, label: 'Performance', color: '#0469ff', bgColor: '#E3F2FD', href: "/payfees" },
-                            { icon: Calendar, label: 'Attendance', color: '#4ECDC4', bgColor: '#E0F7F4', href: "/payfees" },
-                            { icon: FileText, label: 'Report Card', color: '#FFD93D', bgColor: '#FFF9E0', href: "/payfees" },
-                            {
-                                icon: DollarSign, label: 'Pay Fees', color: '#FF6B6B', bgColor: '#FFE9E9', href: "/(screens)/payfees", params: {
-                                    childData: JSON.stringify(selectedChild)
-                                },
-                            },
-                            { icon: MessageCircle, label: 'Messages', color: '#9C27B0', bgColor: '#F3E5F5', href: "/payfees" },
-                            { icon: BookOpen, label: 'Assignments', color: '#FF9800', bgColor: '#FFF3E0', href: "/payfees" },
-                        ].map((action, index) => (
-                            <Animated.View key={action.label} entering={FadeInDown.delay(500 + index * 50).duration(400)}>
-                                <HapticTouchable
-                                    onPress={() => {
-                                        if (action.label === 'Pay Fees') {
-                                            router.push({
-                                                pathname: action.href,
-                                                ...(action.params ? { params: action.params } : {}),
-                                            });
-                                        } else {
-                                            router.push(action.href || '');
-                                        }
-                                    }}
+                {actionGroups && actionGroups.map((group, groupIndex) => (
+                    <Animated.View
+                        key={group.title}
+                        entering={FadeInDown.delay(400 + groupIndex * 100).duration(600)}
+                        style={styles.section}
+                    >
+                        <Text style={styles.sectionTitle}>{group.title}</Text>
+                        <View style={styles.actionsGrid}>
+                            {group.actions.map((action, index) => (
+                                <Animated.View
+                                    key={action.label}
+                                    entering={FadeInDown.delay(500 + index * 50).duration(400)}
                                 >
-                                    <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}>
-                                        <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
-                                            <action.icon size={22} color={action.color} />
+                                    <HapticTouchable
+                                        onPress={() => {
+                                            if (action.params) {
+                                                router.push({
+                                                    pathname: action.href,
+                                                    params: action.params,
+                                                });
+                                            } else {
+                                                router.push(action.href || '');
+                                            }
+                                        }}
+                                    >
+                                        <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}>
+                                            <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
+                                                <action.icon size={22} color={action.color} />
+                                            </View>
+                                            <Text style={styles.actionLabel} numberOfLines={1}>
+                                                {action.label}
+                                            </Text>
                                         </View>
-                                        <Text style={styles.actionLabel} numberOfLines={1}>{action.label}</Text>
-                                    </View>
-                                </HapticTouchable>
-                            </Animated.View>
-
-                        ))}
-                    </View>
-                </Animated.View>
-
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))}
+                        </View>
+                    </Animated.View>
+                ))}
                 {/* Upcoming Events */}
                 <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
                     <View style={styles.sectionHeader}>
@@ -620,37 +784,65 @@ export default function HomeScreen() {
                 <Animated.View entering={FadeInDown.delay(800).duration(600)} style={[styles.section, { marginBottom: 30 }]}>
                     <View style={styles.sectionHeader}>
                         <Text style={styles.sectionTitle}>Recent Notices</Text>
-                        <HapticTouchable>
+                        <HapticTouchable onPress={() => router.push('/(tabs)/noticeboard')}>
                             <Text style={styles.seeAll}>View All</Text>
                         </HapticTouchable>
                     </View>
                     <View style={styles.noticesContainer}>
-                        {parentData.recentNotices.map((notice, index) => (
-                            <Animated.View key={notice.id} entering={FadeInRight.delay(900 + index * 100).duration(500)}>
-                                <HapticTouchable>
-                                    <View style={styles.noticeCard}>
-                                        <View style={styles.noticeLeft}>
-                                            <View style={[styles.noticeIcon, notice.unread && styles.unreadIcon]}>
-                                                <Bell size={16} color={notice.unread ? '#0469ff' : '#999'} />
+                        {notices && notices.length > 0 ? (
+                            notices.map((notice, index) => (
+                                <Animated.View
+                                    key={notice.id}
+                                    entering={FadeInRight.delay(900 + index * 100).duration(500)}
+                                >
+                                    <HapticTouchable onPress={() => router.push('/(tabs)/noticeboard')}>
+                                        <View style={styles.noticeCard}>
+                                            <View style={styles.noticeLeft}>
+                                                <View style={[styles.noticeIcon, notice.unread && styles.unreadIcon]}>
+                                                    <Bell size={16} color={notice.unread ? '#0469ff' : '#999'} />
+                                                </View>
+                                                <View style={styles.noticeInfo}>
+                                                    <Text style={[styles.noticeTitle, notice.unread && styles.unreadTitle]}>
+                                                        {notice.title}
+                                                    </Text>
+                                                    <Text style={styles.noticeTime}>{notice.time}</Text>
+                                                </View>
                                             </View>
-                                            <View style={styles.noticeInfo}>
-                                                <Text style={[styles.noticeTitle, notice.unread && styles.unreadTitle]}>
-                                                    {notice.title}
-                                                </Text>
-                                                <Text style={styles.noticeTime}>{notice.time}</Text>
-                                            </View>
+                                            {notice.unread && <View style={styles.unreadDot} />}
                                         </View>
-                                        {notice.unread && <View style={styles.unreadDot} />}
-                                    </View>
-                                </HapticTouchable>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))
+                        ) : (
+                            <Animated.View
+                                entering={FadeInRight.delay(900).duration(500)}
+                                style={{
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    paddingVertical: 20,
+                                    opacity: 0.8,
+                                }}
+                            >
+                                <CheckCircle2 size={26} color="#0469ff" />
+                                <Text style={{ marginTop: 8, fontSize: 14, color: '#555' }}>
+                                    You’re all caught up!
+                                </Text>
                             </Animated.View>
-                        ))}
+                        )}
                     </View>
                 </Animated.View>
+
+                {/* Add Child Modal */}
+                <AddChildModal
+                    visible={showAddChildModal}
+                    onClose={() => setShowAddChildModal(false)}
+                    parentId={parentId}
+                    schoolId={schoolId}
+                    onSuccess={handleAddChildSuccess}
+                />
             </ScrollView>
         );
     };
-
     return (
         <View style={styles.container}>
             <Header />

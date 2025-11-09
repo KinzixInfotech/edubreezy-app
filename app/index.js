@@ -36,7 +36,7 @@ export default function Index() {
   }
 
   if (session) {
-    return <Redirect href="/(tabs)/home" />;
+    return <Redirect href="/(screens)/greeting" />;
   }
 
   return <Redirect href="/(auth)/schoolcode" />;

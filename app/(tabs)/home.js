@@ -1,10 +1,10 @@
 import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Dimensions, RefreshControl } from 'react-native';
-import { router } from 'expo-router';
+import { Link, router } from 'expo-router';
 import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../components/HapticTouch';
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, act } from 'react';
 import Animated, { FadeInDown, FadeInRight, FadeInUp } from 'react-native-reanimated';
 import { dataUi } from '../data/uidata';
 import { StatusBar } from 'expo-status-bar';
@@ -174,11 +174,11 @@ export default function HomeScreen() {
             const text = replaceDynamic(item.text, roleKey);
             const style =
                 item.type === 'role' ? styles.role :
-                item.type === 'separator' ? styles.separator :
-                item.type === 'school' ? styles.school :
-                item.type === 'department' ? styles.school :
-                item.type === 'childClass' ? styles.school :
-                item.type === 'static' ? styles.role : styles.role;
+                    item.type === 'separator' ? styles.separator :
+                        item.type === 'school' ? styles.school :
+                            item.type === 'department' ? styles.school :
+                                item.type === 'childClass' ? styles.school :
+                                    item.type === 'static' ? styles.role : styles.role;
             return <Text key={i} style={style} numberOfLines={1}>{text}</Text>;
         });
 
@@ -194,8 +194,8 @@ export default function HomeScreen() {
                     key={i}
                     onPress={
                         isBell ? () => router.push('(screens)/notification') :
-                        isRefresh ? onRefresh :
-                        undefined
+                            isRefresh ? onRefresh :
+                                undefined
                     }
                 >
                     <View style={styles.iconButton}>
@@ -242,28 +242,28 @@ export default function HomeScreen() {
         const role = user_acc?.role?.name ? user_acc.role.name.toLowerCase() : '';
 
         switch (role) {
-            case 'student': 
+            case 'student':
                 return <StudentView refreshing={refreshing} onRefresh={onRefresh} />;
-            case 'teacher': 
+            case 'teacher':
                 return <TeacherView refreshing={refreshing} onRefresh={onRefresh} />;
-            case 'admin': 
+            case 'admin':
                 return <AdminView refreshing={refreshing} onRefresh={onRefresh} />;
-            case 'parent': 
-                return <ParentView 
-                    schoolId={user_acc?.schoolId} 
+            case 'parent':
+                return <ParentView
+                    schoolId={user_acc?.schoolId}
                     parentId={user_acc?.parentData.id}
                     refreshing={refreshing}
                     onRefresh={onRefresh}
                 />;
-            default: 
+            default:
                 return <StudentView refreshing={refreshing} onRefresh={onRefresh} />;
         }
     };
 
     // === STUDENT VIEW ===
     const StudentView = ({ refreshing, onRefresh }) => (
-        <ScrollView 
-            style={styles.content} 
+        <ScrollView
+            style={styles.content}
             showsVerticalScrollIndicator={false}
             refreshControl={
                 <RefreshControl
@@ -360,8 +360,8 @@ export default function HomeScreen() {
 
     // === TEACHER VIEW ===
     const TeacherView = ({ refreshing, onRefresh }) => (
-        <ScrollView 
-            style={styles.content} 
+        <ScrollView
+            style={styles.content}
             showsVerticalScrollIndicator={false}
             refreshControl={
                 <RefreshControl
@@ -379,8 +379,8 @@ export default function HomeScreen() {
 
     // === ADMIN VIEW ===
     const AdminView = ({ refreshing, onRefresh }) => (
-        <ScrollView 
-            style={styles.content} 
+        <ScrollView
+            style={styles.content}
             showsVerticalScrollIndicator={false}
             refreshControl={
                 <RefreshControl
@@ -408,10 +408,12 @@ export default function HomeScreen() {
             placeholderData: { parent: null, children: [] },
             staleTime: 1000 * 60,
         });
+        // console.log(data, 'data from here');
 
-        const uiChildren = useMemo(() => 
+        const uiChildren = useMemo(() =>
             data?.children?.map((child, index) => ({
-                id: index + 1,
+                id: child.studentId,
+                studentId:child.studentId,
                 name: child.name,
                 class: child.class,
                 section: child.section,
@@ -421,8 +423,8 @@ export default function HomeScreen() {
                 feeStatus: "Paid",
                 performance: "Excellent",
                 pendingFee: 0
-            })) || [], 
-        [data]);
+            })) || [],
+            [data]);
 
         const parentData = useMemo(() => ({
             name: "Sarah Johnsonn",
@@ -455,10 +457,11 @@ export default function HomeScreen() {
                 </View>
             );
         }
+        console.log(selectedChild);
 
         return (
-            <ScrollView 
-                style={styles.container} 
+            <ScrollView
+                style={styles.container}
                 showsVerticalScrollIndicator={false}
                 refreshControl={
                     <RefreshControl
@@ -545,15 +548,30 @@ export default function HomeScreen() {
                     <Text style={styles.sectionTitle}>Quick Actions</Text>
                     <View style={styles.actionsGrid}>
                         {[
-                            { icon: TrendingUp, label: 'Performance', color: '#0469ff', bgColor: '#E3F2FD' },
-                            { icon: Calendar, label: 'Attendance', color: '#4ECDC4', bgColor: '#E0F7F4' },
-                            { icon: FileText, label: 'Report Card', color: '#FFD93D', bgColor: '#FFF9E0' },
-                            { icon: DollarSign, label: 'Fee Payment', color: '#FF6B6B', bgColor: '#FFE9E9' },
-                            { icon: MessageCircle, label: 'Messages', color: '#9C27B0', bgColor: '#F3E5F5' },
-                            { icon: BookOpen, label: 'Assignments', color: '#FF9800', bgColor: '#FFF3E0' },
+                            { icon: TrendingUp, label: 'Performance', color: '#0469ff', bgColor: '#E3F2FD', href: "/payfees" },
+                            { icon: Calendar, label: 'Attendance', color: '#4ECDC4', bgColor: '#E0F7F4', href: "/payfees" },
+                            { icon: FileText, label: 'Report Card', color: '#FFD93D', bgColor: '#FFF9E0', href: "/payfees" },
+                            {
+                                icon: DollarSign, label: 'Pay Fees', color: '#FF6B6B', bgColor: '#FFE9E9', href: "/(screens)/payfees", params: {
+                                    childData: JSON.stringify(selectedChild)
+                                },
+                            },
+                            { icon: MessageCircle, label: 'Messages', color: '#9C27B0', bgColor: '#F3E5F5', href: "/payfees" },
+                            { icon: BookOpen, label: 'Assignments', color: '#FF9800', bgColor: '#FFF3E0', href: "/payfees" },
                         ].map((action, index) => (
                             <Animated.View key={action.label} entering={FadeInDown.delay(500 + index * 50).duration(400)}>
-                                <HapticTouchable>
+                                <HapticTouchable
+                                    onPress={() => {
+                                        if (action.label === 'Pay Fees') {
+                                            router.push({
+                                                pathname: action.href,
+                                                ...(action.params ? { params: action.params } : {}),
+                                            });
+                                        } else {
+                                            router.push(action.href || '');
+                                        }
+                                    }}
+                                >
                                     <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}>
                                         <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
                                             <action.icon size={22} color={action.color} />
@@ -562,6 +580,7 @@ export default function HomeScreen() {
                                     </View>
                                 </HapticTouchable>
                             </Animated.View>
+
                         ))}
                     </View>
                 </Animated.View>

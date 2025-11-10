@@ -100,7 +100,7 @@ const NoticeBoardScreen = () => {
   // ──────────────────────────────────────────────────────
   // 4. React-Query: fetch notices
   // ──────────────────────────────────────────────────────
-  const {
+const {
     data,
     isFetching,
     isLoading,

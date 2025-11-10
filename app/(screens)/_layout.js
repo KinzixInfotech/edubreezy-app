@@ -4,6 +4,7 @@ export default function ScreenLayout() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="notification" />
+      <Stack.Screen name="paymenthistory" />
       <Stack.Screen name="greeting" />
       <Stack.Screen name="payfees" />
     </Stack>

@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Dimensions, RefreshControl } from 'react-native';
 import { Link, router } from 'expo-router';
-import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings, Plus, CheckCircle2 } from 'lucide-react-native';
+import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings, Plus, CheckCircle2, TimerIcon } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../components/HapticTouch';
@@ -81,6 +81,72 @@ export default function HomeScreen() {
             unreadCount: data?.notifications?.filter(n => !n.read).length || 0
         })
     });
+    // Add this query in your ParentView component, near the other queries
+    const { data: upcomingEventsData, isLoading: eventsLoading } = useQuery({
+        queryKey: ['upcomingEvents', schoolId],
+        queryFn: async () => {
+            if (!schoolId) return { events: [], total: 0 };
+            const res = await api.get(`/schools/${schoolId}/calendar/upcoming?limit=5`);
+            return res.data;
+        },
+        enabled: !!schoolId,
+        staleTime: 1000 * 60 * 5, // 5 minutes
+    });
+    // Helper function to get category icon
+    const getCategoryIcon = (category, eventType) => {
+        const icons = {
+            'MEETING': '👥',
+            'SPORTS': '⚽',
+            'ACADEMIC': '📚',
+            'CULTURAL': '🎭',
+            'EXAM': '📝',
+            'HOLIDAY': '🎉',
+            'OTHER': '📅',
+            'CUSTOM': '✨'
+        };
+        return icons[category] || icons[eventType] || '📅';
+    };
+    // Helper function to format date
+    const formatEventDate = (startDate, endDate, isAllDay) => {
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+
+        const options = { month: 'short', day: 'numeric', year: 'numeric' };
+
+        if (start.toDateString() === end.toDateString()) {
+            return start.toLocaleDateString('en-US', options);
+        }
+
+        return `${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${end.toLocaleDateString('en-US', options)}`;
+    };
+
+    // Helper function to check if event is today
+    const isEventToday = (startDate) => {
+        const today = new Date();
+        const eventDate = new Date(startDate);
+        return today.toDateString() === eventDate.toDateString();
+    };
+    // Process events data
+    const upcomingEvents = useMemo(() => {
+        if (!upcomingEventsData?.events) return [];
+
+        return upcomingEventsData.events.map(event => ({
+            id: event.id,
+            title: event.title,
+            date: formatEventDate(event.startDate, event.endDate, event.isAllDay),
+            icon: getCategoryIcon(event.category, event.eventType),
+            color: event.color || '#0469ff',
+            location: event.location,
+            isToday: isEventToday(event.startDate),
+            rawStartDate: event.startDate,
+        }));
+    }, [upcomingEventsData]);
+
+    // Filter today's events
+    const todaysEvents = useMemo(() =>
+        upcomingEvents.filter(event => event.isToday),
+        [upcomingEvents]
+    );
 
     const unreadCount = notificationData?.unreadCount || uiData.notifications.today.filter(n => !n.read).length;
 
@@ -293,6 +359,41 @@ export default function HomeScreen() {
                 />
             }
         >
+               {todaysEvents.length > 0 && (
+                <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
+                    <View style={styles.sectionHeader}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <Text style={styles.sectionTitle}>Today's Events</Text>
+                            <View style={styles.todayBadge}>
+                                <Text style={styles.todayBadgeText}>NOW</Text>
+                            </View>
+                        </View>
+                    </View>
+                    <View style={styles.eventsContainer}>
+                        {todaysEvents.map((event, index) => (
+                            <Animated.View key={event.id} entering={FadeInRight.delay(600 + index * 100).duration(500)}>
+                                <HapticTouchable>
+                                    <LinearGradient
+                                        colors={[event.color, event.color + 'DD']}
+                                        style={styles.todayEventCard}
+                                    >
+                                        <View style={styles.todayEventIcon}>
+                                            <Text style={styles.eventEmoji}>{event.icon}</Text>
+                                        </View>
+                                        <View style={styles.eventInfo}>
+                                            <Text style={styles.todayEventTitle}>{event.title}</Text>
+                                            {event.location && (
+                                                <Text style={styles.todayEventLocation}>📍 {event.location}</Text>
+                                            )}
+                                        </View>
+                                        <View style={styles.pulsingDot} />
+                                    </LinearGradient>
+                                </HapticTouchable>
+                            </Animated.View>
+                        ))}
+                    </View>
+                </Animated.View>
+            )}
             {/* Upcoming Exam */}
             <Animated.View
                 entering={FadeInDown.delay(100).duration(600)}
@@ -410,6 +511,41 @@ export default function HomeScreen() {
                 />
             }
         >
+               {todaysEvents.length > 0 && (
+                <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
+                    <View style={styles.sectionHeader}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <Text style={styles.sectionTitle}>Today's Events</Text>
+                            <View style={styles.todayBadge}>
+                                <Text style={styles.todayBadgeText}>NOW</Text>
+                            </View>
+                        </View>
+                    </View>
+                    <View style={styles.eventsContainer}>
+                        {todaysEvents.map((event, index) => (
+                            <Animated.View key={event.id} entering={FadeInRight.delay(600 + index * 100).duration(500)}>
+                                <HapticTouchable>
+                                    <LinearGradient
+                                        colors={[event.color, event.color + 'DD']}
+                                        style={styles.todayEventCard}
+                                    >
+                                        <View style={styles.todayEventIcon}>
+                                            <Text style={styles.eventEmoji}>{event.icon}</Text>
+                                        </View>
+                                        <View style={styles.eventInfo}>
+                                            <Text style={styles.todayEventTitle}>{event.title}</Text>
+                                            {event.location && (
+                                                <Text style={styles.todayEventLocation}>📍 {event.location}</Text>
+                                            )}
+                                        </View>
+                                        <View style={styles.pulsingDot} />
+                                    </LinearGradient>
+                                </HapticTouchable>
+                            </Animated.View>
+                        ))}
+                    </View>
+                </Animated.View>
+            )}
             <Text style={styles.sectionTitle}>School Dashboard</Text>
             <Text style={{ padding: 16, color: '#666' }}>Admin features coming soon.</Text>
         </ScrollView>
@@ -479,6 +615,19 @@ export default function HomeScreen() {
                         href: "/(screens)/payfees",
                         params: { childData: JSON.stringify(selectedChild) },
                     },
+                    {
+                        icon: TimerIcon,
+                        label: 'History',
+                        color: '#4CAF50',
+                        bgColor: '#E7F5E9',
+                        href: "/(screens)/paymenthistory",
+                        params: {
+                            childData: JSON.stringify({
+                                ...selectedChild,
+                                parentId
+                            })
+                        }
+                    },
                 ],
             },
         ];
@@ -513,11 +662,11 @@ export default function HomeScreen() {
             name: "Sarah Johnson",
             email: "sarah.johnson@email.com",
             phone: "+91 9876543210",
-            upcomingEvents: [
-                { id: 1, title: "Parent-Teacher Meeting", date: "Nov 15, 2025", icon: "👥", color: "#FF6B6B" },
-                { id: 2, title: "Annual Sports Day", date: "Nov 20, 2025", icon: "⚽", color: "#4ECDC4" },
-                { id: 3, title: "Science Exhibition", date: "Nov 25, 2025", icon: "🔬", color: "#FFD93D" }
-            ],
+            // upcomingEvents: [
+            //     { id: 1, title: "Parent-Teacher Meeting", date: "Nov 15, 2025", icon: "👥", color: "#FF6B6B" },
+            //     { id: 2, title: "Annual Sports Day", date: "Nov 20, 2025", icon: "⚽", color: "#4ECDC4" },
+            //     { id: 3, title: "Science Exhibition", date: "Nov 25, 2025", icon: "🔬", color: "#FFD93D" }
+            // ],
             recentNotices: [
                 { id: 1, title: "Winter Break Schedule", time: "2 hours ago", unread: true },
                 { id: 2, title: "Fee Payment Reminder", time: "1 day ago", unread: true },
@@ -569,6 +718,7 @@ export default function HomeScreen() {
                         }
                     >
                         <View style={{ alignItems: 'center' }}>
+
                             <View style={{
                                 width: 120,
                                 height: 120,
@@ -631,6 +781,41 @@ export default function HomeScreen() {
                     />
                 }
             >
+                   {todaysEvents.length > 0 && (
+                <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
+                    <View style={styles.sectionHeader}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <Text style={styles.sectionTitle}>Today's Events</Text>
+                            <View style={styles.todayBadge}>
+                                <Text style={styles.todayBadgeText}>NOW</Text>
+                            </View>
+                        </View>
+                    </View>
+                    <View style={styles.eventsContainer}>
+                        {todaysEvents.map((event, index) => (
+                            <Animated.View key={event.id} entering={FadeInRight.delay(600 + index * 100).duration(500)}>
+                                <HapticTouchable>
+                                    <LinearGradient
+                                        colors={[event.color, event.color + 'DD']}
+                                        style={styles.todayEventCard}
+                                    >
+                                        <View style={styles.todayEventIcon}>
+                                            <Text style={styles.eventEmoji}>{event.icon}</Text>
+                                        </View>
+                                        <View style={styles.eventInfo}>
+                                            <Text style={styles.todayEventTitle}>{event.title}</Text>
+                                            {event.location && (
+                                                <Text style={styles.todayEventLocation}>📍 {event.location}</Text>
+                                            )}
+                                        </View>
+                                        <View style={styles.pulsingDot} />
+                                    </LinearGradient>
+                                </HapticTouchable>
+                            </Animated.View>
+                        ))}
+                    </View>
+                </Animated.View>
+            )}
                 {/* Children Selector */}
                 <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.section}>
                     <View style={styles.sectionHeader}>
@@ -758,7 +943,7 @@ export default function HomeScreen() {
                         </HapticTouchable>
                     </View>
                     <View style={styles.eventsContainer}>
-                        {parentData.upcomingEvents.map((event, index) => (
+                        {upcomingEvents.map((event, index) => (
                             <Animated.View key={event.id} entering={FadeInRight.delay(700 + index * 100).duration(500)}>
                                 <HapticTouchable>
                                     <View style={styles.eventCard}>
@@ -846,6 +1031,9 @@ export default function HomeScreen() {
     return (
         <View style={styles.container}>
             <Header />
+            <StatusBar style='dark' />
+            {/* Today's Events (if any) */}
+         
             {renderContent()}
         </View>
     );
@@ -1291,5 +1479,58 @@ const styles = StyleSheet.create({
         height: 8,
         borderRadius: 4,
         backgroundColor: '#0469ff',
+    },
+    todayBadge: {
+        backgroundColor: '#FF6B6B',
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 8,
+    },
+    todayBadgeText: {
+        color: '#fff',
+        fontSize: 10,
+        fontWeight: '700',
+    },
+    todayEventCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+        borderRadius: 16,
+        gap: 12,
+        position: 'relative',
+        overflow: 'hidden',
+    },
+    todayEventIcon: {
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        backgroundColor: 'rgba(255,255,255,0.3)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    todayEventTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#fff',
+        marginBottom: 4,
+    },
+    todayEventLocation: {
+        fontSize: 13,
+        color: 'rgba(255,255,255,0.9)',
+        fontWeight: '500',
+    },
+    pulsingDot: {
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+        backgroundColor: '#fff',
+        position: 'absolute',
+        top: 16,
+        right: 16,
+    },
+    eventLocation: {
+        fontSize: 11,
+        color: '#888',
+        marginTop: 2,
     },
 });

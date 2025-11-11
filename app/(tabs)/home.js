@@ -359,7 +359,7 @@ export default function HomeScreen() {
                 />
             }
         >
-               {todaysEvents.length > 0 && (
+            {todaysEvents.length > 0 && (
                 <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
                     <View style={styles.sectionHeader}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -511,7 +511,7 @@ export default function HomeScreen() {
                 />
             }
         >
-               {todaysEvents.length > 0 && (
+            {todaysEvents.length > 0 && (
                 <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
                     <View style={styles.sectionHeader}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -595,6 +595,13 @@ export default function HomeScreen() {
                     { icon: TrendingUp, label: 'Performance', color: '#0469ff', bgColor: '#E3F2FD', href: "/payfees" },
                     { icon: Calendar, label: 'Attendance', color: '#4ECDC4', bgColor: '#E0F7F4', href: "/payfees" },
                     { icon: MessageCircle, label: 'Messages', color: '#9C27B0', bgColor: '#F3E5F5', href: "/payfees" },
+                    {
+                        icon: Calendar,
+                        label: 'School Calendar',
+                        color: '#4CAF50',     // green icon
+                        bgColor: '#E8F5E9',   // light green background
+                        href: "/calendarscreen"
+                    }
                 ],
             },
             {
@@ -781,41 +788,41 @@ export default function HomeScreen() {
                     />
                 }
             >
-                   {todaysEvents.length > 0 && (
-                <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                            <Text style={styles.sectionTitle}>Today's Events</Text>
-                            <View style={styles.todayBadge}>
-                                <Text style={styles.todayBadgeText}>NOW</Text>
+                {todaysEvents.length > 0 && (
+                    <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
+                        <View style={styles.sectionHeader}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                <Text style={styles.sectionTitle}>Today's Events</Text>
+                                <View style={styles.todayBadge}>
+                                    <Text style={styles.todayBadgeText}>NOW</Text>
+                                </View>
                             </View>
                         </View>
-                    </View>
-                    <View style={styles.eventsContainer}>
-                        {todaysEvents.map((event, index) => (
-                            <Animated.View key={event.id} entering={FadeInRight.delay(600 + index * 100).duration(500)}>
-                                <HapticTouchable>
-                                    <LinearGradient
-                                        colors={[event.color, event.color + 'DD']}
-                                        style={styles.todayEventCard}
-                                    >
-                                        <View style={styles.todayEventIcon}>
-                                            <Text style={styles.eventEmoji}>{event.icon}</Text>
-                                        </View>
-                                        <View style={styles.eventInfo}>
-                                            <Text style={styles.todayEventTitle}>{event.title}</Text>
-                                            {event.location && (
-                                                <Text style={styles.todayEventLocation}>📍 {event.location}</Text>
-                                            )}
-                                        </View>
-                                        <View style={styles.pulsingDot} />
-                                    </LinearGradient>
-                                </HapticTouchable>
-                            </Animated.View>
-                        ))}
-                    </View>
-                </Animated.View>
-            )}
+                        <View style={styles.eventsContainer}>
+                            {todaysEvents.map((event, index) => (
+                                <Animated.View key={event.id} entering={FadeInRight.delay(600 + index * 100).duration(500)}>
+                                    <HapticTouchable>
+                                        <LinearGradient
+                                            colors={[event.color, event.color + 'DD']}
+                                            style={styles.todayEventCard}
+                                        >
+                                            <View style={styles.todayEventIcon}>
+                                                <Text style={styles.eventEmoji}>{event.icon}</Text>
+                                            </View>
+                                            <View style={styles.eventInfo}>
+                                                <Text style={styles.todayEventTitle}>{event.title}</Text>
+                                                {event.location && (
+                                                    <Text style={styles.todayEventLocation}>📍 {event.location}</Text>
+                                                )}
+                                            </View>
+                                            <View style={styles.pulsingDot} />
+                                        </LinearGradient>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))}
+                        </View>
+                    </Animated.View>
+                )}
                 {/* Children Selector */}
                 <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.section}>
                     <View style={styles.sectionHeader}>
@@ -945,7 +952,7 @@ export default function HomeScreen() {
                     <View style={styles.eventsContainer}>
                         {upcomingEvents.map((event, index) => (
                             <Animated.View key={event.id} entering={FadeInRight.delay(700 + index * 100).duration(500)}>
-                                <HapticTouchable>
+                                <HapticTouchable onPress={()=> router.push(`/(screens)/calendarscreen?eventid=${event.id}`)}>
                                     <View style={styles.eventCard}>
                                         <View style={[styles.eventIcon, { backgroundColor: event.color + '20' }]}>
                                             <Text style={styles.eventEmoji}>{event.icon}</Text>
@@ -1033,7 +1040,7 @@ export default function HomeScreen() {
             <Header />
             <StatusBar style='dark' />
             {/* Today's Events (if any) */}
-         
+
             {renderContent()}
         </View>
     );

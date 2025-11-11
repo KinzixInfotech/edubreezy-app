@@ -6,6 +6,7 @@ export default function ScreenLayout() {
       <Stack.Screen name="notification" />
       <Stack.Screen name="paymenthistory" />
       <Stack.Screen name="greeting" />
+      <Stack.Screen name="calendarscreen" />
       <Stack.Screen name="payfees" />
     </Stack>
   );

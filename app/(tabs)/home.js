@@ -148,6 +148,8 @@ export default function HomeScreen() {
         [upcomingEvents]
     );
 
+    
+
     const unreadCount = notificationData?.unreadCount || uiData.notifications.today.filter(n => !n.read).length;
 
     // Pull to refresh handler
@@ -593,9 +595,11 @@ export default function HomeScreen() {
                 title: 'Quick Actions',
                 actions: [
                     { icon: TrendingUp, label: 'Performance', color: '#0469ff', bgColor: '#E3F2FD', href: "/payfees" },
-                    { icon: Calendar, label: 'Attendance', color: '#4ECDC4', bgColor: '#E0F7F4', href: "/payfees" },
-                    { icon: MessageCircle, label: 'Messages', color: '#9C27B0', bgColor: '#F3E5F5', href: "/payfees" },
                     {
+                        icon: Calendar, label: 'Attendance', color: '#4ECDC4', bgColor: '#E0F7F4', href: "/my-child/attendance",
+                        params: { childData: JSON.stringify(selectedChild) },
+                    },
+                    { icon: MessageCircle, label: 'Messages', color: '#9C27B0', bgColor: '#F3E5F5', href: "/payfees" }, {
                         icon: Calendar,
                         label: 'School Calendar',
                         color: '#4CAF50',     // green icon
@@ -952,7 +956,7 @@ export default function HomeScreen() {
                     <View style={styles.eventsContainer}>
                         {upcomingEvents.map((event, index) => (
                             <Animated.View key={event.id} entering={FadeInRight.delay(700 + index * 100).duration(500)}>
-                                <HapticTouchable onPress={()=> router.push(`/(screens)/calendarscreen?eventid=${event.id}`)}>
+                                <HapticTouchable onPress={() => router.push(`/(screens)/calendarscreen?eventid=${event.id}`)}>
                                     <View style={styles.eventCard}>
                                         <View style={[styles.eventIcon, { backgroundColor: event.color + '20' }]}>
                                             <Text style={styles.eventEmoji}>{event.icon}</Text>

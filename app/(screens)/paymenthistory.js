@@ -12,6 +12,7 @@ import {
     Share,
     Platform,
 } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
 import { useState, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -133,9 +134,13 @@ export default function PaymentHistoryScreen() {
         return icons[method] || CreditCard;
     };
 
-    const handleViewReceipt = (payment) => {
+    const handleViewReceipt = async (payment) => {
         setSelectedReceipt(payment);
-        setReceiptModalVisible(true);
+        // setReceiptModalVisible(true);
+        console.log(selectedReceipt.receiptUrl);
+        
+        await WebBrowser.openBrowserAsync(selectedReceipt.receiptUrl);
+
     };
 
     const handleShareReceipt = async (payment) => {

@@ -457,7 +457,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     backButtonText: {
-        color: '#0469ff',
+        color: '#0469ff', 
         fontSize: 15,
         fontWeight: '600',
     },

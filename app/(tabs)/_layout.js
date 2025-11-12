@@ -70,6 +70,21 @@ export default function TabsLayout() {
           ),
         }}
       />
+       <Tabs.Screen
+        name="teacher/mark-attendance"
+        options={{
+          title: 'Mark Attendance',
+          // href: isStudent ? '/noticeboard' : null,
+          // tabBarBadge: noticeBadgeCount > 0 ? noticeBadgeCount : undefined, // Show badge
+          tabBarIcon: ({ focused, color, size }) => (
+            <Ionicons
+              name={focused ? 'calendar-outline' : 'calendar-clear-outline'}
+              size={size}
+              color={color}
+            />
+          ),
+        }}
+      />
       <Tabs.Screen
         name="settings"
         options={{

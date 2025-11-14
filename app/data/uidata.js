@@ -11,12 +11,13 @@ export const dataUi = {
       ],
       "icons": ["refresh", "bell"]
     },
-    "teacher": {
+    "teaching_staff": {
       "title": "{name}",
       "subtitle": [
-        { "text": "{role.name}", "type": "role" },
-        { "text": "|", "type": "separator" },
-        { "text": "{department}", "type": "department" }
+        // { "text": "{role.name}", "type": "role" },
+        // { "text": "|", "type": "separator" },
+        { "text": "{class}", "type": "class" },
+        // { "text": "{section}", "type": "section" },
       ],
       "icons": ["refresh", "bell"]
     },

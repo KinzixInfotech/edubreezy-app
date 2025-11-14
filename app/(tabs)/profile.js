@@ -4,7 +4,7 @@ import { Settings, Edit, LogOut, Mail, Phone, Calendar, MapPin, Award, BookOpen,
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../components/HapticTouch';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Animated, { FadeInDown, FadeInUp, FadeInRight } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 
@@ -30,27 +30,27 @@ const PROFILE_CONFIG = {
     },
     // Stats to show
     stats: [
-      { 
-        key: 'attendance', 
-        label: 'Attendance', 
-        value: '95%', 
-        color: '#10b981', 
+      {
+        key: 'attendance',
+        label: 'Attendance',
+        value: '95%',
+        color: '#10b981',
         icon: '📊',
         dataPath: 'stats.attendance' // Path in user object
       },
-      { 
-        key: 'grade', 
-        label: 'Grade', 
-        value: 'A+', 
-        color: '#f59e0b', 
+      {
+        key: 'grade',
+        label: 'Grade',
+        value: 'A+',
+        color: '#f59e0b',
         icon: '🎯',
         dataPath: 'stats.grade'
       },
-      { 
-        key: 'assignments', 
-        label: 'Assignments', 
-        value: '24/26', 
-        color: '#8b5cf6', 
+      {
+        key: 'assignments',
+        label: 'Assignments',
+        value: '24/26',
+        color: '#8b5cf6',
         icon: '📝',
         dataPath: 'stats.assignments'
       },
@@ -78,7 +78,7 @@ const PROFILE_CONFIG = {
       { id: 6, label: 'Edit Profile', icon: Edit, route: '/edit-profile', color: '#ec4899' },
     ],
   },
-  
+
   TEACHER: {
     fieldMappings: {
       name: 'name',
@@ -95,27 +95,27 @@ const PROFILE_CONFIG = {
       qualification: 'qualification',
     },
     stats: [
-      { 
-        key: 'classes', 
-        label: 'Classes', 
-        value: '6', 
-        color: '#0469ff', 
+      {
+        key: 'classes',
+        label: 'Classes',
+        value: '6',
+        color: '#0469ff',
         icon: '👥',
         dataPath: 'stats.totalClasses'
       },
-      { 
-        key: 'students', 
-        label: 'Students', 
-        value: '180', 
-        color: '#10b981', 
+      {
+        key: 'students',
+        label: 'Students',
+        value: '180',
+        color: '#10b981',
         icon: '🎓',
         dataPath: 'stats.totalStudents'
       },
-      { 
-        key: 'attendance', 
-        label: 'Avg. Attendance', 
-        value: '92%', 
-        color: '#f59e0b', 
+      {
+        key: 'attendance',
+        label: 'Avg. Attendance',
+        value: '92%',
+        color: '#f59e0b',
         icon: '📊',
         dataPath: 'stats.avgAttendance'
       },
@@ -141,7 +141,7 @@ const PROFILE_CONFIG = {
       { id: 7, label: 'Edit Profile', icon: Edit, route: '/edit-profile', color: '#ef4444' },
     ],
   },
-  
+
   PARENT: {
     fieldMappings: {
       name: 'name',
@@ -157,27 +157,27 @@ const PROFILE_CONFIG = {
       address: 'address',
     },
     stats: [
-      { 
-        key: 'children', 
-        label: 'Children', 
-        value: '2', 
-        color: '#ec4899', 
+      {
+        key: 'children',
+        label: 'Children',
+        value: '2',
+        color: '#ec4899',
         icon: '👶',
         dataPath: 'children.length'
       },
-      { 
-        key: 'avgAttendance', 
-        label: 'Avg. Attendance', 
-        value: '94%', 
-        color: '#10b981', 
+      {
+        key: 'avgAttendance',
+        label: 'Avg. Attendance',
+        value: '94%',
+        color: '#10b981',
         icon: '📊',
         dataPath: 'stats.avgAttendance'
       },
-      { 
-        key: 'notifications', 
-        label: 'Notifications', 
-        value: '5', 
-        color: '#f59e0b', 
+      {
+        key: 'notifications',
+        label: 'Notifications',
+        value: '5',
+        color: '#f59e0b',
         icon: '🔔',
         dataPath: 'stats.unreadNotifications'
       },
@@ -202,7 +202,7 @@ const PROFILE_CONFIG = {
       { id: 7, label: 'Edit Profile', icon: Edit, route: '/edit-profile', color: '#ef4444' },
     ],
   },
-  
+
   ADMIN: {
     fieldMappings: {
       name: 'name',
@@ -217,27 +217,27 @@ const PROFILE_CONFIG = {
       permissions: 'permissions',
     },
     stats: [
-      { 
-        key: 'totalUsers', 
-        label: 'Total Users', 
-        value: '1250', 
-        color: '#0469ff', 
+      {
+        key: 'totalUsers',
+        label: 'Total Users',
+        value: '1250',
+        color: '#0469ff',
         icon: '👥',
         dataPath: 'stats.totalUsers'
       },
-      { 
-        key: 'activeClasses', 
-        label: 'Active Classes', 
-        value: '45', 
-        color: '#10b981', 
+      {
+        key: 'activeClasses',
+        label: 'Active Classes',
+        value: '45',
+        color: '#10b981',
         icon: '🏫',
         dataPath: 'stats.activeClasses'
       },
-      { 
-        key: 'pendingTasks', 
-        label: 'Pending Tasks', 
-        value: '12', 
-        color: '#f59e0b', 
+      {
+        key: 'pendingTasks',
+        label: 'Pending Tasks',
+        value: '12',
+        color: '#f59e0b',
         icon: '📋',
         dataPath: 'stats.pendingTasks'
       },
@@ -276,14 +276,20 @@ export default function ProfileScreen() {
   const [role, setRole] = useState(null);
   const [loading, setLoading] = useState(true);
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
-
+ const getInitials = useCallback((name) => {
+    if (!name) return '';
+    const parts = name.trim().split(' ');
+    if (parts.length === 1) return parts[0][0];
+    if (parts.length === 2) return parts[0][0] + parts[1][0];
+    return parts[0][0] + parts[parts.length - 1][0];
+  }, []);
   useEffect(() => {
     (async () => {
       try {
         const stored = await SecureStore.getItemAsync('user');
         let savedRole = await SecureStore.getItemAsync('userRole');
         savedRole = savedRole?.replace(/^"|"$/g, '');
-        
+
         if (stored) {
           setUser(JSON.parse(stored));
           setRole(savedRole || 'STUDENT');
@@ -324,15 +330,16 @@ export default function ProfileScreen() {
       </View>
     );
   }
-
+ 
   // Get configuration for current role
   const config = PROFILE_CONFIG[role] || PROFILE_CONFIG.STUDENT;
-  
+
   // Get mapped values
   const userName = getNestedValue(user, config.fieldMappings.name);
   const userRole = getNestedValue(user, config.fieldMappings.role);
   const schoolName = getNestedValue(user, config.fieldMappings.school);
   const profilePicture = getNestedValue(user, config.fieldMappings.profilePicture, 'https://via.placeholder.com/150');
+
 
   return (
     <View style={styles.container}>
@@ -340,14 +347,18 @@ export default function ProfileScreen() {
         {/* Profile Header */}
         <Animated.View entering={FadeInUp.duration(600)} style={styles.profileHeader}>
           <HapticTouchable onPress={openImageViewer}>
-            <View style={styles.avatarContainer}>
-              <Image
-                source={{ uri: profilePicture }}
-                style={styles.avatar}
-                contentFit="cover"
-              />
-              <View style={styles.statusDot} />
-            </View>
+            {profilePicture && profilePicture !== 'default.png' ? (
+              <View style={styles.avatarContainer}>
+                <Image source={{ uri: profilePicture }} style={styles.avatar} />
+                <View style={styles.statusDot} />
+              </View>
+            ) : (
+              <View style={[styles.avatar, styles.parentAvatar]}>
+                <Text style={styles.fallbackText}>
+                  {userName ? getInitials(userName) : 'U'}
+                </Text>
+              </View>
+            )}
           </HapticTouchable>
           <Text style={styles.userName}>{userName}</Text>
           <Text style={styles.userRole}>{userRole}</Text>
@@ -408,7 +419,7 @@ export default function ProfileScreen() {
             <View style={styles.infoCard}>
               {config.additionalInfo.map((info, index) => {
                 let value = getNestedValue(user, info.dataPath);
-                
+
                 // Handle array values
                 if (info.isArray && Array.isArray(value)) {
                   if (info.displayKey) {
@@ -417,7 +428,7 @@ export default function ProfileScreen() {
                     value = value.join(', ');
                   }
                 }
-                
+
                 return (
                   <View key={info.key}>
                     {index > 0 && <View style={styles.divider} />}
@@ -730,6 +741,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  parentAvatar: {
+    backgroundColor: '#0469ff',
+  },
+  fallbackText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+
   imageContainer: {
     width: SCREEN_WIDTH * 0.85,
     height: SCREEN_WIDTH * 0.85,

@@ -30,10 +30,11 @@ export default function TabsLayout() {
           showMarkAttendance: false,
           showSettings: true,
         };
-      case 'TEACHER':
+      case 'TEACHING_STAFF':
         return {
           showHome: true,
           showProfile: true,
+          markSelf: false,
           showNoticeBoard: true,
           showMarkAttendance: true,
           showSettings: true,
@@ -50,7 +51,7 @@ export default function TabsLayout() {
         return {
           showHome: true,
           showProfile: true,
-          markSelf:false,
+          markSelf: false,
           showNoticeBoard: true,
           showMarkAttendance: false,
           showSettings: true,
@@ -60,7 +61,7 @@ export default function TabsLayout() {
           showHome: true,
           showProfile: true,
           showNoticeBoard: false,
-          markSelf:false,
+          markSelf: false,
           showMarkAttendance: false,
           showSettings: true,
         };
@@ -110,6 +111,21 @@ export default function TabsLayout() {
       />
 
       <Tabs.Screen
+        name="teacher/mark-attendance"
+        options={{
+          title: 'Mark Attendance',
+          href: tabConfig.showMarkAttendance ? undefined : null,
+          tabBarItemStyle: tabConfig.showMarkAttendance ? undefined : { display: 'none' },
+          tabBarIcon: ({ focused, color, size }) => (
+            <Ionicons
+              name={focused ? 'calendar' : 'calendar-outline'}
+              size={size}
+              color={color}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="noticeboard"
         options={{
           title: 'Notice Board',
@@ -141,21 +157,7 @@ export default function TabsLayout() {
           ),
         }}
       />
-      <Tabs.Screen
-        name="teacher/mark-attendance"
-        options={{
-          title: 'Mark Attendance',
-          href: tabConfig.showMarkAttendance ? undefined : null,
-          tabBarItemStyle: tabConfig.showMarkAttendance ? undefined : { display: 'none' },
-          tabBarIcon: ({ focused, color, size }) => (
-            <Ionicons
-              name={focused ? 'calendar' : 'calendar-outline'}
-              size={size}
-              color={color}
-            />
-          ),
-        }}
-      />
+
 
       <Tabs.Screen
         name="settings"

@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Dimensions, RefreshControl } from 'react-native';
 import { Link, router } from 'expo-router';
-import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings, Plus, CheckCircle2, TimerIcon } from 'lucide-react-native';
+import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings, Plus, CheckCircle2, TimerIcon, Book, CalendarDays, Umbrella } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../components/HapticTouch';
@@ -67,6 +67,20 @@ export default function HomeScreen() {
     const user_acc = useMemo(() => user, [user]);
     const userId = user_acc?.id;
     const schoolId = user_acc?.schoolId;
+    // Fetch Teacher Data 
+    const { data: teacher, isLoading } = useQuery({
+        queryKey: ["teacher-profile", userId, schoolId],
+        queryFn: async () => {
+            const res = await api.get(
+                `/schools/${schoolId}/teachers/${userId}/get?detail=true`
+            );
+            return res.data.teacher;
+        },
+        enabled: user_acc?.role?.name === "TEACHING_STAFF" && !!schoolId,
+        staleTime: 1000 * 60 * 2,
+    });
+
+    console.log(teacher);
 
     // Fetch notifications for badge count
     const { data: notificationData } = useQuery({
@@ -148,7 +162,7 @@ export default function HomeScreen() {
         [upcomingEvents]
     );
 
-    
+
 
     const unreadCount = notificationData?.unreadCount || uiData.notifications.today.filter(n => !n.read).length;
 
@@ -208,11 +222,9 @@ export default function HomeScreen() {
                 '{child.class}': user_acc?.classs?.className || 'N/A',
                 '{child.section}': user_acc?.section?.name || 'N/A',
             },
-            teacher: {
+            teaching_staff: {
                 '{name}': user_acc?.name || '',
-                '{role.name}': user_acc?.role?.name || '',
-                '{school.name}': user_acc?.school?.name || '',
-                '{department}': user_acc?.department || 'N/A',
+                '{class}': teacher?.sectionsAssigned[0]?.class?.className + "'" + teacher?.sectionsAssigned[0]?.name || 'N/A',
             },
             parent: {
                 '{name}': user_acc?.name || '',
@@ -241,7 +253,6 @@ export default function HomeScreen() {
     const Header = () => {
         const roleKey = user_acc?.role?.name?.toLowerCase() ?? '';
         const config = uiData.header[roleKey] || uiData.header.student;
-
         const title = replaceDynamic(config.title, roleKey);
         const subtitle = config.subtitle.map((item, i) => {
             const text = replaceDynamic(item.text, roleKey);
@@ -327,12 +338,12 @@ export default function HomeScreen() {
     // === ROLE-BASED CONTENT ===
     const renderContent = () => {
         const role = user_acc?.role?.name ? user_acc.role.name.toLowerCase() : '';
-
+        // console.log(role);
         switch (role) {
             case 'student':
                 return <StudentView refreshing={refreshing} onRefresh={onRefresh} />;
-            case 'teacher':
-                return <TeacherView refreshing={refreshing} onRefresh={onRefresh} />;
+            case 'teaching_staff':
+                return <TeacherView refreshing={refreshing} schoolId={schoolId} onRefresh={onRefresh} />;
             case 'admin':
                 return <AdminView refreshing={refreshing} onRefresh={onRefresh} />;
             case 'parent':
@@ -481,23 +492,375 @@ export default function HomeScreen() {
     );
 
     // === TEACHER VIEW ===
-    const TeacherView = ({ refreshing, onRefresh }) => (
-        <ScrollView
-            style={styles.content}
-            showsVerticalScrollIndicator={false}
-            refreshControl={
-                <RefreshControl
-                    refreshing={refreshing}
-                    onRefresh={onRefresh}
-                    tintColor="#0469ff"
-                    colors={['#0469ff']}
-                />
-            }
-        >
-            <Text style={styles.sectionTitle}>Your Classes Today</Text>
-            <Text style={{ padding: 16, color: '#666' }}>No classes scheduled.</Text>
-        </ScrollView>
-    );
+    const TeacherView = ({ schoolId, parentId, refreshing, onRefresh }) => {
+        const [showAddChildModal, setShowAddChildModal] = useState(false);
+        const [selectedChild, setSelectedChild] = useState(null);
+        const queryClient = useQueryClient();
+        const {
+            data: recentNotices,
+            isFetching,
+            isLoading,
+            refetch,
+        } = useQuery({
+            queryKey: ['notices', schoolId, userId],
+            queryFn: async () => {
+                if (!schoolId || !userId) return { notices: [], pagination: {} };
+
+                const cat = 'All';
+                const unread = '';
+
+                const res = await api.get(
+                    `/notices/${schoolId}?userId=${userId}&${cat}&${unread}&limit=4&page=1`
+                );
+                return res.data; // { notices: [], pagination: { totalPages, currentPage } }
+            },
+            enabled: !!schoolId && !!userId,
+            // keepPreviousData: true,
+            staleTime: 0,               // ← force fresh data on mount / category change
+        });
+        const notices = recentNotices?.notices?.map((n) => ({
+            id: n.id,
+            title: n.title,
+            time: new Date(n.createdAt).toLocaleString(), // or format like "2 hours ago"
+            unread: !n.read,
+        })) || [];
+        // qucik access for teacher
+        const actionGroups = [
+            {
+                title: 'Quick Actions',
+                actions: [
+                    { icon: Book, label: 'Add Homework', color: '#0469ff', bgColor: '#E3F2FD', href: "/payfees" },
+                    {
+                        icon: Calendar,
+                        label: 'Self Attendance',
+                        color: '#F9A825',     // deep bold yellow (icon)
+                        bgColor: '#FFF8E1',   // soft light yellow background
+                        href: "attendance",
+                        // params: { childData: JSON.stringify(selectedChild) },
+                    },
+                    {
+                        icon: Calendar, label: 'Mark Attendance', color: '#4ECDC4', bgColor: '#E0F7F4', href: "teacher/mark-attendance",
+                        // params: { childData: JSON.stringify(selectedChild) },
+                    },
+
+                    { icon: MessageCircle, label: 'View Student Attendance', color: '#9C27B0', bgColor: '#F3E5F5', href: "/payfees" }, {
+                        icon: Calendar,
+                        label: 'School Calendar',
+                        color: '#4CAF50',     // green icon
+                        bgColor: '#E8F5E9',   // light green background
+                        href: "/calendarscreen"
+                    }
+                ],
+            },
+            {
+                title: 'Examination',
+                actions: [
+                    { icon: FileText, label: 'Report Card', color: '#FFD93D', bgColor: '#FFF9E0', href: "/payfees" },
+                    { icon: BookOpen, label: 'Assignments', color: '#FF9800', bgColor: '#FFF3E0', href: "/payfees" },
+                ],
+            },
+            {
+                title: 'Fee Management',
+                actions: [
+                    {
+                        icon: DollarSign,
+                        label: 'Pay Fees',
+                        color: '#FF6B6B',
+                        bgColor: '#FFE9E9',
+                        href: "/(screens)/payfees",
+                        params: { childData: JSON.stringify(selectedChild) },
+                    },
+                    {
+                        icon: TimerIcon,
+                        label: 'History',
+                        color: '#4CAF50',
+                        bgColor: '#E7F5E9',
+                        href: "/(screens)/paymenthistory",
+                        params: {
+                            childData: JSON.stringify({
+                                ...selectedChild,
+                                parentId
+                            })
+                        }
+                    },
+                ],
+            },
+        ];
+        // const { data, isPending } = useQuery({
+        //     queryKey: QUERY_KEYS.parentChildren(schoolId, parentId),
+        //     queryFn: async () => {
+        //         const res = await api.get(`/schools/${schoolId}/parents/${parentId}/child`);
+        //         return res.data;
+        //     },
+        //     enabled: Boolean(schoolId && parentId),
+        //     placeholderData: { parent: null, children: [] },
+        //     staleTime: 1000 * 60,
+        // });
+
+        // const uiChildren = useMemo(() =>
+        //     data?.children?.map((child) => ({
+        //         id: child.studentId,
+        //         studentId: child.studentId,
+        //         name: child.name,
+        //         class: child.class,
+        //         section: child.section,
+        //         rollNo: child.rollNumber,
+        //         avatar: child.profilePicture,
+        //         attendance: Math.floor(Math.random() * 21) + 80,
+        //         feeStatus: "Paid",
+        //         performance: "Excellent",
+        //         pendingFee: 0
+        //     })) || [],
+        //     [data]);
+
+
+        // useEffect(() => {
+        //     if (uiChildren.length > 0 && !selectedChild) {
+        //         setSelectedChild(uiChildren[0]);
+        //     }
+        // }, [uiChildren, selectedChild]);
+
+        // Loading state
+        // if (isPending) {
+        //     return (
+        //         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        //             <ActivityIndicator size="large" color="#0469ff" />
+        //         </View>
+        //     );
+        // }
+
+        // Empty state - No children added yet
+        // if (!isPending ) {
+        //     return (
+        //         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        //             <ActivityIndicator size="large" color="#0469ff" />
+        //             <Text style={{
+        //                 marginTop:5,
+        //                 fontSize:13,
+        //                 color:'grey',
+        //             }}>Loading Data</Text>
+        //         </View>
+        //     );
+        // }
+
+        // Main view with children
+        return (
+            <ScrollView
+                style={styles.container}
+                showsVerticalScrollIndicator={false}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
+                        tintColor="#0469ff"
+                        colors={['#0469ff']}
+                    />
+                }
+            >
+                {todaysEvents.length > 0 && (
+                    <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
+                        <View style={styles.sectionHeader}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                <Text style={styles.sectionTitle}>Today's Events</Text>
+                                <View style={styles.todayBadge}>
+                                    <Text style={styles.todayBadgeText}>NOW</Text>
+                                </View>
+                            </View>
+                        </View>
+                        <View style={styles.eventsContainer}>
+                            {todaysEvents.map((event, index) => (
+                                <Animated.View key={event.id} entering={FadeInRight.delay(600 + index * 100).duration(500)}>
+                                    <HapticTouchable>
+                                        <LinearGradient
+                                            colors={[event.color, event.color + 'DD']}
+                                            style={styles.todayEventCard}
+                                        >
+                                            <View style={styles.todayEventIcon}>
+                                                <Text style={styles.eventEmoji}>{event.icon}</Text>
+                                            </View>
+                                            <View style={styles.eventInfo}>
+                                                <Text style={styles.todayEventTitle}>{event.title}</Text>
+                                                {event.location && (
+                                                    <Text style={styles.todayEventLocation}>📍 {event.location}</Text>
+                                                )}
+                                            </View>
+                                            <View style={styles.pulsingDot} />
+                                        </LinearGradient>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))}
+                        </View>
+                    </Animated.View>
+                )}
+                {/* Children Selector */}
+
+
+                {/* Quick Stats for  teacher */}
+                <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.section}>
+                    <View style={styles.statsGrid}>
+
+                        <LinearGradient colors={['#4ECDC4', '#44A08D']} style={styles.statCard}>
+                            <View style={styles.statIcon}>
+                                <CalendarDays size={24} color="#fff" />
+
+                            </View>
+                            <Text style={styles.statValue}>520</Text>
+                            <Text style={styles.statLabel}>School Days</Text>
+                        </LinearGradient>
+
+                        <LinearGradient colors={['#FFD93D', '#F6C90E']} style={styles.statCard}>
+                            <View style={styles.statIcon}>
+                                <Award size={24} color="#fff" />
+                            </View>
+                            <Text style={styles.statValue}>05</Text>
+                            <Text style={styles.statLabel}>Total Years</Text>
+                        </LinearGradient>
+
+                        <LinearGradient colors={['#FF6B6B', '#EE5A6F']} style={styles.statCard}>
+                            <View style={styles.statIcon}>
+                                <Umbrella size={24} color="#fff" />
+                            </View>
+                            <Text style={styles.statValue}>25</Text>
+                            <Text style={styles.statLabel}>Leaves Only</Text>
+                        </LinearGradient>
+
+                    </View>
+                </Animated.View>
+
+                {/* Quick Actions */}
+                {actionGroups && actionGroups.map((group, groupIndex) => (
+                    <Animated.View
+                        key={group.title}
+                        entering={FadeInDown.delay(400 + groupIndex * 100).duration(600)}
+                        style={styles.section}
+                    >
+                        <Text style={styles.sectionTitle}>{group.title}</Text>
+                        <View style={styles.actionsGrid}>
+                            {group.actions.map((action, index) => (
+                                <Animated.View
+                                    key={action.label}
+                                    entering={FadeInDown.delay(500 + index * 50).duration(400)}
+                                >
+                                    <HapticTouchable
+                                        onPress={() => {
+                                            if (action.params) {
+                                                router.push({
+                                                    pathname: action.href,
+                                                    params: action.params,
+                                                });
+                                            } else {
+                                                router.push(action.href || '');
+                                            }
+                                        }}
+                                    >
+                                        <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}>
+                                            <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
+                                                <action.icon size={22} color={action.color} />
+                                            </View>
+                                            <Text style={styles.actionLabel} numberOfLines={1}>
+                                                {action.label}
+                                            </Text>
+                                        </View>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))}
+                        </View>
+                    </Animated.View>
+                ))}
+                {/* Upcoming Events */}
+                <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Upcoming Events</Text>
+                        <HapticTouchable>
+                            <Text style={styles.seeAll}>See All</Text>
+                        </HapticTouchable>
+                    </View>
+                    <View style={styles.eventsContainer}>
+                        {upcomingEvents.map((event, index) => (
+                            <Animated.View key={event.id} entering={FadeInRight.delay(700 + index * 100).duration(500)}>
+                                <HapticTouchable onPress={() => router.push(`/(screens)/calendarscreen?eventid=${event.id}`)}>
+                                    <View style={styles.eventCard}>
+                                        <View style={[styles.eventIcon, { backgroundColor: event.color + '20' }]}>
+                                            <Text style={styles.eventEmoji}>{event.icon}</Text>
+                                        </View>
+                                        <View style={styles.eventInfo}>
+                                            <Text style={styles.eventTitle}>{event.title}</Text>
+                                            <View style={styles.eventDate}>
+                                                <Calendar size={14} color="#666" />
+                                                <Text style={styles.eventDateText}>{event.date}</Text>
+                                            </View>
+                                        </View>
+                                        <ChevronRight size={20} color="#999" />
+                                    </View>
+                                </HapticTouchable>
+                            </Animated.View>
+                        ))}
+                    </View>
+                </Animated.View>
+
+                {/* Recent Notices */}
+                <Animated.View entering={FadeInDown.delay(800).duration(600)} style={[styles.section, { marginBottom: 30 }]}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Recent Notices</Text>
+                        <HapticTouchable onPress={() => router.push('/(tabs)/noticeboard')}>
+                            <Text style={styles.seeAll}>View All</Text>
+                        </HapticTouchable>
+                    </View>
+                    <View style={styles.noticesContainer}>
+                        {notices && notices.length > 0 ? (
+                            notices.map((notice, index) => (
+                                <Animated.View
+                                    key={notice.id}
+                                    entering={FadeInRight.delay(900 + index * 100).duration(500)}
+                                >
+                                    <HapticTouchable onPress={() => router.push('/(tabs)/noticeboard')}>
+                                        <View style={styles.noticeCard}>
+                                            <View style={styles.noticeLeft}>
+                                                <View style={[styles.noticeIcon, notice.unread && styles.unreadIcon]}>
+                                                    <Bell size={16} color={notice.unread ? '#0469ff' : '#999'} />
+                                                </View>
+                                                <View style={styles.noticeInfo}>
+                                                    <Text style={[styles.noticeTitle, notice.unread && styles.unreadTitle]}>
+                                                        {notice.title}
+                                                    </Text>
+                                                    <Text style={styles.noticeTime}>{notice.time}</Text>
+                                                </View>
+                                            </View>
+                                            {notice.unread && <View style={styles.unreadDot} />}
+                                        </View>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))
+                        ) : (
+                            <Animated.View
+                                entering={FadeInRight.delay(900).duration(500)}
+                                style={{
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    paddingVertical: 20,
+                                    opacity: 0.8,
+                                }}
+                            >
+                                <CheckCircle2 size={26} color="#0469ff" />
+                                <Text style={{ marginTop: 8, fontSize: 14, color: '#555' }}>
+                                    You’re all caught up!
+                                </Text>
+                            </Animated.View>
+                        )}
+                    </View>
+                </Animated.View>
+
+                {/* Add Child Modal */}
+                {/* <AddChildModal
+                    visible={showAddChildModal}
+                    onClose={() => setShowAddChildModal(false)}
+                    parentId={parentId}
+                    schoolId={schoolId}
+                    onSuccess={handleAddChildSuccess}
+                /> */}
+            </ScrollView>
+        );
+    };
 
     // === ADMIN VIEW ===
     const AdminView = ({ refreshing, onRefresh }) => (
@@ -1085,7 +1448,7 @@ const styles = StyleSheet.create({
         fontSize: isSmallDevice ? 17 : 19,
         fontWeight: '700',
         color: '#111',
-        marginTop: 2,
+        marginTop: 1,
     },
     roleRow: { flexDirection: 'row', gap: 5, alignItems: 'center', flexWrap: 'nowrap' },
     role: { fontSize: isSmallDevice ? 11 : 13, color: '#666', flexShrink: 1 },
@@ -1198,7 +1561,8 @@ const styles = StyleSheet.create({
     },
     welcomeText: {
         fontSize: isSmallDevice ? 12 : 13,
-        color: '#666',
+        color: '#17b512ff',
+        // fontWeight:'200',
     },
     parentName: {
         fontSize: isSmallDevice ? 17 : 19,

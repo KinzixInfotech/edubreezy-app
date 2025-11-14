@@ -1,4 +1,4 @@
-// Parent view for child's attendance - app/(tabs)/my-child-attendance.jsx
+// Parent view for child's attendance with Monthly Trend Graph
 import React, { useState, useMemo, useCallback } from 'react';
 import {
     View,
@@ -8,7 +8,6 @@ import {
     RefreshControl,
     Dimensions,
     ActivityIndicator,
-    Alert
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -25,18 +24,17 @@ import {
     ChevronLeft,
     ChevronRight,
     ArrowLeft,
-    User,
-    Sparkles
+    Sparkles,
+    BarChart3
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
+import { LineChart } from 'react-native-chart-kit';
 import api from '../../../lib/api';
 import HapticTouchable from '../../components/HapticTouch';
 
 const getISTDateString = (dateInput = new Date()) => {
     let date;
-
     if (typeof dateInput === 'string') {
-        // If it's already YYYY-MM-DD, return as-is
         if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
             return dateInput;
         }
@@ -44,9 +42,7 @@ const getISTDateString = (dateInput = new Date()) => {
     } else {
         date = new Date(dateInput);
     }
-
     if (isNaN(date.getTime())) return null;
-
     const offset = 5.5 * 60 * 60 * 1000;
     const istDate = new Date(date.getTime() + offset);
     return istDate.toISOString().split('T')[0];
@@ -72,7 +68,8 @@ const formatISTTime = (dateString) => {
 };
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const CALENDAR_DAY_SIZE = (SCREEN_WIDTH - 64) / 7;
+const CALENDAR_WIDTH = SCREEN_WIDTH - 32;
+const CALENDAR_DAY_SIZE = CALENDAR_WIDTH / 7;
 
 export default function ParentAttendanceView() {
     const params = useLocalSearchParams();
@@ -80,6 +77,7 @@ export default function ParentAttendanceView() {
 
     const queryClient = useQueryClient();
     const [refreshing, setRefreshing] = useState(false);
+    const [graphPeriod, setGraphPeriod] = useState('30d'); // '7d', '30d', '90d'
     const [currentMonth, setCurrentMonth] = useState(() => {
         const now = new Date();
         const offset = 5.5 * 60 * 60 * 1000;
@@ -87,8 +85,6 @@ export default function ParentAttendanceView() {
         return new Date(ist.getFullYear(), ist.getMonth(), 1);
     });
 
-
-    // Load user data
     const { data: userData } = useQuery({
         queryKey: ['user-data'],
         queryFn: async () => {
@@ -101,7 +97,6 @@ export default function ParentAttendanceView() {
     const schoolId = userData?.schoolId;
     const studentId = childData?.studentId;
 
-    // Fetch attendance stats
     const { data: statsData, isLoading } = useQuery({
         queryKey: ['child-attendance-stats', studentId, currentMonth],
         queryFn: async () => {
@@ -121,43 +116,88 @@ export default function ParentAttendanceView() {
     const recentAttendance = statsData?.recentAttendance || [];
     const streak = statsData?.streak;
 
-    // Generate calendar days
+    // Generate graph data
+    const graphData = useMemo(() => {
+        if (!recentAttendance || recentAttendance.length === 0) return null;
+
+        const days = graphPeriod === '7d' ? 7 : graphPeriod === '30d' ? 30 : 90;
+        const today = new Date();
+        const startDate = new Date(today);
+        startDate.setDate(today.getDate() - days + 1);
+
+        const dateMap = new Map();
+        for (let i = 0; i < days; i++) {
+            const date = new Date(startDate);
+            date.setDate(startDate.getDate() + i);
+            const dateStr = getISTDateString(date);
+            dateMap.set(dateStr, { present: 0, absent: 0 });
+        }
+
+        recentAttendance.forEach(record => {
+            const dateStr = getISTDateString(record.date);
+            if (dateMap.has(dateStr)) {
+                const data = dateMap.get(dateStr);
+                if (record.status === 'PRESENT') {
+                    data.present = 1;
+                } else if (record.status === 'ABSENT') {
+                    data.absent = 1;
+                }
+            }
+        });
+
+        const sortedDates = Array.from(dateMap.keys()).sort();
+        const labels = sortedDates.map(date => {
+            const d = new Date(date);
+            return graphPeriod === '7d' 
+                ? d.toLocaleDateString('en-US', { weekday: 'short' })
+                : `${d.getDate()}`;
+        });
+
+        const presentData = sortedDates.map(date => dateMap.get(date).present);
+        const absentData = sortedDates.map(date => dateMap.get(date).absent);
+
+        return {
+            labels: labels.length > 15 ? labels.filter((_, i) => i % 2 === 0) : labels,
+            datasets: [
+                {
+                    data: presentData,
+                    color: (opacity = 1) => `rgba(81, 207, 102, ${opacity})`,
+                    strokeWidth: 2,
+                },
+                {
+                    data: absentData,
+                    color: (opacity = 1) => `rgba(255, 107, 107, ${opacity})`,
+                    strokeWidth: 2,
+                }
+            ],
+            legend: ['Present', 'Absent']
+        };
+    }, [recentAttendance, graphPeriod]);
+
+    // Calendar days generation (keeping existing logic)
     const calendarDays = useMemo(() => {
         const year = currentMonth.getFullYear();
         const month = currentMonth.getMonth();
         const days = [];
-
-        // Padding for first row
         const firstDay = new Date(year, month, 1);
+        
         for (let i = 0; i < firstDay.getDay(); i++) {
             days.push({ date: null, isOtherMonth: true });
         }
 
-        // Today in IST (YYYY-MM-DD)
         const todayIST = getISTDateString();
 
-        // Loop through days
         for (let i = 1; i <= 31; i++) {
             if (i > new Date(year, month + 1, 0).getDate()) break;
 
-            // Generate IST date string: "2025-11-12"
             const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
-
-            // Find matching attendance — WORKS WITH ANY SERVER FORMAT (using checkInTime for date matching)
             const dayData = recentAttendance.find(record => {
-                const serverDate = record.checkInTime; // Use checkInTime instead of date for IST alignment
-
+                const serverDate = record.date;
                 if (!serverDate) return false;
-
-                // Case 1: Already "2025-11-12"
                 if (serverDate === dateStr) return true;
-
-                // Case 2: Full ISO string "2025-11-12T00:00:00.000Z"
                 if (typeof serverDate === 'string' && serverDate.includes('T')) {
                     return getISTDateString(serverDate) === dateStr;
                 }
-
-                // Case 3: Any other format — convert to IST string
                 try {
                     return getISTDateString(serverDate) === dateStr;
                 } catch (e) {
@@ -204,7 +244,16 @@ export default function ParentAttendanceView() {
         return configs[status] || { color: '#94A3B8', icon: AlertCircle, bg: '#F1F5F9' };
     };
 
-    const formatDate = (dateString) => formatIST(dateString);
+    const getDayBorderColor = (dayData) => {
+        if (!dayData?.attendance) return 'transparent';
+        const status = dayData.attendance.status;
+        if (status === 'PRESENT') return '#51CF66';
+        if (status === 'ABSENT') return '#FF6B6B';
+        if (status === 'LATE') return '#FFB020';
+        if (status === 'HALF_DAY') return '#FF8C42';
+        if (status === 'ON_LEAVE') return '#8B5CF6';
+        return 'transparent';
+    };
 
     if (!childData) {
         return (
@@ -279,6 +328,8 @@ export default function ParentAttendanceView() {
                             </View>
                         </Animated.View>
 
+            
+
                         {/* Streak Card */}
                         {streak && streak.current > 0 && (
                             <Animated.View entering={FadeInDown.delay(400).duration(500)} style={styles.streakCard}>
@@ -318,56 +369,91 @@ export default function ParentAttendanceView() {
 
                         <Animated.View entering={FadeInDown.delay(600).duration(500)} style={styles.calendarCard}>
                             <View style={styles.calendarHeader}>
-                                <HapticTouchable onPress={() => setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth() - 1)))}>
-                                    <View style={styles.calendarNavButton}>
-                                        <ChevronLeft size={20} color="#0469ff" />
-                                    </View>
-                                </HapticTouchable>
-
                                 <Text style={styles.calendarTitle}>
                                     {currentMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
                                 </Text>
 
-                                <HapticTouchable onPress={() => setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth() + 1)))}>
-                                    <View style={styles.calendarNavButton}>
-                                        <ChevronRight size={20} color="#0469ff" />
+                                <View style={styles.calendarControls}>
+                                    <HapticTouchable onPress={() => {
+                                        const newDate = new Date();
+                                        setCurrentMonth(new Date(newDate.getFullYear(), newDate.getMonth(), 1));
+                                    }}>
+                                        <View style={styles.todayButton}>
+                                            <Text style={styles.todayButtonText}>Today</Text>
+                                        </View>
+                                    </HapticTouchable>
+
+                                    <HapticTouchable onPress={() => {
+                                        const newDate = new Date(currentMonth);
+                                        newDate.setMonth(newDate.getMonth() - 1);
+                                        setCurrentMonth(newDate);
+                                    }}>
+                                        <View style={styles.navButton}>
+                                            <ChevronLeft size={20} color="#666" />
+                                        </View>
+                                    </HapticTouchable>
+
+                                    <HapticTouchable onPress={() => {
+                                        const newDate = new Date(currentMonth);
+                                        newDate.setMonth(newDate.getMonth() + 1);
+                                        setCurrentMonth(newDate);
+                                    }}>
+                                        <View style={styles.navButton}>
+                                            <ChevronRight size={20} color="#666" />
+                                        </View>
+                                    </HapticTouchable>
+                                </View>
+                            </View>
+
+                            {/* Weekday Headers */}
+                            <View style={styles.weekdayHeader}>
+                                {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, idx) => (
+                                    <View
+                                        key={idx}
+                                        style={[
+                                            styles.weekdayCell,
+                                            (idx === 0 || idx === 6) && styles.weekendHeader
+                                        ]}
+                                    >
+                                        <Text style={styles.weekdayText}>{day}</Text>
                                     </View>
-                                </HapticTouchable>
+                                ))}
                             </View>
 
                             {/* Calendar Grid */}
-                            <View style={styles.calendar}>
-                                {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, idx) => (
-                                    <View key={idx} style={styles.calendarDayHeader}>
-                                        <Text style={styles.calendarDayHeaderText}>{day}</Text>
-                                    </View>
-                                ))}
-
+                            <View style={styles.calendarGrid}>
                                 {calendarDays.map((day, idx) => {
-                                    const statusConfig = day.attendance ? getStatusConfig(day.attendance.status) : null;
+                                    const isWeekend = new Date(day.fullDate).getDay() === 0 || new Date(day.fullDate).getDay() === 6;
+                                    const borderColor = day.isToday ? '#0469ff' : getDayBorderColor(day);
+                                    const bgColor = day.isToday ? '#E3F2FD' : (isWeekend && !day.isOtherMonth ? '#f8f9fa' : '#fff');
 
                                     return (
                                         <View
                                             key={idx}
                                             style={[
-                                                styles.calendarDay,
-                                                day.isOtherMonth && styles.calendarDayOther,
-                                                day.isToday && styles.calendarDayToday,
+                                                styles.dayCell,
+                                                day.isOtherMonth && styles.otherMonthDay,
+                                                {
+                                                    borderColor: borderColor,
+                                                    backgroundColor: bgColor
+                                                }
                                             ]}
                                         >
                                             {!day.isOtherMonth && (
                                                 <>
                                                     <Text style={[
-                                                        styles.calendarDayText,
-                                                        day.isToday && styles.calendarDayTextToday
+                                                        styles.dayText,
+                                                        day.isToday && styles.todayText
                                                     ]}>
                                                         {day.date}
                                                     </Text>
                                                     {day.attendance && (
-                                                        <View style={[
-                                                            styles.calendarDayDot,
-                                                            { backgroundColor: statusConfig.color }
-                                                        ]} />
+                                                        <View style={styles.eventIndicators}>
+                                                            <View style={[
+                                                                styles.eventDot,
+                                                                { backgroundColor: getStatusColor(day.attendance.status) }
+                                                            ]} />
+                                                        </View>
                                                     )}
                                                 </>
                                             )}
@@ -415,7 +501,7 @@ export default function ParentAttendanceView() {
                                         </View>
                                         <View style={styles.activityContent}>
                                             <Text style={styles.activityDate}>
-                                                {formatIST(record.checkInTime)}
+                                                {formatIST(record.date)}
                                             </Text>
                                             <View style={[styles.statusBadge, { backgroundColor: statusConfig.bg }]}>
                                                 <Text style={[styles.statusText, { color: statusConfig.color }]}>
@@ -435,7 +521,89 @@ export default function ParentAttendanceView() {
                                 </Animated.View>
                             );
                         })}
+            {/* Attendance Trend Graph */}
+                        <Animated.View entering={FadeInDown.delay(350).duration(500)}>
+                            <View style={styles.graphCard}>
+                                <View style={styles.graphHeader}>
+                                    <View style={styles.graphHeaderLeft}>
+                                        <BarChart3 size={20} color="#0469ff" />
+                                        <Text style={styles.graphTitle}>Attendance Trend</Text>
+                                    </View>
+                                    <View style={styles.periodSelector}>
+                                        {['7d', '30d', '90d'].map(period => (
+                                            <HapticTouchable 
+                                                key={period} 
+                                                onPress={() => setGraphPeriod(period)}
+                                            >
+                                                <View style={[
+                                                    styles.periodButton,
+                                                    graphPeriod === period && styles.periodButtonActive
+                                                ]}>
+                                                    <Text style={[
+                                                        styles.periodText,
+                                                        graphPeriod === period && styles.periodTextActive
+                                                    ]}>
+                                                        {period === '7d' ? '7d' : period === '30d' ? '30d' : '90d'}
+                                                    </Text>
+                                                </View>
+                                            </HapticTouchable>
+                                        ))}
+                                    </View>
+                                </View>
 
+                                {graphData ? (
+                                    <View style={styles.chartContainer}>
+                                        <LineChart
+                                            data={graphData}
+                                            width={SCREEN_WIDTH - 64}
+                                            height={200}
+                                            chartConfig={{
+                                                backgroundColor: '#fff',
+                                                backgroundGradientFrom: '#fff',
+                                                backgroundGradientTo: '#fff',
+                                                decimalPlaces: 0,
+                                                color: (opacity = 1) => `rgba(59, 130, 246, ${opacity})`,
+                                                labelColor: (opacity = 1) => `rgba(102, 102, 102, ${opacity})`,
+                                                style: {
+                                                    borderRadius: 16,
+                                                },
+                                                propsForDots: {
+                                                    r: '4',
+                                                    strokeWidth: '2',
+                                                },
+                                                propsForBackgroundLines: {
+                                                    strokeDasharray: '',
+                                                    stroke: '#e5e7eb',
+                                                    strokeWidth: 1,
+                                                }
+                                            }}
+                                            bezier
+                                            style={styles.chart}
+                                            withInnerLines={true}
+                                            withOuterLines={false}
+                                            withVerticalLabels={true}
+                                            withHorizontalLabels={true}
+                                            segments={4}
+                                        />
+                                        <View style={styles.graphLegend}>
+                                            <View style={styles.graphLegendItem}>
+                                                <View style={[styles.legendLine, { backgroundColor: '#51CF66' }]} />
+                                                <Text style={styles.graphLegendText}>Present</Text>
+                                            </View>
+                                            <View style={styles.graphLegendItem}>
+                                                <View style={[styles.legendLine, { backgroundColor: '#FF6B6B' }]} />
+                                                <Text style={styles.graphLegendText}>Absent</Text>
+                                            </View>
+                                        </View>
+                                    </View>
+                                ) : (
+                                    <View style={styles.noGraphData}>
+                                        <BarChart3 size={40} color="#ccc" />
+                                        <Text style={styles.noGraphText}>No data available for selected period</Text>
+                                    </View>
+                                )}
+                            </View>
+                        </Animated.View>
                         <View style={{ height: 40 }} />
                     </>
                 )}
@@ -542,6 +710,94 @@ const styles = StyleSheet.create({
         color: 'rgba(255,255,255,0.9)',
         fontWeight: '600',
     },
+    // Graph Styles
+    graphCard: {
+        backgroundColor: '#fff',
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 16,
+        // shadowColor: '#000',
+        // shadowOffset: { width: 0, height: 2 },
+        // shadowOpacity: 0.05,
+        // shadowRadius: 8,
+        // elevation: 2,
+    },
+    graphHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 16,
+    },
+    graphHeaderLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    graphTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#111',
+    },
+    periodSelector: {
+        flexDirection: 'row',
+        gap: 6,
+        backgroundColor: '#f5f5f5',
+        borderRadius: 8,
+        padding: 3,
+    },
+    periodButton: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 6,
+    },
+    periodButtonActive: {
+        backgroundColor: '#0469ff',
+    },
+    periodText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#666',
+    },
+    periodTextActive: {
+        color: '#fff',
+    },
+    chartContainer: {
+        alignItems: 'center',
+    },
+    chart: {
+        marginVertical: 8,
+        borderRadius: 16,
+    },
+    graphLegend: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        gap: 20,
+        marginTop: 12,
+    },
+    graphLegendItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    legendLine: {
+        width: 20,
+        height: 3,
+        borderRadius: 2,
+    },
+    graphLegendText: {
+        fontSize: 12,
+        color: '#666',
+        fontWeight: '600',
+    },
+    noGraphData: {
+        alignItems: 'center',
+        paddingVertical: 40,
+        gap: 12,
+    },
+    noGraphText: {
+        fontSize: 14,
+        color: '#999',
+    },
     streakCard: {
         marginBottom: 16,
         borderRadius: 16,
@@ -637,7 +893,7 @@ const styles = StyleSheet.create({
     },
     calendarCard: {
         padding: 16,
-        backgroundColor: '#f8f9fa',
+        backgroundColor: '#fff',
         borderRadius: 16,
         marginBottom: 16,
     },
@@ -647,64 +903,87 @@ const styles = StyleSheet.create({
         justifyContent: 'space-between',
         marginBottom: 16,
     },
-    calendarNavButton: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        backgroundColor: '#fff',
-        justifyContent: 'center',
-        alignItems: 'center',
-        borderWidth: 1,
-        borderColor: '#e5e7eb',
-    },
     calendarTitle: {
         fontSize: 16,
         fontWeight: '700',
         color: '#111',
     },
-    calendar: {
+    calendarControls: {
         flexDirection: 'row',
-        flexWrap: 'wrap',
+        gap: 8,
     },
-    calendarDayHeader: {
+    todayButton: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        backgroundColor: '#E3F2FD',
+        borderRadius: 8,
+    },
+    todayButtonText: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#0469ff',
+    },
+    navButton: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: '#f5f5f5',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    weekdayHeader: {
+        flexDirection: 'row',
+        marginBottom: 8,
+    },
+    weekdayCell: {
         width: CALENDAR_DAY_SIZE,
         alignItems: 'center',
         paddingVertical: 8,
     },
-    calendarDayHeaderText: {
+    weekendHeader: {
+        backgroundColor: '#f8f9fa',
+    },
+    weekdayText: {
         fontSize: 12,
-        fontWeight: '700',
+        fontWeight: '600',
         color: '#666',
     },
-    calendarDay: {
-        width: CALENDAR_DAY_SIZE,
-        aspectRatio: 1,
+    calendarGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 4,
+    },
+    dayCell: {
+        width: CALENDAR_DAY_SIZE - 5,
+        height: CALENDAR_DAY_SIZE * 0.85,
         alignItems: 'center',
         justifyContent: 'center',
-        borderRadius: 8,
+        borderWidth: 2,
+        borderRadius: 7,
+        borderColor: 'transparent',
     },
-    calendarDayOther: {
+    otherMonthDay: {
         opacity: 0,
     },
-    calendarDayToday: {
-        backgroundColor: '#E3F2FD',
-        borderWidth: 2,
-        borderColor: '#0469ff',
-    },
-    calendarDayText: {
+    dayText: {
         fontSize: 14,
         fontWeight: '600',
         color: '#111',
+        marginBottom: 4,
     },
-    calendarDayTextToday: {
+    todayText: {
         color: '#0469ff',
         fontWeight: '700',
     },
-    calendarDayDot: {
+    eventIndicators: {
+        flexDirection: 'row',
+        gap: 2,
+        marginTop: 2,
+    },
+    eventDot: {
         width: 6,
         height: 6,
         borderRadius: 3,
-        marginTop: 3,
     },
     legend: {
         flexDirection: 'row',
@@ -720,9 +999,9 @@ const styles = StyleSheet.create({
         gap: 6,
     },
     legendDot: {
-        width: 10,
-        height: 10,
-        borderRadius: 5,
+        width: 12,
+        height: 12,
+        borderRadius: 6,
     },
     legendText: {
         fontSize: 11,

@@ -2,25 +2,73 @@ import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
-import { useNotification } from '../../contexts/NotificationContext'; // Import
+import { useNotification } from '../../contexts/NotificationContext';
 
 export default function TabsLayout() {
   const [role, setRole] = useState(null);
-  const { noticeBadgeCount } = useNotification(); // Use context
+  const { noticeBadgeCount } = useNotification();
 
   useEffect(() => {
     const loadRole = async () => {
       let savedRole = await SecureStore.getItemAsync('userRole');
-      savedRole = savedRole.replace(/^"|"$/g, '');
-      setRole(savedRole || 'admin');
+      savedRole = savedRole?.replace(/^"|"$/g, '');
+      setRole(savedRole || 'STUDENT');
     };
     loadRole();
   }, []);
 
   if (!role) return null;
 
-  const isStudent = role === "STUDENT";
-  
+  // Define tab configurations based on role
+  const getTabConfig = () => {
+    switch (role) {
+      case 'STUDENT':
+        return {
+          showHome: true,
+          showProfile: true,
+          showNoticeBoard: true,
+          showMarkAttendance: false,
+          showSettings: true,
+        };
+      case 'TEACHER':
+        return {
+          showHome: true,
+          showProfile: true,
+          showNoticeBoard: true,
+          showMarkAttendance: true,
+          showSettings: true,
+        };
+      case 'ADMIN':
+        return {
+          showHome: true,
+          showProfile: true,
+          showNoticeBoard: true,
+          showMarkAttendance: false,
+          showSettings: true,
+        };
+      case 'PARENT':
+        return {
+          showHome: true,
+          showProfile: true,
+          markSelf:false,
+          showNoticeBoard: true,
+          showMarkAttendance: false,
+          showSettings: true,
+        };
+      default:
+        return {
+          showHome: true,
+          showProfile: true,
+          showNoticeBoard: false,
+          markSelf:false,
+          showMarkAttendance: false,
+          showSettings: true,
+        };
+    }
+  };
+
+  const tabConfig = getTabConfig();
+
   return (
     <Tabs
       screenOptions={{
@@ -33,6 +81,8 @@ export default function TabsLayout() {
         name="home"
         options={{
           title: 'Home',
+          href: tabConfig.showHome ? undefined : null,
+          tabBarItemStyle: tabConfig.showHome ? undefined : { display: 'none' },
           tabBarIcon: ({ focused, color, size }) => (
             <Ionicons
               name={focused ? 'home' : 'home-outline'}
@@ -42,10 +92,13 @@ export default function TabsLayout() {
           ),
         }}
       />
+
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
+          href: tabConfig.showProfile ? undefined : null,
+          tabBarItemStyle: tabConfig.showProfile ? undefined : { display: 'none' },
           tabBarIcon: ({ focused, color, size }) => (
             <Ionicons
               name={focused ? 'person' : 'person-outline'}
@@ -55,12 +108,14 @@ export default function TabsLayout() {
           ),
         }}
       />
+
       <Tabs.Screen
         name="noticeboard"
         options={{
           title: 'Notice Board',
-          // href: isStudent ? '/noticeboard' : null,
-          tabBarBadge: noticeBadgeCount > 0 ? noticeBadgeCount : undefined, // Show badge
+          href: tabConfig.showNoticeBoard ? undefined : null,
+          tabBarItemStyle: tabConfig.showNoticeBoard ? undefined : { display: 'none' },
+          tabBarBadge: noticeBadgeCount > 0 ? noticeBadgeCount : undefined,
           tabBarIcon: ({ focused, color, size }) => (
             <Ionicons
               name={focused ? 'megaphone' : 'megaphone-outline'}
@@ -70,15 +125,16 @@ export default function TabsLayout() {
           ),
         }}
       />
-       <Tabs.Screen
-        name="teacher/mark-attendance"
+
+      <Tabs.Screen
+        name="attendance"
         options={{
-          title: 'Mark Attendance',
-          // href: isStudent ? '/noticeboard' : null,
-          // tabBarBadge: noticeBadgeCount > 0 ? noticeBadgeCount : undefined, // Show badge
+          title: 'Mark Self',
+          href: tabConfig.markSelf ? undefined : null,
+          tabBarItemStyle: tabConfig.markSelf ? undefined : { display: 'none' },
           tabBarIcon: ({ focused, color, size }) => (
             <Ionicons
-              name={focused ? 'calendar-outline' : 'calendar-clear-outline'}
+              name={focused ? 'book' : 'book-outline'}
               size={size}
               color={color}
             />
@@ -86,9 +142,27 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="teacher/mark-attendance"
+        options={{
+          title: 'Mark Attendance',
+          href: tabConfig.showMarkAttendance ? undefined : null,
+          tabBarItemStyle: tabConfig.showMarkAttendance ? undefined : { display: 'none' },
+          tabBarIcon: ({ focused, color, size }) => (
+            <Ionicons
+              name={focused ? 'calendar' : 'calendar-outline'}
+              size={size}
+              color={color}
+            />
+          ),
+        }}
+      />
+
+      <Tabs.Screen
         name="settings"
         options={{
           title: 'Settings',
+          href: tabConfig.showSettings ? undefined : null,
+          tabBarItemStyle: tabConfig.showSettings ? undefined : { display: 'none' },
           tabBarIcon: ({ focused, color, size }) => (
             <Ionicons
               name={focused ? 'settings' : 'settings-outline'}

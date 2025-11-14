@@ -7,6 +7,7 @@ export default function ScreenLayout() {
       <Stack.Screen name="paymenthistory" />
       <Stack.Screen name="greeting" />
       <Stack.Screen name="my-child/attendance" />
+      <Stack.Screen name="wish" />
       <Stack.Screen name="calendarscreen" />
       <Stack.Screen name="payfees" />
     </Stack>

@@ -47,7 +47,7 @@ export default function HomeScreen() {
 
     useEffect(() => {
         loadUser();
-        // router.replace('/(screens)/greeting')
+        // router.replace('/(screens)/wish')
     }, []);
 
     const loadUser = async () => {

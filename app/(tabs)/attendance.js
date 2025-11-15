@@ -9,13 +9,24 @@ import {
     RefreshControl,
     Alert,
     Platform,
-    ActivityIndicator
+    ActivityIndicator,
+    AppState
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Location from 'expo-location';
 import * as Device from 'expo-device';
 import * as SecureStore from 'expo-secure-store';
-import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
+import * as Notifications from 'expo-notifications';
+import * as BackgroundFetch from 'expo-background-fetch';
+import * as TaskManager from 'expo-task-manager';
+import Animated, {
+    FadeInDown,
+    FadeInUp,
+    useSharedValue,
+    useAnimatedStyle,
+    withTiming,
+    withRepeat
+} from 'react-native-reanimated';
 import {
     Calendar,
     Clock,
@@ -25,10 +36,66 @@ import {
     Clock4,
     AlertCircle,
     TrendingUp,
-    Timer
+    Timer,
+    Zap
 } from 'lucide-react-native';
 import api from '../../lib/api';
 
+// ──────────────────────────────────────────────────────────────────────
+// BACKGROUND TASK: Update live working hours
+// ──────────────────────────────────────────────────────────────────────
+const BACKGROUND_ATTENDANCE_TASK = 'background-attendance-task';
+
+TaskManager.defineTask(BACKGROUND_ATTENDANCE_TASK, async () => {
+    try {
+        const userJson = await SecureStore.getItemAsync('user');
+        if (!userJson) return BackgroundFetch.BackgroundFetchResult.NoData;
+
+        const user = JSON.parse(userJson);
+        if (user.role !== 'TEACHER') return BackgroundFetch.BackgroundFetchResult.NoData;
+
+        const res = await fetch(`${api.defaults.baseURL}/schools/${user.schoolId}/attendance/mark?userId=${user.id}`);
+        if (!res.ok) return BackgroundFetch.BackgroundFetchResult.Failed;
+
+        const data = await res.json();
+        if (!data.attendance?.checkInTime || data.attendance?.checkOutTime) {
+            return BackgroundFetch.BackgroundFetchResult.NoData;
+        }
+
+        const checkIn = new Date(data.attendance.checkInTime);
+        const diff = (Date.now() - checkIn.getTime()) / (1000 * 60 * 60);
+        const hours = Number(diff.toFixed(2));
+
+        await Notifications.scheduleNotificationAsync({
+            content: {
+                title: "Working Hours",
+                body: `You've been working for ${hours} hours`,
+                data: { screen: 'attendance', hours },
+                categoryIdentifier: 'attendance'
+            },
+            trigger: null,
+        });
+
+        return BackgroundFetch.BackgroundFetchResult.NewData;
+    } catch (error) {
+        return BackgroundFetch.BackgroundFetchResult.Failed;
+    }
+});
+
+// Register background task
+async function registerBackgroundTask() {
+    try {
+        await BackgroundFetch.registerTaskAsync(BACKGROUND_ATTENDANCE_TASK, {
+            minimumInterval: 60 * 15, // 15 min
+            stopOnTerminate: false,
+            startOnBoot: true,
+        });
+    } catch (err) {
+        // Already registered
+    }
+}
+
+// ──────────────────────────────────────────────────────────────────────
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 export default function SelfAttendance() {
@@ -38,16 +105,64 @@ export default function SelfAttendance() {
     const [location, setLocation] = useState(null);
     const [locationError, setLocationError] = useState(null);
     const [deviceInfo, setDeviceInfo] = useState(null);
-
-    // === TIMER STATE ===
+    const [liveHours, setLiveHours] = useState(0);
     const [timeLeft, setTimeLeft] = useState('');
     const [checkInDeadline, setCheckInDeadline] = useState(null);
+    const pulseAnim = useSharedValue(1);
     const intervalRef = useRef(null);
+    const appState = useRef(AppState.currentState);
 
-    // Load user
+    // Load user + setup
     useEffect(() => {
         loadUser();
+        setupNotifications();
+        registerBackgroundTask();
     }, []);
+
+    useEffect(() => {
+        const subscription = AppState.addEventListener('change', handleAppStateChange);
+        return () => subscription.remove();
+    }, []);
+
+    const handleAppStateChange = (nextState) => {
+        if (appState.current.match(/inactive|background/) && nextState === 'active') {
+            queryClient.invalidateQueries({ queryKey: ['self-attendance-status'] });
+        }
+        appState.current = nextState;
+    };
+
+    const setupNotifications = async () => {
+        const { status } = await Notifications.requestPermissionsAsync();
+        if (status !== 'granted') return;
+
+        Notifications.setNotificationHandler({
+            handleNotification: async () => ({
+                shouldShowAlert: true,
+                shouldPlaySound: true,
+                shouldSetBadge: false,
+            }),
+        });
+
+        await Notifications.setNotificationCategoryAsync('attendance', [
+            {
+                identifier: 'dismiss',
+                buttonTitle: 'Dismiss',
+                options: { isDestructive: true }
+            },
+            {
+                identifier: 'view',
+                buttonTitle: 'View',
+                options: { opensAppToForeground: true }
+            }
+        ]);
+
+        Notifications.addNotificationResponseReceivedListener(response => {
+            const { screen } = response.notification.request.content.data;
+            if (screen === 'attendance') {
+                // Navigate to attendance screen
+            }
+        });
+    };
 
     const loadUser = async () => {
         try {
@@ -68,7 +183,9 @@ export default function SelfAttendance() {
     const userId = user_acc?.id;
     const schoolId = user_acc?.schoolId;
 
-    // === LOCATION & DEVICE ===
+    const isTeacher = user_acc?.role.name === 'TEACHING_STAFF';
+
+    // Location & Device
     useEffect(() => {
         if (!userId || !schoolId) return;
 
@@ -91,7 +208,6 @@ export default function SelfAttendance() {
                     accuracy: loc.coords.accuracy
                 });
             } catch (err) {
-                console.error('Location error:', err);
                 setLocationError(err.message || 'Failed to get location');
             }
 
@@ -104,7 +220,7 @@ export default function SelfAttendance() {
         })();
     }, [userId, schoolId]);
 
-    // === FETCH ATTENDANCE ===
+    // FETCH ATTENDANCE
     const { data, isLoading, error } = useQuery({
         queryKey: ['self-attendance-status', userId, schoolId],
         queryFn: async () => {
@@ -113,17 +229,16 @@ export default function SelfAttendance() {
             return res.data;
         },
         enabled: !!userId && !!schoolId,
-        refetchInterval: 60000,
+        refetchInterval: 30000,
         retry: 2,
         onError: (err) => {
-            console.error('Query error:', err);
             Alert.alert('Network Error', err.message || 'Failed to load attendance');
         }
     });
 
     const { attendance, isWorkingDay, dayType, config, monthlyStats } = data || {};
 
-    // === CALCULATE DEADLINE & TIMER ===
+    // CHECK-IN DEADLINE TIMER
     useEffect(() => {
         if (!config?.startTime || !isWorkingDay || attendance?.checkInTime) {
             if (intervalRef.current) clearInterval(intervalRef.current);
@@ -134,7 +249,7 @@ export default function SelfAttendance() {
         const today = new Date();
         const start = new Date(today.getFullYear(), today.getMonth(), today.getDate(), hours, minutes);
         const deadline = new Date(start);
-        deadline.setHours(deadline.getHours() + 3); // 3-hour window
+        deadline.setHours(deadline.getHours() + 3);
 
         setCheckInDeadline(deadline);
 
@@ -154,19 +269,87 @@ export default function SelfAttendance() {
         };
 
         updateTimer();
-        intervalRef.current = setInterval(updateTimer, 60000); // Update every minute
+        intervalRef.current = setInterval(updateTimer, 60000);
 
         return () => {
             if (intervalRef.current) clearInterval(intervalRef.current);
         };
     }, [config?.startTime, isWorkingDay, attendance?.checkInTime]);
 
-    // === MUTATIONS ===
+    // LIVE WORKING HOURS TIMER
+    // useEffect(() => {
+    //     if (!attendance?.checkInTime || attendance?.checkOutTime) {
+    //         setLiveHours(attendance?.workingHours || 0);
+    //         if (intervalRef.current) clearInterval(intervalRef.current);
+    //         pulseAnim.value = withTiming(1, { duration: 0 });
+    //         return;
+    //     }
+
+    //     const checkInTime = new Date(attendance.checkInTime).getTime();
+    //     const update = () => {
+    //         const diff = (Date.now() - checkInTime) / (1000 * 60 * 60);
+    //         const hours = Number(diff.toFixed(2));
+    //         setLiveHours(hours);
+
+    //         pulseAnim.value = withRepeat(
+    //             withTiming(1.2, { duration: 800 }),
+    //             -1,
+    //             true
+    //         );
+    //     };
+
+    //     update();
+    //     intervalRef.current = setInterval(update, 1000);
+
+    //     return () => {
+    //         if (intervalRef.current) clearInterval(intervalRef.current);
+    //         pulseAnim.value = withTiming(1);
+    //     };
+    // }, [attendance?.checkInTime, attendance?.checkOutTime]);
+    // === LIVE TIMER – FINAL (Use liveWorkingHours from GET) ===
+    useEffect(() => {
+        if (!attendance?.checkInTime) {
+            setLiveHours(0);
+            return;
+        }
+
+        if (attendance?.checkOutTime) {
+            // After checkout: use saved workingHours
+            setLiveHours(attendance.workingHours || 0);
+            if (intervalRef.current) clearInterval(intervalRef.current);
+            pulseAnim.value = withTiming(1);
+            return;
+        }
+
+        // Live: use liveWorkingHours from GET (refreshes every 30s)
+        if (attendance.liveWorkingHours !== undefined) {
+            setLiveHours(attendance.liveWorkingHours);
+            pulseAnim.value = withRepeat(withTiming(1.2, { duration: 800 }), -1, true);
+        }
+
+        // Fallback: calculate locally
+        const checkInTime = new Date(attendance.checkInTime).getTime();
+        const update = () => {
+            const diff = (Date.now() - checkInTime) / (1000 * 60 * 60);
+            setLiveHours(Number(diff.toFixed(2)));
+        };
+
+        update();
+        intervalRef.current = setInterval(update, 1000);
+
+        return () => {
+            if (intervalRef.current) clearInterval(intervalRef.current);
+            pulseAnim.value = withTiming(1);
+        };
+    }, [attendance?.checkInTime, attendance?.checkOutTime, attendance?.workingHours, attendance?.liveWorkingHours]);
+    const animatedPulse = useAnimatedStyle(() => ({
+        transform: [{ scale: pulseAnim.value }],
+    }));
+
+    // MUTATIONS
     const checkInMutation = useMutation({
         mutationFn: async () => {
             if (!location) throw new Error('Location not available');
-            if (!userId || !schoolId) throw new Error('User not ready');
-
             return await api.post(`/schools/${schoolId}/attendance/mark`, {
                 userId,
                 type: 'CHECK_IN',
@@ -187,12 +370,10 @@ export default function SelfAttendance() {
             Alert.alert('Check-In Failed', err.message || 'Try again');
         }
     });
-
+    // === CHECK-OUT MUTATION – FINAL FIXED ===
     const checkOutMutation = useMutation({
         mutationFn: async () => {
             if (!location) throw new Error('Location not available');
-            if (!userId || !schoolId) throw new Error('User not ready');
-
             return await api.post(`/schools/${schoolId}/attendance/mark`, {
                 userId,
                 type: 'CHECK_OUT',
@@ -202,10 +383,18 @@ export default function SelfAttendance() {
         },
         onSuccess: (res) => {
             queryClient.invalidateQueries({ queryKey: ['self-attendance-status'] });
-            const { workingHours } = res.data;
+
+            if (!res.data.success) {
+                // SHOW USER-FRIENDLY MESSAGE FROM BACKEND
+                const msg = res.data.message || 'Cannot check out';
+                Alert.alert('Cannot Check Out', msg, [{ text: 'OK' }]);
+                return;
+            }
+
+            const workingHours = res.data.workingHours ?? 0;
             Alert.alert(
                 'Checked Out',
-                `Worked ${workingHours?.toFixed(2)} hours`,
+                `Worked ${workingHours.toFixed(2)} hours`,
                 [{ text: 'OK' }]
             );
         },
@@ -220,16 +409,16 @@ export default function SelfAttendance() {
         setRefreshing(false);
     };
 
-    // === CONDITIONS ===
     const canCheckIn = isWorkingDay && (!attendance || !attendance.checkInTime);
     const canCheckOut = attendance?.checkInTime && !attendance?.checkOutTime;
 
-    // === RENDER ===
-    if (!userId || !schoolId) {
+    // ──────────────────────────────────────────────────────────────────────
+    // RENDER
+    // ──────────────────────────────────────────────────────────────────────
+    if (!userId || !schoolId || !isTeacher) {
         return (
             <View style={styles.loaderContainer}>
-                <ActivityIndicator size="large" color="#0469ff" />
-                <Text style={styles.loaderText}>Loading user...</Text>
+                <Text style={styles.loaderText}>Only teachers can mark attendance</Text>
             </View>
         );
     }
@@ -258,10 +447,9 @@ export default function SelfAttendance() {
     return (
         <ScrollView
             style={styles.container}
-            refreshControl={
-                <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" />
-            }
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" />}
         >
+
             {/* Header */}
             <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
                 <View style={styles.headerTop}>
@@ -283,6 +471,21 @@ export default function SelfAttendance() {
                     )}
                 </View>
             </Animated.View>
+            {/* LIVE TIMER CARD */}
+            {attendance?.checkInTime && !attendance?.checkOutTime && (
+                <Animated.View entering={FadeInDown.delay(100)} style={styles.timerCard}>
+                    <Animated.View style={[styles.pulseCircle, animatedPulse]} />
+                    <View style={styles.timerContent}>
+                        <Zap size={28} color="#F59E0B" />
+                        <Text style={styles.timerLabel}>Live Working Time</Text>
+                        <Text style={styles.timerValue}>{liveHours.toFixed(2)} hrs</Text>
+                        <Text style={styles.timerSub}>
+                            Since {new Date(attendance.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </Text>
+                    </View>
+                </Animated.View>
+            )}
+
 
             {/* Location Error */}
             {locationError && (
@@ -305,7 +508,7 @@ export default function SelfAttendance() {
                 </Animated.View>
             )}
 
-            {/* === CHECK-IN DEADLINE BADGE === */}
+            {/* CHECK-IN DEADLINE BADGE */}
             {isWorkingDay && canCheckIn && checkInDeadline && (
                 <Animated.View entering={FadeInDown.delay(250)} style={styles.deadlineCard}>
                     <Timer size={18} color="#F59E0B" />
@@ -407,6 +610,35 @@ export default function SelfAttendance() {
                             )}
                         </AnimatedPressable>
                     )}
+                    {attendance?.checkInTime && !attendance?.checkOutTime && config && (
+                        <Animated.View entering={FadeInDown.delay(300)} style={styles.minCheckoutHint}>
+                            <Clock4 size={16} color="#F59E0B" />
+                            <Text style={styles.minCheckoutText}>
+                                Can check out after{' '}
+                                {(() => {
+                                    const raw = String(attendance.checkInTime).trim();
+                                    const clean = raw.replace(/\s+/g, '');
+                                    const checkIn = new Date(clean);
+
+                                    console.log("PARSED CHECKIN:", checkIn);
+                                    console.log("HALF DAY HOURS:", config?.halfDayHours);
+
+                                    if (isNaN(checkIn.getTime())) return "Invalid Date";
+
+                                    const min = new Date(checkIn);
+                                    const half = Number(config?.halfDayHours) || 0;  // ← FIX
+                                    min.setHours(min.getHours() + half);
+
+                                    return min.toLocaleTimeString([], {
+                                        hour: '2-digit',
+                                        minute: '2-digit'
+                                    });
+                                })()}
+                                {' '}({config.halfDayHours || 0} h minimum)
+                            </Text>
+                        </Animated.View>
+                    )}
+
 
                     {canCheckOut && (
                         <AnimatedPressable
@@ -433,7 +665,6 @@ export default function SelfAttendance() {
                 <Animated.View entering={FadeInDown.delay(500)} style={styles.timelineCard}>
                     <Text style={styles.timelineTitle}>Today's Log</Text>
                     <View style={styles.timeline}>
-                        {/* Check In */}
                         <View style={styles.timelineItem}>
                             <View style={styles.timelineDot} />
                             <View style={styles.timelineContent}>
@@ -449,7 +680,6 @@ export default function SelfAttendance() {
                             </View>
                         </View>
 
-                        {/* Check Out */}
                         {attendance.checkOutTime && (
                             <View style={styles.timelineItem}>
                                 <View style={styles.timelineDot} />
@@ -465,7 +695,6 @@ export default function SelfAttendance() {
                             </View>
                         )}
 
-                        {/* Working Hours */}
                         {attendance.workingHours > 0 && (
                             <View style={styles.timelineItem}>
                                 <View style={styles.timelineDot} />
@@ -480,6 +709,7 @@ export default function SelfAttendance() {
                     </View>
                 </Animated.View>
             )}
+
             {/* Stats */}
             <View style={styles.infoGrid}>
                 <Animated.View entering={FadeInDown.delay(600)} style={styles.infoCard}>
@@ -517,7 +747,10 @@ export default function SelfAttendance() {
     );
 }
 
-// === STYLES ===
+// ──────────────────────────────────────────────────────────────────────
+// STYLES
+// ──────────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#F8F9FA' },
     loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
@@ -525,6 +758,52 @@ const styles = StyleSheet.create({
     errorText: { fontSize: 16, color: '#EF4444', marginTop: 8 },
     retryButton: { marginTop: 16, padding: 12, backgroundColor: '#0469ff', borderRadius: 12 },
     retryText: { color: '#fff', fontWeight: '600' },
+
+    // LIVE TIMER
+    timerCard: {
+        margin: 20,
+        padding: 24,
+        backgroundColor: '#FFF7ED',
+        borderRadius: 24,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 16,
+        borderWidth: 1.5,
+        borderColor: '#FED7AA',
+        overflow: 'hidden',
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+    },
+    minCheckoutHint: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginHorizontal: 20,
+        marginTop: 8,
+    },
+    minCheckoutText: {
+        fontSize: 12,
+        color: '#F59E0B',
+        fontWeight: '500',
+    },
+    pulseCircle: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        backgroundColor: '#FF9800',
+        opacity: 0.2,
+        position: 'absolute',
+        left: -20,
+        top: -20,
+    },
+    timerContent: { flex: 1 },
+    timerLabel: { fontSize: 14, color: '#92400E', fontWeight: '600', marginBottom: 4 },
+    timerValue: { fontSize: 36, fontWeight: '800', color: '#D97706', letterSpacing: -1 },
+    timerSub: { fontSize: 13, color: '#92400E', marginTop: 2 },
+
     header: { paddingHorizontal: 20, paddingTop: 60, paddingBottom: 20, backgroundColor: '#fff' },
     headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
     headerTitle: { fontSize: 28, fontWeight: '700', color: '#111', marginBottom: 4 },
@@ -551,7 +830,7 @@ const styles = StyleSheet.create({
     lateBadge: { marginTop: 12, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#FEF3C7', borderRadius: 12 },
     lateBadgeText: { fontSize: 14, fontWeight: '600', color: '#92400E' },
     actionContainer: { paddingHorizontal: 20, gap: 12 },
-    actionButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, paddingVertical: 18, borderRadius: 16, elevation: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 12 },
+    actionButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, paddingVertical: 18, borderRadius: 16 },
     checkInButton: { backgroundColor: '#0469ff' },
     checkOutButton: { backgroundColor: '#10B981' },
     actionButtonText: { fontSize: 18, fontWeight: '700', color: '#fff' },

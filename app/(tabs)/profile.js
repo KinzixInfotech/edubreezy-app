@@ -276,7 +276,7 @@ export default function ProfileScreen() {
   const [role, setRole] = useState(null);
   const [loading, setLoading] = useState(true);
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
- const getInitials = useCallback((name) => {
+  const getInitials = useCallback((name) => {
     if (!name) return '';
     const parts = name.trim().split(' ');
     if (parts.length === 1) return parts[0][0];
@@ -330,7 +330,7 @@ export default function ProfileScreen() {
       </View>
     );
   }
- 
+
   // Get configuration for current role
   const config = PROFILE_CONFIG[role] || PROFILE_CONFIG.STUDENT;
 

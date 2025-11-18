@@ -120,7 +120,7 @@
 //                 const eventId = remoteMessage.data.eventId;
 //                 router.push(`/(tabs)/home?eventid=${eventId}`);
 //             }
-//         });
+//         }); 
 
 //         // Return cleanup function
 //         return () => {

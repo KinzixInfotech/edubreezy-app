@@ -14,6 +14,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../../lib/api';
 import GlowingStatusBar from '../components/GlowingStatusBar';
 import AddChildModal from '../components/AddChildModal';
+import DelegationCheckModal from '../components/DelegationCheckModal';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const isSmallDevice = SCREEN_WIDTH < 375;
@@ -495,7 +496,10 @@ export default function HomeScreen() {
     const TeacherView = ({ schoolId, parentId, refreshing, onRefresh }) => {
         const [showAddChildModal, setShowAddChildModal] = useState(false);
         const [selectedChild, setSelectedChild] = useState(null);
+        const [showDelegationModal, setShowDelegationModal] = useState(false);
+        const [activeDelegations, setActiveDelegations] = useState([]);
         const queryClient = useQueryClient();
+
         const {
             data: recentNotices,
             isFetching,
@@ -524,6 +528,7 @@ export default function HomeScreen() {
             time: new Date(n.createdAt).toLocaleString(), // or format like "2 hours ago"
             unread: !n.read,
         })) || [];
+
         // qucik access for teacher
         const actionGroups = [
             {
@@ -545,7 +550,7 @@ export default function HomeScreen() {
                     },
                     {
                         icon: ChartPie, label: 'Attendance Stats', color: '#F9A825',     // deep bold yellow (icon)
-                        params: { teacherData: JSON.stringify({schoolId,userId}) },
+                        params: { teacherData: JSON.stringify({ schoolId, userId }) },
 
                         bgColor: '#FFF8E1', href: "/teachers/stats-calendar"
                     },
@@ -655,6 +660,43 @@ export default function HomeScreen() {
         //         </View>
         //     );
         // }
+
+
+        // Check for active delegations on mount
+        const { data: delegationCheck } = useQuery({
+            queryKey: ['delegation-check', schoolId, userId],
+            queryFn: async () => {
+                const res = await api.get(
+                    `/schools/${schoolId}/attendance/delegations/check?teacherId=${userId}`
+                );
+                return res.data;
+            },
+            enabled: !!schoolId && !!userId,
+            staleTime: 1000 * 60 * 2, // 2 minutes
+        });
+
+        // Show delegation modal if there are active delegations
+        useEffect(() => {
+            if (delegationCheck?.hasDelegations && delegationCheck.delegations.length > 0) {
+                setActiveDelegations(delegationCheck.delegations);
+                setShowDelegationModal(true);
+            }
+        }, [delegationCheck]);
+        const handleSelectDelegation = (delegation) => {
+            setShowDelegationModal(false);
+            // Navigate to marking page with delegation data
+            router.push({
+                pathname: 'teachers/delegationmarking',
+                params: {
+                    delegationId: delegation.id,
+                    classId: delegation.classId,
+                    sectionId: delegation.sectionId || 'all',
+                    className: delegation.className,
+                    sectionName: delegation.sectionName || '',
+                    isDelegation: 'true'
+                }
+            });
+        };
 
         // Main view with children
         return (
@@ -863,14 +905,12 @@ export default function HomeScreen() {
                     </View>
                 </Animated.View>
 
-                {/* Add Child Modal */}
-                {/* <AddChildModal
-                    visible={showAddChildModal}
-                    onClose={() => setShowAddChildModal(false)}
-                    parentId={parentId}
-                    schoolId={schoolId}
-                    onSuccess={handleAddChildSuccess}
-                /> */}
+                <DelegationCheckModal
+                    visible={showDelegationModal}
+                    delegations={activeDelegations}
+                    onSelectDelegation={handleSelectDelegation}
+                    onClose={() => setShowDelegationModal(false)}
+                />
             </ScrollView>
         );
     };
@@ -1153,6 +1193,25 @@ export default function HomeScreen() {
                 </View>
             );
         }
+        const ActionButtonWithBadge = ({ action, onPress }) => {
+            return (
+                <HapticTouchable onPress={onPress}>
+                    <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}>
+                        <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
+                            <action.icon size={22} color={action.color} />
+                            {action.badge && (
+                                <View style={styles.badgeContainer}>
+                                    <Text style={styles.badgeText}>{action.badge}</Text>
+                                </View>
+                            )}
+                        </View>
+                        <Text style={styles.actionLabel} numberOfLines={1}>
+                            {action.label}
+                        </Text>
+                    </View>
+                </HapticTouchable>
+            );
+        };
 
         // Main view with children
         return (
@@ -1425,6 +1484,7 @@ export default function HomeScreen() {
         </View>
     );
 }
+
 
 // === STYLES ===
 const styles = StyleSheet.create({
@@ -1820,6 +1880,23 @@ const styles = StyleSheet.create({
     },
     noticesContainer: {
         gap: 10,
+    },
+    badgeContainer: {
+        position: 'absolute',
+        top: -4,
+        right: -4,
+        backgroundColor: '#FF6B6B',
+        borderRadius: 10,
+        minWidth: 20,
+        height: 20,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingHorizontal: 6,
+    },
+    badgeText: {
+        color: '#fff',
+        fontSize: 11,
+        fontWeight: '700',
     },
     noticeCard: {
         flexDirection: 'row',

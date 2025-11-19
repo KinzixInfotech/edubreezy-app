@@ -13,7 +13,7 @@ import { z } from 'zod';
 import {
     Calendar as CalendarIcon, TrendingUp, Award, AlertCircle, CheckCircle,
     XCircle, Clock, ChevronLeft, ChevronRight, ArrowLeft, Sparkles,
-    BarChart3, FileText, Send, X as CloseIcon, AlertTriangle, Info, 
+    BarChart3, FileText, Send, X as CloseIcon, AlertTriangle, Info,
     ChevronRight as ChevronRightIcon, Umbrella
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
@@ -57,24 +57,24 @@ const getISTDateString = (dateInput = new Date()) => {
     return istDate.toISOString().split('T')[0];
 };
 
-const formatIST = (dateString) => {
-    return new Date(dateString).toLocaleDateString('en-IN', {
-        timeZone: 'Asia/Kolkata',
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric'
-    });
-};
+// const formatIST = (dateString) => {
+//     return new Date(dateString).toLocaleDateString('en-IN', {
+//         timeZone: 'Asia/Kolkata',
+//         day: 'numeric',
+//         month: 'short',
+//         year: 'numeric'
+//     });
+// };
 
-const formatISTTime = (dateString) => {
-    if (!dateString) return '';
-    return new Date(dateString).toLocaleTimeString('en-IN', {
-        timeZone: 'Asia/Kolkata',
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true
-    });
-};
+// const formatISTTime = (dateString) => {
+//     if (!dateString) return '';
+//     return new Date(dateString).toLocaleTimeString('en-IN', {
+//         timeZone: 'Asia/Kolkata',
+//         hour: '2-digit',
+//         minute: '2-digit',
+//         hour12: true
+//     });
+// };
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CALENDAR_WIDTH = SCREEN_WIDTH - 32;
@@ -172,18 +172,18 @@ export default function TeacherAttendanceView() {
     // Check if teacher is on approved leave today
     const isOnLeaveToday = () => {
         if (!leaveData?.leaves) return false;
-        
+
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        
+
         return leaveData.leaves.some(leave => {
             if (leave.status !== 'APPROVED') return false;
-            
+
             const startDate = new Date(leave.startDate);
             const endDate = new Date(leave.endDate);
             startDate.setHours(0, 0, 0, 0);
             endDate.setHours(23, 59, 59, 999);
-            
+
             return today >= startDate && today <= endDate;
         });
     };
@@ -191,18 +191,18 @@ export default function TeacherAttendanceView() {
     // Get today's leave details if on leave
     const getTodayLeaveDetails = () => {
         if (!leaveData?.leaves) return null;
-        
+
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        
+
         return leaveData.leaves.find(leave => {
             if (leave.status !== 'APPROVED') return false;
-            
+
             const startDate = new Date(leave.startDate);
             const endDate = new Date(leave.endDate);
             startDate.setHours(0, 0, 0, 0);
             endDate.setHours(23, 59, 59, 999);
-            
+
             return today >= startDate && today <= endDate;
         });
     };

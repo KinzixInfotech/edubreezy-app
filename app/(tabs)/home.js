@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Dimensions, RefreshControl } from 'react-native';
 import { Link, router } from 'expo-router';
-import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings, Plus, CheckCircle2, TimerIcon, Book, CalendarDays, Umbrella } from 'lucide-react-native';
+import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings, Plus, CheckCircle2, TimerIcon, Book, CalendarDays, Umbrella, ChartPie } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../components/HapticTouch';
@@ -539,10 +539,23 @@ export default function HomeScreen() {
                         // params: { childData: JSON.stringify(selectedChild) },
                     },
                     {
-                        icon: Calendar, label: 'Mark Attendance', color: '#4ECDC4', bgColor: '#E0F7F4', href: "teacher/mark-attendance",
+                        icon: Calendar, label: 'Mark Attendance', color: '#F9A825',     // deep bold yellow (icon)
+                        bgColor: '#FFF8E1', href: "teacher/mark-attendance",
                         // params: { childData: JSON.stringify(selectedChild) },
                     },
+                    {
+                        icon: ChartPie, label: 'Attendance Stats', color: '#F9A825',     // deep bold yellow (icon)
+                        params: { teacherData: JSON.stringify({schoolId,userId}) },
 
+                        bgColor: '#FFF8E1', href: "/teachers/stats-calendar"
+                    },
+                    {
+                        icon: Calendar,
+                        label: 'School Calendar',
+                        color: '#4CAF50',     // green icon
+                        bgColor: '#E8F5E9',   // light green background
+                        href: "/calendarscreen"
+                    },
                     { icon: MessageCircle, label: 'View Student Attendance', color: '#9C27B0', bgColor: '#F3E5F5', href: "/payfees" }, {
                         icon: Calendar,
                         label: 'School Calendar',

@@ -1,5 +1,5 @@
 // Fixed Teacher Bulk Attendance Marking
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -28,12 +28,14 @@ import {
 import * as SecureStore from 'expo-secure-store';
 import api from '../../../lib/api';
 import HapticTouchable from '../../components/HapticTouch';
+
 const getISTDateString = (dateInput = new Date()) => {
   const date = new Date(dateInput);
   const offset = 5.5 * 60 * 60 * 1000; // IST = UTC+5:30
   const istDate = new Date(date.getTime() + offset);
   return istDate.toISOString().split('T')[0]; // "2025-11-12"
 };
+
 export default function BulkAttendanceMarking() {
   const queryClient = useQueryClient();
   const [selectedDate, setSelectedDate] = useState(getISTDateString());
@@ -112,7 +114,7 @@ export default function BulkAttendanceMarking() {
   const existingBulk = studentsData?.existingBulk;
 
   // Initialize attendance from existing data
-  React.useEffect(() => {
+  useEffect(() => {
     if (students.length > 0) {
       const initialAttendance = {};
       students.forEach(student => {
@@ -125,7 +127,7 @@ export default function BulkAttendanceMarking() {
     }
   }, [students]);
 
-  // Submit bulk attendance
+  // Submit bulk attendance - UPDATED WITH ERROR HANDLING
   const submitMutation = useMutation({
     mutationFn: async (data) => {
       const res = await api.post(`/schools/${schoolId}/attendance/bulk`, data);
@@ -137,7 +139,31 @@ export default function BulkAttendanceMarking() {
       Alert.alert('Success! 🎉', 'Attendance marked successfully!');
     },
     onError: (error) => {
-      Alert.alert('Error', error.response?.data?.error || 'Failed to mark attendance');
+      // ✅ ENHANCED ERROR HANDLING
+      const errorData = error.response?.data;
+
+      if (errorData) {
+        const title = errorData.error || 'Cannot Mark Attendance';
+        const message = errorData.message || errorData.alert || 'Failed to mark attendance';
+
+        Alert.alert(
+          title,
+          message,
+          [
+            {
+              text: 'OK',
+              style: 'default'
+            }
+          ],
+          { cancelable: true }
+        );
+      } else {
+        Alert.alert(
+          'Error',
+          'Failed to mark attendance. Please try again.',
+          [{ text: 'OK' }]
+        );
+      }
     }
   });
 

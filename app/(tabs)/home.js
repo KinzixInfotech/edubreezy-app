@@ -764,10 +764,10 @@ export default function HomeScreen() {
                                             </View>
                                             <Text style={{
                                                 fontSize: 12,
-                                                marginTop:5,
+                                                marginTop: 5,
                                                 color: 'rgba(255, 255, 255, 0.9)',
                                             }}>
-                                                Click To Mark 
+                                                Click To Mark
                                             </Text>
                                         </View>
                                         {/* <HapticTouchable
@@ -2018,10 +2018,12 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         flexWrap: 'wrap',
         gap: 12,
+        // backgroundColor:'red',
         marginTop: 12,
     },
     actionButton: {
-        width: (SCREEN_WIDTH - (isSmallDevice ? 48 : 56)) / 3,
+        width: (SCREEN_WIDTH - (isSmallDevice ? 48 : 56) - 24) / 3, // subtract 2 gaps (2 × 12)
+        // → now it's (totalWidth - padding - 24) / 3
         padding: 14,
         borderRadius: 16,
         alignItems: 'center',

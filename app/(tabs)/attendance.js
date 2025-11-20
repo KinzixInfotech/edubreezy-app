@@ -169,18 +169,18 @@ export default function SelfAttendance() {
     // Check if teacher is on approved leave today
     const isOnLeaveToday = () => {
         if (!leaveData?.leaves) return false;
-        
+
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        
+
         return leaveData.leaves.some(leave => {
             if (leave.status !== 'APPROVED') return false;
-            
+
             const startDate = new Date(leave.startDate);
             const endDate = new Date(leave.endDate);
             startDate.setHours(0, 0, 0, 0);
             endDate.setHours(23, 59, 59, 999);
-            
+
             return today >= startDate && today <= endDate;
         });
     };
@@ -188,18 +188,18 @@ export default function SelfAttendance() {
     // Get today's leave details if on leave
     const getTodayLeaveDetails = () => {
         if (!leaveData?.leaves) return null;
-        
+
         const today = new Date();
         today.setHours(0, 0, 0, 0);
-        
+
         return leaveData.leaves.find(leave => {
             if (leave.status !== 'APPROVED') return false;
-            
+
             const startDate = new Date(leave.startDate);
             const endDate = new Date(leave.endDate);
             startDate.setHours(0, 0, 0, 0);
             endDate.setHours(23, 59, 59, 999);
-            
+
             return today >= startDate && today <= endDate;
         });
     };
@@ -566,7 +566,7 @@ export default function SelfAttendance() {
                             <Text style={styles.statusTitle}>
                                 {attendance.status === 'PRESENT' ? 'Checked In' :
                                     attendance.status === 'LATE' ? 'Late Check-In' :
-                                        attendance.status.replaceAll('_', ' ')
+                                        attendance.status?.replaceAll('_', ' ')
                                 }
                             </Text>
                             {attendance.checkInTime && (

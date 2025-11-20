@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Dimensions, RefreshControl } from 'react-native';
 import { Link, router } from 'expo-router';
-import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings, Plus, CheckCircle2, TimerIcon, Book, CalendarDays, Umbrella, ChartPie } from 'lucide-react-native';
+import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings, Plus, CheckCircle2, TimerIcon, Book, CalendarDays, Umbrella, ChartPie, User, UserCheck, X, ArrowRight } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../components/HapticTouch';
@@ -81,7 +81,6 @@ export default function HomeScreen() {
         staleTime: 1000 * 60 * 2,
     });
 
-    console.log(teacher);
 
     // Fetch notifications for badge count
     const { data: notificationData } = useQuery({
@@ -344,7 +343,7 @@ export default function HomeScreen() {
             case 'student':
                 return <StudentView refreshing={refreshing} onRefresh={onRefresh} />;
             case 'teaching_staff':
-                return <TeacherView refreshing={refreshing} schoolId={schoolId} onRefresh={onRefresh} />;
+                return <TeacherView refreshing={refreshing} schoolId={schoolId} userId={userId} onRefresh={onRefresh} />;
             case 'admin':
                 return <AdminView refreshing={refreshing} onRefresh={onRefresh} />;
             case 'parent':
@@ -493,13 +492,81 @@ export default function HomeScreen() {
     );
 
     // === TEACHER VIEW ===
-    const TeacherView = ({ schoolId, parentId, refreshing, onRefresh }) => {
+    // TeacherView.js
+    const DELEGATION_STORAGE_KEY = 'delegation_shown_versions';
+
+    const TeacherView = ({ schoolId, parentId, userId, refreshing, onRefresh }) => {
         const [showAddChildModal, setShowAddChildModal] = useState(false);
         const [selectedChild, setSelectedChild] = useState(null);
         const [showDelegationModal, setShowDelegationModal] = useState(false);
         const [activeDelegations, setActiveDelegations] = useState([]);
+        const [shownDelegations, setShownDelegations] = useState({});
         const queryClient = useQueryClient();
 
+        // Load shown delegations from secure storage
+        useEffect(() => {
+            loadShownDelegations();
+        }, []);
+
+        const loadShownDelegations = async () => {
+            try {
+                const stored = await SecureStore.getItemAsync(DELEGATION_STORAGE_KEY);
+                if (stored) {
+                    setShownDelegations(JSON.parse(stored));
+                }
+            } catch (error) {
+                console.error('Error loading shown delegations:', error);
+            }
+        };
+
+        const saveDelegationAsShown = async (delegationId, version) => {
+            try {
+                const updated = {
+                    ...shownDelegations,
+                    [delegationId]: version
+                };
+                await SecureStore.setItemAsync(DELEGATION_STORAGE_KEY, JSON.stringify(updated));
+                setShownDelegations(updated);
+            } catch (error) {
+                console.error('Error saving delegation status:', error);
+            }
+        };
+
+        // Check for active delegations
+        // Check for active delegations
+        const { data: delegationCheck, refetch: refetchDelegations } = useQuery({
+            queryKey: ['delegation-check', schoolId, userId],
+            queryFn: async () => {
+                const res = await api.get(
+                    `/schools/${schoolId}/attendance/delegations/check?teacherId=${userId}`
+                );
+
+                // ADD THESE CONSOLE LOGS
+                // console.log('=== API RESPONSE ===');
+                // console.log('Full response:', JSON.stringify(res.data, null, 2));
+                // console.log('Has delegations:', res.data.hasDelegations);
+                // console.log('Delegations array:', res.data.delegations);
+
+                // if (res.data.delegations) {
+                //     res.data.delegations.forEach((d, i) => {
+                //         console.log(`\nDelegation ${i + 1}:`);
+                //         console.log('  ID:', d.id);
+                //         console.log('  className:', d.className);
+                //         console.log('  acknowledgedAt:', d.acknowledgedAt);
+                //         console.log('  acknowledgedAt type:', typeof d.acknowledgedAt);
+                //         console.log('  Is null?:', d.acknowledgedAt === null);
+                //         console.log('  Is undefined?:', d.acknowledgedAt === undefined);
+                //         console.log('  Falsy check (!acknowledgedAt):', !d.acknowledgedAt);
+                //     });
+                // }
+
+                return res.data;
+            },
+            enabled: !!schoolId && !!userId,
+            staleTime: 1000 * 60 * 2,
+            refetchInterval: 1000 * 60 * 5,
+        });
+        // Fetch recent notices
         const {
             data: recentNotices,
             isFetching,
@@ -509,182 +576,66 @@ export default function HomeScreen() {
             queryKey: ['notices', schoolId, userId],
             queryFn: async () => {
                 if (!schoolId || !userId) return { notices: [], pagination: {} };
-
-                const cat = 'All';
-                const unread = '';
-
                 const res = await api.get(
-                    `/notices/${schoolId}?userId=${userId}&${cat}&${unread}&limit=4&page=1`
-                );
-                return res.data; // { notices: [], pagination: { totalPages, currentPage } }
-            },
-            enabled: !!schoolId && !!userId,
-            // keepPreviousData: true,
-            staleTime: 0,               // ← force fresh data on mount / category change
-        });
-        const notices = recentNotices?.notices?.map((n) => ({
-            id: n.id,
-            title: n.title,
-            time: new Date(n.createdAt).toLocaleString(), // or format like "2 hours ago"
-            unread: !n.read,
-        })) || [];
-
-        // qucik access for teacher
-        const actionGroups = [
-            {
-                title: 'Quick Actions',
-                actions: [
-                    { icon: Book, label: 'Add Homework', color: '#0469ff', bgColor: '#E3F2FD', href: "/payfees" },
-                    {
-                        icon: Calendar,
-                        label: 'Self Attendance',
-                        color: '#F9A825',     // deep bold yellow (icon)
-                        bgColor: '#FFF8E1',   // soft light yellow background
-                        href: "attendance",
-                        // params: { childData: JSON.stringify(selectedChild) },
-                    },
-                    {
-                        icon: Calendar, label: 'Mark Attendance', color: '#F9A825',     // deep bold yellow (icon)
-                        bgColor: '#FFF8E1', href: "teacher/mark-attendance",
-                        // params: { childData: JSON.stringify(selectedChild) },
-                    },
-                    {
-                        icon: ChartPie, label: 'Attendance Stats', color: '#F9A825',     // deep bold yellow (icon)
-                        params: { teacherData: JSON.stringify({ schoolId, userId }) },
-
-                        bgColor: '#FFF8E1', href: "/teachers/stats-calendar"
-                    },
-                    {
-                        icon: Calendar,
-                        label: 'School Calendar',
-                        color: '#4CAF50',     // green icon
-                        bgColor: '#E8F5E9',   // light green background
-                        href: "/calendarscreen"
-                    },
-                    { icon: MessageCircle, label: 'View Student Attendance', color: '#9C27B0', bgColor: '#F3E5F5', href: "/payfees" }, {
-                        icon: Calendar,
-                        label: 'School Calendar',
-                        color: '#4CAF50',     // green icon
-                        bgColor: '#E8F5E9',   // light green background
-                        href: "/calendarscreen"
-                    }
-                ],
-            },
-            {
-                title: 'Examination',
-                actions: [
-                    { icon: FileText, label: 'Report Card', color: '#FFD93D', bgColor: '#FFF9E0', href: "/payfees" },
-                    { icon: BookOpen, label: 'Assignments', color: '#FF9800', bgColor: '#FFF3E0', href: "/payfees" },
-                ],
-            },
-            {
-                title: 'Fee Management',
-                actions: [
-                    {
-                        icon: DollarSign,
-                        label: 'Pay Fees',
-                        color: '#FF6B6B',
-                        bgColor: '#FFE9E9',
-                        href: "/(screens)/payfees",
-                        params: { childData: JSON.stringify(selectedChild) },
-                    },
-                    {
-                        icon: TimerIcon,
-                        label: 'History',
-                        color: '#4CAF50',
-                        bgColor: '#E7F5E9',
-                        href: "/(screens)/paymenthistory",
-                        params: {
-                            childData: JSON.stringify({
-                                ...selectedChild,
-                                parentId
-                            })
-                        }
-                    },
-                ],
-            },
-        ];
-        // const { data, isPending } = useQuery({
-        //     queryKey: QUERY_KEYS.parentChildren(schoolId, parentId),
-        //     queryFn: async () => {
-        //         const res = await api.get(`/schools/${schoolId}/parents/${parentId}/child`);
-        //         return res.data;
-        //     },
-        //     enabled: Boolean(schoolId && parentId),
-        //     placeholderData: { parent: null, children: [] },
-        //     staleTime: 1000 * 60,
-        // });
-
-        // const uiChildren = useMemo(() =>
-        //     data?.children?.map((child) => ({
-        //         id: child.studentId,
-        //         studentId: child.studentId,
-        //         name: child.name,
-        //         class: child.class,
-        //         section: child.section,
-        //         rollNo: child.rollNumber,
-        //         avatar: child.profilePicture,
-        //         attendance: Math.floor(Math.random() * 21) + 80,
-        //         feeStatus: "Paid",
-        //         performance: "Excellent",
-        //         pendingFee: 0
-        //     })) || [],
-        //     [data]);
-
-
-        // useEffect(() => {
-        //     if (uiChildren.length > 0 && !selectedChild) {
-        //         setSelectedChild(uiChildren[0]);
-        //     }
-        // }, [uiChildren, selectedChild]);
-
-        // Loading state
-        // if (isPending) {
-        //     return (
-        //         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        //             <ActivityIndicator size="large" color="#0469ff" />
-        //         </View>
-        //     );
-        // }
-
-        // Empty state - No children added yet
-        // if (!isPending ) {
-        //     return (
-        //         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        //             <ActivityIndicator size="large" color="#0469ff" />
-        //             <Text style={{
-        //                 marginTop:5,
-        //                 fontSize:13,
-        //                 color:'grey',
-        //             }}>Loading Data</Text>
-        //         </View>
-        //     );
-        // }
-
-
-        // Check for active delegations on mount
-        const { data: delegationCheck } = useQuery({
-            queryKey: ['delegation-check', schoolId, userId],
-            queryFn: async () => {
-                const res = await api.get(
-                    `/schools/${schoolId}/attendance/delegations/check?teacherId=${userId}`
+                    `/notices/${schoolId}?userId=${userId}&limit=4&page=1`
                 );
                 return res.data;
             },
             enabled: !!schoolId && !!userId,
-            staleTime: 1000 * 60 * 2, // 2 minutes
+            staleTime: 0,
         });
 
-        // Show delegation modal if there are active delegations
+        const notices = recentNotices?.notices?.map((n) => ({
+            id: n.id,
+            title: n.title,
+            time: new Date(n.createdAt).toLocaleString(),
+            unread: !n.read,
+        })) || [];
+
+        // Handle delegation modal display
+        // Handle delegation modal display
         useEffect(() => {
+            // console.log('\n=== DELEGATION FILTER LOGIC ===');
+            // console.log('delegationCheck:', delegationCheck);
+
             if (delegationCheck?.hasDelegations && delegationCheck.delegations.length > 0) {
-                setActiveDelegations(delegationCheck.delegations);
-                setShowDelegationModal(true);
+                // console.log('Total delegations:', delegationCheck.delegations.length);
+
+                // Filter ONLY unacknowledged delegations for the modal
+                const unacknowledgedDelegations = delegationCheck.delegations.filter(
+                    delegation => {
+                        const isUnack = !delegation.acknowledgedAt;
+                        // console.log(`Delegation ${delegation.id}: acknowledgedAt=${delegation.acknowledgedAt}, isUnacknowledged=${isUnack}`);
+                        return isUnack;
+                    }
+                );
+
+                // console.log('Unacknowledged count:', unacknowledgedDelegations.length);
+                // console.log('Should show modal?:', unacknowledgedDelegations.length > 0);
+
+                if (unacknowledgedDelegations.length > 0) {
+                    // console.log('✅ SHOWING MODAL - Unacknowledged delegations found');
+                    setActiveDelegations(unacknowledgedDelegations);
+                    setShowDelegationModal(true);
+                } else {
+                    // console.log('✅ NOT SHOWING MODAL - All delegations acknowledged');
+                    // All delegations are acknowledged, but still show banner
+                    setActiveDelegations(delegationCheck.delegations);
+                    setShowDelegationModal(false);
+                }
+            } else {
+                // console.log('❌ No delegations found');
+                setActiveDelegations([]);
+                setShowDelegationModal(false);
             }
         }, [delegationCheck]);
-        const handleSelectDelegation = (delegation) => {
+        const handleSelectDelegation = async (delegation) => {
+            // Mark this delegation as shown
+            await saveDelegationAsShown(delegation.id, delegation.version);
+
             setShowDelegationModal(false);
-            // Navigate to marking page with delegation data
+
+            // Navigate to marking page
             router.push({
                 pathname: 'teachers/delegationmarking',
                 params: {
@@ -698,7 +649,72 @@ export default function HomeScreen() {
             });
         };
 
-        // Main view with children
+        const handleDismissDelegationModal = async () => {
+            // Mark all shown delegations as seen
+            for (const delegation of activeDelegations) {
+                await saveDelegationAsShown(delegation.id, delegation.version);
+            }
+            setShowDelegationModal(false);
+        };
+
+        const handleDismissBanner = async (delegationId) => {
+            // Temporarily hide banner (will show again on refresh unless delegation is complete)
+            setActiveDelegations(prev => prev.filter(d => d.id !== delegationId));
+        };
+
+        // Quick access actions for teacher
+        const actionGroups = [
+            {
+                title: 'Quick Actions',
+                actions: [
+                    { icon: Book, label: 'Add Homework', color: '#0469ff', bgColor: '#E3F2FD', href: "/payfees" },
+                    {
+                        icon: Calendar,
+                        label: 'Self Attendance',
+                        color: '#F9A825',
+                        bgColor: '#FFF8E1',
+                        href: "attendance",
+                    },
+                    {
+                        icon: Calendar,
+                        label: 'Mark Attendance',
+                        color: '#F9A825',
+                        bgColor: '#FFF8E1',
+                        href: "teacher/mark-attendance",
+                    },
+                    {
+                        icon: ChartPie,
+                        label: 'Attendance Stats',
+                        color: '#F9A825',
+                        params: { teacherData: JSON.stringify({ schoolId, userId }) },
+                        bgColor: '#FFF8E1',
+                        href: "/teachers/stats-calendar"
+                    },
+                    {
+                        icon: Calendar,
+                        label: 'School Calendar',
+                        color: '#4CAF50',
+                        bgColor: '#E8F5E9',
+                        href: "/calendarscreen"
+                    },
+                    {
+                        icon: MessageCircle,
+                        label: 'View Student Attendance',
+                        color: '#9C27B0',
+                        bgColor: '#F3E5F5',
+                        href: "/payfees"
+                    },
+                ],
+            },
+            {
+                title: 'Examination',
+                actions: [
+                    { icon: FileText, label: 'Report Card', color: '#FFD93D', bgColor: '#FFF9E0', href: "/payfees" },
+                    { icon: BookOpen, label: 'Assignments', color: '#FF9800', bgColor: '#FFF3E0', href: "/payfees" },
+                ],
+            },
+        ];
+
         return (
             <ScrollView
                 style={styles.container}
@@ -706,12 +722,71 @@ export default function HomeScreen() {
                 refreshControl={
                     <RefreshControl
                         refreshing={refreshing}
-                        onRefresh={onRefresh}
+                        onRefresh={() => {
+                            onRefresh();
+                            refetchDelegations();
+                        }}
                         tintColor="#0469ff"
                         colors={['#0469ff']}
                     />
                 }
             >
+                {/* Delegation Banner - Shows when there are active delegations */}
+                {activeDelegations.length > 0 && (
+                    <Animated.View entering={FadeInDown.duration(400)} style={styles.delegationBannerContainer}>
+                        {activeDelegations.map((delegation, index) => (
+                            <Animated.View
+                                key={delegation.id}
+                                entering={FadeInDown.delay(index * 100).duration(400)}
+                                style={styles.delegationBanner}
+                            >
+                                <HapticTouchable
+                                    onPress={() => handleSelectDelegation(delegation)}
+                                    style={{ flex: 1 }}
+                                >
+                                    <View style={styles.delegationBannerContent}>
+                                        <View style={styles.delegationBannerIcon}>
+                                            <UserCheck size={20} color="#fff" />
+                                        </View>
+                                        <View style={styles.delegationBannerText}>
+                                            <Text style={styles.delegationBannerTitle}>
+                                                Substitute Teacher Assignment
+                                            </Text>
+                                            <Text style={styles.delegationBannerSubtitle}>
+                                                You are assigned to {delegation.className}
+                                                {delegation.sectionName && ` - ${delegation.sectionName}`} For Attendance Marking!
+                                            </Text>
+                                            <View style={styles.delegationBannerDate}>
+                                                <Calendar size={12} color="rgba(255, 255, 255, 0.9)" />
+                                                <Text style={styles.delegationBannerDateText}>
+                                                    Until {new Date(delegation.endDate).toLocaleDateString()}
+                                                </Text>
+                                            </View>
+                                            <Text style={{
+                                                fontSize: 12,
+                                                marginTop:5,
+                                                color: 'rgba(255, 255, 255, 0.9)',
+                                            }}>
+                                                Click To Mark 
+                                            </Text>
+                                        </View>
+                                        {/* <HapticTouchable
+                                            onPress={(e) => {
+                                                e.stopPropagation();
+                                                handleDismissBanner(delegation.id);
+                                            }}
+                                            style={styles.delegationBannerClose}
+                                        >
+                                            <X size={18} color="rgba(255, 255, 255, 0.9)" />
+                                        </HapticTouchable> */}
+                                    </View>
+                                </HapticTouchable>
+                            </Animated.View>
+                        ))}
+                    </Animated.View>
+                )}
+
+                {/* Today's Events */}
                 {todaysEvents.length > 0 && (
                     <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
                         <View style={styles.sectionHeader}>
@@ -747,17 +822,13 @@ export default function HomeScreen() {
                         </View>
                     </Animated.View>
                 )}
-                {/* Children Selector */}
 
-
-                {/* Quick Stats for  teacher */}
+                {/* Quick Stats for teacher */}
                 <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.section}>
                     <View style={styles.statsGrid}>
-
                         <LinearGradient colors={['#4ECDC4', '#44A08D']} style={styles.statCard}>
                             <View style={styles.statIcon}>
                                 <CalendarDays size={24} color="#fff" />
-
                             </View>
                             <Text style={styles.statValue}>520</Text>
                             <Text style={styles.statLabel}>School Days</Text>
@@ -778,7 +849,6 @@ export default function HomeScreen() {
                             <Text style={styles.statValue}>25</Text>
                             <Text style={styles.statLabel}>Leaves Only</Text>
                         </LinearGradient>
-
                     </View>
                 </Animated.View>
 
@@ -822,6 +892,7 @@ export default function HomeScreen() {
                         </View>
                     </Animated.View>
                 ))}
+
                 {/* Upcoming Events */}
                 <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
                     <View style={styles.sectionHeader}>
@@ -898,23 +969,23 @@ export default function HomeScreen() {
                             >
                                 <CheckCircle2 size={26} color="#0469ff" />
                                 <Text style={{ marginTop: 8, fontSize: 14, color: '#555' }}>
-                                    You’re all caught up!
+                                    You're all caught up!
                                 </Text>
                             </Animated.View>
                         )}
                     </View>
                 </Animated.View>
 
+                {/* Delegation Modal */}
                 <DelegationCheckModal
                     visible={showDelegationModal}
                     delegations={activeDelegations}
                     onSelectDelegation={handleSelectDelegation}
-                    onClose={() => setShowDelegationModal(false)}
+                    onClose={handleDismissDelegationModal}
                 />
             </ScrollView>
         );
     };
-
     // === ADMIN VIEW ===
     const AdminView = ({ refreshing, onRefresh }) => (
         <ScrollView
@@ -1501,6 +1572,136 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
         backgroundColor: '#fff',
     },
+    // Add these styles to your existing StyleSheet.create() in your styles file
+    // Merge these with your existing styles object
+
+    // ADD TO YOUR EXISTING STYLES:
+
+    // Delegation Banner Styles
+    delegationBannerContainer: {
+        paddingHorizontal: isSmallDevice ? 12 : 16,
+        paddingTop: 16,
+        gap: 12,
+    },
+    delegationBanner: {
+        borderRadius: 16,
+        overflow: 'hidden',
+        backgroundColor: '#0469ff',
+        shadowColor: '#0469ff',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 6,
+    },
+    delegationBannerContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+        gap: 12,
+    },
+    delegationBannerIcon: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: 'rgba(255, 255, 255, 0.2)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    delegationBannerText: {
+        flex: 1,
+    },
+    delegationBannerTitle: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#fff',
+        marginBottom: 4,
+    },
+    delegationBannerSubtitle: {
+        fontSize: 13,
+        color: 'rgba(255, 255, 255, 0.95)',
+        fontWeight: '500',
+        marginBottom: 6,
+    },
+    delegationBannerDate: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    delegationBannerDateText: {
+        fontSize: 12,
+        color: 'rgba(255, 255, 255, 0.9)',
+    },
+    delegationBannerClose: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: 'rgba(255, 255, 255, 0.15)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+
+    delegationBannerContainer: {
+        paddingHorizontal: isSmallDevice ? 12 : 16,
+        paddingTop: 16,
+        gap: 12,
+    },
+    delegationBanner: {
+        borderRadius: 16,
+        overflow: 'hidden',
+        backgroundColor: '#0469ff',
+        shadowColor: '#0469ff',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 6,
+    },
+    delegationBannerContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+        gap: 12,
+    },
+    delegationBannerIcon: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: 'rgba(255, 255, 255, 0.2)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    delegationBannerText: {
+        flex: 1,
+    },
+    delegationBannerTitle: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#fff',
+        marginBottom: 4,
+    },
+    delegationBannerSubtitle: {
+        fontSize: 13,
+        color: 'rgba(255, 255, 255, 0.95)',
+        fontWeight: '500',
+        marginBottom: 6,
+    },
+    delegationBannerDate: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    delegationBannerDateText: {
+        fontSize: 12,
+        color: 'rgba(255, 255, 255, 0.9)',
+    },
+    delegationBannerClose: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        backgroundColor: 'rgba(255, 255, 255, 0.15)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+
     userRow: {
         flexDirection: 'row',
         alignItems: 'center',

@@ -15,6 +15,8 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function DelegationCheckModal({ visible, delegations, onSelectDelegation, onClose }) {
+    console.log('DelegationCheckModal rendered:', { visible, delegationsCount: delegations?.length });
+    
     if (!visible || !delegations || delegations.length === 0) return null;
 
     return (
@@ -46,7 +48,10 @@ export default function DelegationCheckModal({ visible, delegations, onSelectDel
                                     key={delegation.id}
                                     entering={FadeInDown.delay(200 + index * 100).duration(400)}
                                 >
-                                    <HapticTouchable onPress={() => onSelectDelegation(delegation)}>
+                                    <HapticTouchable onPress={() => {
+                                        console.log('Delegation selected:', delegation.id);
+                                        onSelectDelegation(delegation);
+                                    }}>
                                         <View style={styles.delegationCard}>
                                             {/* Class Info */}
                                             <View style={styles.delegationHeader}>
@@ -100,7 +105,10 @@ export default function DelegationCheckModal({ visible, delegations, onSelectDel
                         </View>
 
                         {/* Own Classes Link */}
-                        <HapticTouchable onPress={onClose}>
+                        <HapticTouchable onPress={() => {
+                            console.log('Own classes button clicked');
+                            onClose();
+                        }}>
                             <View style={styles.ownClassesButton}>
                                 <Text style={styles.ownClassesText}>
                                     Or mark attendance for my assigned classes

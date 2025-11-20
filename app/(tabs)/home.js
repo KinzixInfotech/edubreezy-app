@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Dimensions, RefreshControl } from 'react-native';
 import { Link, router } from 'expo-router';
-import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings, Plus, CheckCircle2, TimerIcon, Book, CalendarDays, Umbrella, ChartPie, User, UserCheck, X, ArrowRight } from 'lucide-react-native';
+import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings, Plus, CheckCircle2, TimerIcon, Book, CalendarDays, Umbrella, ChartPie, User, UserCheck, X, ArrowRight, Paperclip, PartyPopperIcon } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../components/HapticTouch';
@@ -704,6 +704,13 @@ export default function HomeScreen() {
                         bgColor: '#F3E5F5',
                         href: "/payfees"
                     },
+                    {
+                        icon: PartyPopperIcon,
+                        label: 'Syllabus',
+                        color: '#9C27B0',
+                        bgColor: '#F3E5F5',
+                        href: "/syllabusview"
+                    },
                 ],
             },
             {
@@ -1086,6 +1093,7 @@ export default function HomeScreen() {
                         icon: Calendar, label: 'Attendance', color: '#4ECDC4', bgColor: '#E0F7F4', href: "/my-child/attendance",
                         params: { childData: JSON.stringify(selectedChild) },
                     },
+
                     { icon: MessageCircle, label: 'Messages', color: '#9C27B0', bgColor: '#F3E5F5', href: "/payfees" }, {
                         icon: Calendar,
                         label: 'School Calendar',

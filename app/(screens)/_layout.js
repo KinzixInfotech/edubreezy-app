@@ -12,8 +12,9 @@ export default function ScreenLayout() {
       <Stack.Screen name="teachers/delegationmarking" />
       <Stack.Screen name="calendarscreen" />
       <Stack.Screen name="payfees" />
+      <Stack.Screen name="/homework/view" />
       <Stack.Screen name="syllabusview" />
-      <Stack.Screen name="homework/index" />
+      <Stack.Screen name="homework/assign" />
     </Stack>
   );
 }

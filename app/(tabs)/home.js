@@ -695,7 +695,7 @@ export default function HomeScreen() {
             {
                 title: 'Quick Actions',
                 actions: [
-                    { icon: Book, label: 'Add Homework', color: '#0469ff', bgColor: '#E3F2FD', href: "/payfees" },
+                    { icon: Book, label: 'Add Homework', color: '#0469ff', bgColor: '#E3F2FD', href: "/homework/assign" },
                     {
                         icon: Calendar,
                         label: 'Self Attendance',

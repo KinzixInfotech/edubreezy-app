@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Dimensions, RefreshControl } from 'react-native';
 import { Link, router } from 'expo-router';
-import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings, Plus, CheckCircle2, TimerIcon, Book, CalendarDays, Umbrella, ChartPie, User, UserCheck, X, ArrowRight, Paperclip, PartyPopperIcon } from 'lucide-react-native';
+import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings, Plus, CheckCircle2, TimerIcon, Book, CalendarDays, Umbrella, ChartPie, User, UserCheck, X, ArrowRight, Paperclip, PartyPopperIcon, ScrollText } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../components/HapticTouch';
@@ -45,7 +45,23 @@ export default function HomeScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const queryClient = useQueryClient();
     const uiData = dataUi;
-
+    const user_acc = useMemo(() => user, [user]);
+    const userId = user_acc?.id;
+    const schoolId = user_acc?.schoolId;
+    // Fetch notifications with unread count
+    const { data: notificationData, refetch: refetchNotifications } = useQuery({
+        queryKey: ['notifications', userId, schoolId],
+        queryFn: async () => {
+            const res = await api.get(
+                `/notifications?userId=${userId}&schoolId=${schoolId}&limit=20`
+            );
+            return res.data;
+        },
+        enabled: !!schoolId,
+        staleTime: 1000 * 60, // Cache for 1 minute
+        refetchInterval: 1000 * 60 * 2, // Auto-refresh every 2 minutes
+    });
+    const unreadCount = notificationData?.unreadCount || 0;
     useEffect(() => {
         loadUser();
         // router.replace('/(screens)/wish')
@@ -65,9 +81,10 @@ export default function HomeScreen() {
         }
     };
 
-    const user_acc = useMemo(() => user, [user]);
-    const userId = user_acc?.id;
-    const schoolId = user_acc?.schoolId;
+
+    // useEffect((
+    //     router.push('/homework/index')
+    // ),[])
     // Fetch Teacher Data 
     const { data: teacher, isLoading } = useQuery({
         queryKey: ["teacher-profile", userId, schoolId],
@@ -83,18 +100,18 @@ export default function HomeScreen() {
 
 
     // Fetch notifications for badge count
-    const { data: notificationData } = useQuery({
-        queryKey: QUERY_KEYS.notifications(userId),
-        queryFn: async () => {
-            const res = await api.get(`/notifications/${userId}`);
-            return res.data;
-        },
-        enabled: Boolean(userId),
-        staleTime: 1000 * 60 * 2,
-        select: (data) => ({
-            unreadCount: data?.notifications?.filter(n => !n.read).length || 0
-        })
-    });
+    // const { data: notificationData } = useQuery({
+    //     queryKey: QUERY_KEYS.notifications(userId),
+    //     queryFn: async () => {
+    //         const res = await api.get(`/notifications/${userId}`);
+    //         return res.data;
+    //     },
+    //     enabled: Boolean(userId),
+    //     staleTime: 1000 * 60 * 2,
+    //     select: (data) => ({
+    //         unreadCount: data?.notifications?.filter(n => !n.read).length || 0
+    //     })
+    // });
     // Add this query in your ParentView component, near the other queries
     const { data: upcomingEventsData, isLoading: eventsLoading } = useQuery({
         queryKey: ['upcomingEvents', schoolId],
@@ -164,7 +181,7 @@ export default function HomeScreen() {
 
 
 
-    const unreadCount = notificationData?.unreadCount || uiData.notifications.today.filter(n => !n.read).length;
+    // const unreadCount = notificationData?.unreadCount || uiData.notifications.today.filter(n => !n.read).length;
 
     // Pull to refresh handler
     const onRefresh = useCallback(async () => {
@@ -284,9 +301,20 @@ export default function HomeScreen() {
                 >
                     <View style={styles.iconButton}>
                         <Icon size={isSmallDevice ? 18 : 20} color="#0469ff" />
-                        {isBell && unreadCount > 0 && (
+
+                        {/* {isBell && unreadCount > 0 && (
                             <Animated.View entering={FadeInDown.springify()} style={styles.badge}>
                                 <Text style={styles.badgeText}>{unreadCount}</Text>
+                            </Animated.View>
+                        )} */}
+                        {isBell && unreadCount > 0 && (
+                            <Animated.View
+                                entering={FadeInDown.springify()}
+                                style={styles.badge}
+                            >
+                                <Text style={styles.badgeText}>
+                                    {unreadCount > 99 ? '99+' : unreadCount}
+                                </Text>
                             </Animated.View>
                         )}
                     </View>
@@ -705,7 +733,7 @@ export default function HomeScreen() {
                         href: "/payfees"
                     },
                     {
-                        icon: PartyPopperIcon,
+                        icon: ScrollText,
                         label: 'Syllabus',
                         color: '#9C27B0',
                         bgColor: '#F3E5F5',
@@ -1100,7 +1128,14 @@ export default function HomeScreen() {
                         color: '#4CAF50',     // green icon
                         bgColor: '#E8F5E9',   // light green background
                         href: "/calendarscreen"
-                    }
+                    },
+                    {
+                        icon: ScrollText,
+                        label: 'Syllabus',
+                        color: '#9C27B0',
+                        bgColor: '#F3E5F5',
+                        href: "/syllabusview"
+                    },
                 ],
             },
             {

@@ -8,7 +8,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { applyGlobalFont } from '../app/styles/global';
 import { StatusBar } from 'expo-status-bar';
 import * as SecureStore from 'expo-secure-store';
-import { AppState, View } from 'react-native';
+import { AppState, View, Alert, Platform } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import fcmService from '../services/fcmService';
 import { NotificationProvider, useNotification } from '../contexts/NotificationContext';
 import messaging from '@react-native-firebase/messaging';
@@ -16,26 +17,17 @@ import messaging from '@react-native-firebase/messaging';
 // Keep splash visible while fonts load
 SplashScreen.preventAutoHideAsync();
 
+// Register Background Handler EARLY - SIMPLIFIED for diagnosis
+messaging().setBackgroundMessageHandler(async remoteMessage => {
+    console.log('🔴 FCM BACKGROUND message received:', JSON.stringify(remoteMessage));
+    // Just log - no SecureStore or Notifications at top level to avoid potential issues
+});
+
 // ========================================================================
 // CRITICAL: Background message handler MUST be at top level (outside components)
 // This handles FCM notifications when app is in background or quit state
 // ========================================================================
-const BADGE_KEY = 'noticeBadgeCount';
 
-messaging().setBackgroundMessageHandler(async remoteMessage => {
-    console.log('FCM Background/Quit Message received!', JSON.stringify(remoteMessage, null, 2));
-    
-    // Increment badge in storage when notification arrives
-    try {
-        const saved = await SecureStore.getItemAsync(BADGE_KEY);
-        const current = saved ? parseInt(saved, 10) : 0;
-        const newCount = isNaN(current) ? 1 : current + 1;
-        await SecureStore.setItemAsync(BADGE_KEY, newCount.toString());
-        console.log('🔔 Background handler: Badge incremented to:', newCount);
-    } catch (error) {
-        console.error('Error incrementing badge in background handler:', error);
-    }
-});
 
 function RootLayoutContent() {
     const appState = useRef(AppState.currentState);
@@ -86,11 +78,34 @@ function RootLayoutContent() {
     // 1. FCM FOREGROUND LISTENER – REGISTERED EARLY (BEFORE USER INIT)
     // ========================================================================
     useEffect(() => {
+        // Create Android Notification Channel
+        if (Platform.OS === 'android') {
+            Notifications.setNotificationChannelAsync('default', {
+                name: 'Default',
+                importance: Notifications.AndroidImportance.MAX,
+                vibrationPattern: [0, 250, 250, 250],
+                lightColor: '#FF231F7C',
+            });
+
+            // Debug: Check channels
+            Notifications.getNotificationChannelsAsync().then(channels => {
+                console.log('📢 Active Notification Channels:', channels);
+            });
+        }
+
         const unsubscribe = fcmService.setupNotificationListeners((remoteMessage) => {
             console.log('FCM FOREGROUND message received:', remoteMessage);
 
             // Increment badge on every new notice (foreground)
             incrementNoticeBadge();
+
+            // Show global alert for foreground notifications
+            if (remoteMessage.notification) {
+                Alert.alert(
+                    remoteMessage.notification.title || 'New Notification',
+                    remoteMessage.notification.body
+                );
+            }
 
             if (isAppActiveRef.current) {
                 console.log('New notice from FCM:', remoteMessage.notification?.title);

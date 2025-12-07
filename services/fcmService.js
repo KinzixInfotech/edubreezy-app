@@ -3,7 +3,8 @@
 // import { Platform } from 'react-native';
 // import api from '../lib/api';
 // import * as SecureStore from 'expo-secure-store';
-// import { router } from 'expo-router';
+// import * as SecureStore from 'expo-secure-store';
+import * as Notifications from 'expo-notifications';
 
 // const BADGE_KEY = 'noticeBadgeCount';
 
@@ -283,7 +284,7 @@ class FCMService {
     }
 
     // This must be called at the TOP LEVEL of your index.js (not inside a component)
-    static async setupBackgroundHandler() {
+    async setupBackgroundHandler() {
         messaging().setBackgroundMessageHandler(async remoteMessage => {
             console.log('📨 FCM Background Message:', remoteMessage);
 
@@ -296,6 +297,21 @@ class FCMService {
                 console.log('🔔 Background handler: Badge incremented to:', newCount);
             } catch (error) {
                 console.error('Error incrementing badge in background:', error);
+            }
+
+            // FALLBACK: If "notification" payload is missing (Data-only), show Local Notification
+            if (!remoteMessage.notification && remoteMessage.data?.title) {
+                console.log('⚠️ Showing Local Notification for Data-Only Message (Service)');
+                await Notifications.scheduleNotificationAsync({
+                    content: {
+                        title: remoteMessage.data.title,
+                        body: remoteMessage.data.body || remoteMessage.data.message,
+                        data: remoteMessage.data,
+                        sound: true,
+                        vibrate: [0, 250, 250, 250],
+                    },
+                    trigger: null, // Show immediately
+                });
             }
 
             // Handle EVENT_REMINDER in background

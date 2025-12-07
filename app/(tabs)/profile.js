@@ -144,62 +144,43 @@ const PROFILE_CONFIG = {
 
   PARENT: {
     fieldMappings: {
-      name: 'name',
-      email: 'email',
-      phone: 'phone',
+      name: 'parentData.name',
+      email: 'parentData.email',
+      phone: 'parentData.contactNumber',
       role: 'role.name',
       school: 'school.name',
       profilePicture: 'profilePicture',
-      // Parent-specific fields
-      parentId: 'parentId',
-      children: 'children',
-      occupation: 'occupation',
-      address: 'address',
+      // Parent-specific fields from schema
+      parentId: 'parentData.id',
+      occupation: 'parentData.occupation',
+      qualification: 'parentData.qualification',
+      address: 'parentData.address',
+      city: 'parentData.city',
+      state: 'parentData.state',
+      bloodGroup: 'parentData.bloodGroup',
+      alternateNumber: 'parentData.alternateNumber',
+      emergencyContactName: 'parentData.emergencyContactName',
+      emergencyContactNumber: 'parentData.emergencyContactNumber',
     },
-    stats: [
-      {
-        key: 'children',
-        label: 'Children',
-        value: '2',
-        color: '#ec4899',
-        icon: '👶',
-        dataPath: 'children.length'
-      },
-      {
-        key: 'avgAttendance',
-        label: 'Avg. Attendance',
-        value: '94%',
-        color: '#10b981',
-        icon: '📊',
-        dataPath: 'stats.avgAttendance'
-      },
-      {
-        key: 'notifications',
-        label: 'Notifications',
-        value: '5',
-        color: '#f59e0b',
-        icon: '🔔',
-        dataPath: 'stats.unreadNotifications'
-      },
-    ],
+    stats: [], // Stats will be fetched dynamically if needed
     contactInfo: [
-      { key: 'email', label: 'Email', icon: Mail, color: '#0469ff', dataPath: 'email' },
-      { key: 'phone', label: 'Phone', icon: Phone, color: '#10b981', dataPath: 'phone' },
-      { key: 'address', label: 'Address', icon: MapPin, color: '#8b5cf6', dataPath: 'address' },
+      { key: 'email', label: 'Email', icon: Mail, color: '#0469ff', dataPath: 'parentData.email' },
+      { key: 'phone', label: 'Phone', icon: Phone, color: '#10b981', dataPath: 'parentData.contactNumber' },
+      { key: 'address', label: 'Address', icon: MapPin, color: '#8b5cf6', dataPath: 'parentData.address' },
+      { key: 'city', label: 'City', icon: MapPin, color: '#f59e0b', dataPath: 'parentData.city' },
     ],
     additionalInfo: [
-      { key: 'parentId', label: 'Parent ID', dataPath: 'parentId' },
-      { key: 'occupation', label: 'Occupation', dataPath: 'occupation' },
-      { key: 'children', label: 'Children', dataPath: 'children', isArray: true, displayKey: 'name' },
+      { key: 'occupation', label: 'Occupation', dataPath: 'parentData.occupation' },
+      { key: 'qualification', label: 'Qualification', dataPath: 'parentData.qualification' },
+      { key: 'bloodGroup', label: 'Blood Group', dataPath: 'parentData.bloodGroup' },
+      { key: 'alternateNumber', label: 'Alternate Phone', dataPath: 'parentData.alternateNumber' },
+      { key: 'emergencyContact', label: 'Emergency Contact', dataPath: 'parentData.emergencyContactName' },
+      { key: 'emergencyPhone', label: 'Emergency Phone', dataPath: 'parentData.emergencyContactNumber' },
     ],
     menuItems: [
-      { id: 1, label: "Children's Performance", icon: Award, route: '/children-performance', color: '#10b981' },
-      { id: 2, label: 'Attendance Records', icon: Calendar, route: '/attendance-records', color: '#0469ff' },
-      { id: 3, label: 'Fee Management', icon: FileText, route: '/fee-management', color: '#f59e0b' },
-      { id: 4, label: 'Teacher Communication', icon: Mail, route: '/teacher-communication', color: '#8b5cf6' },
-      { id: 5, label: 'Notifications', icon: Bell, route: '/notifications', color: '#ec4899' },
-      { id: 6, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#06b6d4' },
-      { id: 7, label: 'Edit Profile', icon: Edit, route: '/edit-profile', color: '#ef4444' },
+      { id: 1, label: 'View Children', icon: Users, route: '/(tabs)/home', color: '#ec4899' },
+      { id: 2, label: 'Notifications', icon: Bell, route: '/(tabs)/notifications', color: '#f59e0b' },
+      { id: 3, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#06b6d4' },
     ],
   },
 
@@ -370,23 +351,25 @@ export default function ProfileScreen() {
           </View>
         </Animated.View>
 
-        {/* Stats Cards */}
-        <View style={styles.statsContainer}>
-          {config.stats.map((stat, index) => {
-            const value = stat.dataPath ? getNestedValue(user, stat.dataPath, stat.value) : stat.value;
-            return (
-              <Animated.View
-                key={stat.key}
-                entering={FadeInDown.delay(100 + index * 100).duration(600)}
-                style={[styles.statCard, { backgroundColor: stat.color + '15' }]}
-              >
-                <Text style={styles.statEmoji}>{stat.icon}</Text>
-                <Text style={[styles.statValue, { color: stat.color }]}>{value}</Text>
-                <Text style={styles.statLabel}>{stat.label}</Text>
-              </Animated.View>
-            );
-          })}
-        </View>
+        {/* Stats Cards - only show if stats exist */}
+        {config.stats && config.stats.length > 0 && (
+          <View style={styles.statsContainer}>
+            {config.stats.map((stat, index) => {
+              const value = stat.dataPath ? getNestedValue(user, stat.dataPath, stat.value) : stat.value;
+              return (
+                <Animated.View
+                  key={stat.key}
+                  entering={FadeInDown.delay(100 + index * 100).duration(600)}
+                  style={[styles.statCard, { backgroundColor: stat.color + '15' }]}
+                >
+                  <Text style={styles.statEmoji}>{stat.icon}</Text>
+                  <Text style={[styles.statValue, { color: stat.color }]}>{value}</Text>
+                  <Text style={styles.statLabel}>{stat.label}</Text>
+                </Animated.View>
+              );
+            })}
+          </View>
+        )}
 
         {/* Contact Info */}
         <Animated.View entering={FadeInDown.delay(400).duration(600)} style={styles.section}>
@@ -413,35 +396,45 @@ export default function ProfileScreen() {
         </Animated.View>
 
         {/* Additional Info Section */}
-        {config.additionalInfo && config.additionalInfo.length > 0 && (
-          <Animated.View entering={FadeInDown.delay(450).duration(600)} style={styles.section}>
-            <Text style={styles.sectionTitle}>Additional Information</Text>
-            <View style={styles.infoCard}>
-              {config.additionalInfo.map((info, index) => {
-                let value = getNestedValue(user, info.dataPath);
+        {config.additionalInfo && config.additionalInfo.length > 0 && (() => {
+          // Filter to only show items with actual values
+          const validItems = config.additionalInfo.filter((info) => {
+            const value = getNestedValue(user, info.dataPath, null);
+            return value !== null && value !== 'N/A' && value !== '';
+          });
 
-                // Handle array values
-                if (info.isArray && Array.isArray(value)) {
-                  if (info.displayKey) {
-                    value = value.map(item => item[info.displayKey]).join(', ');
-                  } else {
-                    value = value.join(', ');
+          if (validItems.length === 0) return null;
+
+          return (
+            <Animated.View entering={FadeInDown.delay(450).duration(600)} style={styles.section}>
+              <Text style={styles.sectionTitle}>Additional Information</Text>
+              <View style={styles.infoCard}>
+                {validItems.map((info, index) => {
+                  let value = getNestedValue(user, info.dataPath);
+
+                  // Handle array values
+                  if (info.isArray && Array.isArray(value)) {
+                    if (info.displayKey) {
+                      value = value.map(item => item[info.displayKey]).join(', ');
+                    } else {
+                      value = value.join(', ');
+                    }
                   }
-                }
 
-                return (
-                  <View key={info.key}>
-                    {index > 0 && <View style={styles.divider} />}
-                    <View style={styles.additionalInfoRow}>
-                      <Text style={styles.additionalInfoLabel}>{info.label}</Text>
-                      <Text style={styles.additionalInfoValue}>{value}</Text>
+                  return (
+                    <View key={info.key}>
+                      {index > 0 && <View style={styles.divider} />}
+                      <View style={styles.additionalInfoRow}>
+                        <Text style={styles.additionalInfoLabel}>{info.label}</Text>
+                        <Text style={styles.additionalInfoValue}>{value}</Text>
+                      </View>
                     </View>
-                  </View>
-                );
-              })}
-            </View>
-          </Animated.View>
-        )}
+                  );
+                })}
+              </View>
+            </Animated.View>
+          );
+        })()}
 
         {/* Menu Items */}
         <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>

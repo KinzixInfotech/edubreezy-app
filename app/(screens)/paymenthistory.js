@@ -138,7 +138,7 @@ export default function PaymentHistoryScreen() {
         setSelectedReceipt(payment);
         // setReceiptModalVisible(true);
         console.log(selectedReceipt.receiptUrl);
-        
+
         await WebBrowser.openBrowserAsync(selectedReceipt.receiptUrl);
 
     };
@@ -318,7 +318,6 @@ Thank you for your payment!
                                 </LinearGradient>
                             </View>
                         </Animated.View>
-
                         {/* Last Payment Card */}
                         {summary.lastPayment && (
                             <Animated.View entering={FadeInDown.delay(300)}>
@@ -338,7 +337,6 @@ Thank you for your payment!
                                 </View>
                             </Animated.View>
                         )}
-
                         {/* Payments List */}
                         <Animated.View entering={FadeInDown.delay(400)}>
                             <View style={styles.sectionHeader}>

@@ -309,6 +309,8 @@ export default function LoginScreen() {
         setErrors({});
 
         try {
+            console.log('Parent auth called');
+
             const validated = LoginSchema.parse({ email: email.trim(), password });
             setLoading(true);
 
@@ -316,6 +318,8 @@ export default function LoginScreen() {
                 email,
                 password,
             });
+
+            console.log(data, error, 'supabase');
 
             if (error || !data.user) {
                 setErrors('Authorization Failed');
@@ -334,7 +338,7 @@ export default function LoginScreen() {
 
             await SecureStore.setItemAsync("user", JSON.stringify(user));
             await SecureStore.setItemAsync("userRole", JSON.stringify(user?.role?.name));
-            
+
             router.replace('/(screens)/greeting');
         } catch (err) {
             // error handling same as before

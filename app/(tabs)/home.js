@@ -80,12 +80,6 @@ export default function HomeScreen() {
             setLoading(false);
         }
     };
-
-
-    // useEffect((
-    //     router.push('/homework/index')
-    // ),[])
-    // Fetch Teacher Data 
     const { data: teacher, isLoading } = useQuery({
         queryKey: ["teacher-profile", userId, schoolId],
         queryFn: async () => {
@@ -97,22 +91,6 @@ export default function HomeScreen() {
         enabled: user_acc?.role?.name === "TEACHING_STAFF" && !!schoolId,
         staleTime: 1000 * 60 * 2,
     });
-
-
-    // Fetch notifications for badge count
-    // const { data: notificationData } = useQuery({
-    //     queryKey: QUERY_KEYS.notifications(userId),
-    //     queryFn: async () => {
-    //         const res = await api.get(`/notifications/${userId}`);
-    //         return res.data;
-    //     },
-    //     enabled: Boolean(userId),
-    //     staleTime: 1000 * 60 * 2,
-    //     select: (data) => ({
-    //         unreadCount: data?.notifications?.filter(n => !n.read).length || 0
-    //     })
-    // });
-    // Add this query in your ParentView component, near the other queries
     const { data: upcomingEventsData, isLoading: eventsLoading } = useQuery({
         queryKey: ['upcomingEvents', schoolId],
         queryFn: async () => {
@@ -1111,12 +1089,175 @@ export default function HomeScreen() {
             time: new Date(n.createdAt).toLocaleString(), // or format like "2 hours ago"
             unread: !n.read,
         })) || [];
+
+        // Fetch homework for selected child (for badge count)
+        const { data: homeworkData } = useQuery({
+            queryKey: ['parent-homework-badge', schoolId, selectedChild?.studentId],
+            queryFn: async () => {
+                if (!schoolId || !selectedChild?.studentId) return { homework: [], lastViewed: null };
+                const res = await api.get(`/schools/homework?schoolId=${schoolId}&studentId=${selectedChild.studentId}`);
+                // Get last viewed timestamp for this child
+                const lastViewedKey = `homework_last_viewed_${selectedChild.studentId}`;
+                const lastViewed = await SecureStore.getItemAsync(lastViewedKey);
+                return { ...res.data, lastViewed };
+            },
+            enabled: !!schoolId && !!selectedChild?.studentId,
+            staleTime: 1000 * 60 * 2,
+        });
+
+        // Fetch attendance stats for selected child (for dashboard card)
+        const { data: attendanceStats, isFetching: isAttendanceFetching } = useQuery({
+            queryKey: ['parent-child-attendance', schoolId, selectedChild?.studentId],
+            queryFn: async () => {
+                if (!schoolId || !selectedChild?.studentId) return null;
+                const now = new Date();
+                const month = now.getMonth() + 1;
+                const year = now.getFullYear();
+                const res = await api.get(`/schools/${schoolId}/attendance/stats?userId=${selectedChild.studentId}&month=${month}&year=${year}`);
+                return res.data;
+            },
+            enabled: !!schoolId && !!selectedChild?.studentId,
+            staleTime: 1000 * 60 * 5,
+        });
+
+        // Fetch fee status for selected child (for dashboard card)
+        const { data: academicYearData } = useQuery({
+            queryKey: ['academic-years-parent', schoolId],
+            queryFn: async () => {
+                const res = await api.get(`/schools/academic-years?schoolId=${schoolId}`);
+                return res.data?.find(y => y.isActive);
+            },
+            enabled: !!schoolId,
+            staleTime: 1000 * 60 * 10,
+        });
+
+        const { data: feeData } = useQuery({
+            queryKey: ['parent-child-fee', selectedChild?.studentId, academicYearData?.id],
+            queryFn: async () => {
+                if (!selectedChild?.studentId || !academicYearData?.id) return null;
+                const params = new URLSearchParams({ academicYearId: academicYearData.id });
+                const res = await api.get(`/schools/fee/students/${selectedChild.studentId}?${params}`);
+                return res.data;
+            },
+            enabled: !!selectedChild?.studentId && !!academicYearData?.id,
+            staleTime: 1000 * 60 * 5,
+        });
+
+        // Calculate dashboard card values (moved childPerformance after examBadgeData query below)
+        const childAttendance = attendanceStats?.monthlyStats?.attendancePercentage ?? '--';
+        // Fee status: show actual balance, or 'N/A' if no fee data, or 'Paid' if balance is 0
+        const childFeeStatus = feeData === undefined || feeData === null
+            ? 'N/A'
+            : feeData.balanceAmount > 0
+                ? `₹${Math.round(feeData.balanceAmount / 1000)}K Due`
+                : 'Paid';
+        const childFeePending = feeData?.balanceAmount || 0;
+
+        // Fetch upcoming events for parent
+        const { data: upcomingEvents } = useQuery({
+            queryKey: ['parent-upcoming-events', schoolId],
+            queryFn: async () => {
+                if (!schoolId) return [];
+                const res = await api.get(`/schools/${schoolId}/calendar/upcoming?limit=3`);
+                return res.data?.events || res.data || [];
+            },
+            enabled: !!schoolId,
+            staleTime: 1000 * 60 * 5,
+        });
+
+        // Get recent unread notice only (don't show if already read)
+        const recentNotice = notices?.find(n => n.unread) || null;
+        const nextEvent = upcomingEvents?.[0] || null;
+
+
+        // Count only new homework (created after last viewed, if exists)
+        const pendingHomework = (homeworkData?.homework || []).filter(hw => {
+            const isPending = !hw.mySubmission || hw.mySubmission.status === 'PENDING';
+            if (!isPending) return false;
+
+            // If user has viewed homework before, only count new ones
+            if (homeworkData?.lastViewed) {
+                const lastViewedDate = new Date(homeworkData.lastViewed);
+                const homeworkDate = new Date(hw.createdAt);
+                return homeworkDate > lastViewedDate;
+            }
+            return true; // No lastViewed = show all pending
+        }).length;
+
+        // Fetch exam results for selected child (for badge count)
+        const { data: examBadgeData, isFetching: isExamFetching } = useQuery({
+            queryKey: ['parent-exams-badge', schoolId, selectedChild?.studentId],
+            queryFn: async () => {
+                if (!schoolId || !selectedChild?.studentId) return { stats: { latestResultDate: null }, lastViewed: null };
+                const res = await api.get(`/schools/${schoolId}/examination/student-results?studentId=${selectedChild.studentId}`);
+                // Get last viewed timestamp for this child
+                const lastViewedKey = `exam_last_viewed_${selectedChild.studentId}`;
+                const lastViewed = await SecureStore.getItemAsync(lastViewedKey);
+                return { ...res.data, lastViewed };
+            },
+            enabled: !!schoolId && !!selectedChild?.studentId,
+            staleTime: 1000 * 60 * 2,
+        });
+
+        // Combined loading state for stats cards
+        const isStatsLoading = isAttendanceFetching || isExamFetching;
+
+        // Count new exam results (created after last viewed)
+        const newExamResults = (() => {
+            if (!examBadgeData?.lastViewed) {
+                // First time viewing - no badge, or show total results
+                return 0; // Don't show badge if never viewed
+            }
+            const lastViewedDate = new Date(examBadgeData.lastViewed);
+            const latestResultDate = examBadgeData.stats?.latestResultDate ? new Date(examBadgeData.stats.latestResultDate) : null;
+            if (latestResultDate && latestResultDate > lastViewedDate) {
+                // There are new results since last view
+                return (examBadgeData.results || []).filter(r => {
+                    const resultDate = new Date(r.examDate || r.createdAt);
+                    return resultDate > lastViewedDate;
+                }).length;
+            }
+            return 0;
+        })();
+
+        // Calculate performance using same formula as performance page (40% attendance + 60% exams)
+        const childPerformance = (() => {
+            let score = 0;
+            let weight = 0;
+
+            // Attendance component (40% weight)
+            const attendancePercent = attendanceStats?.monthlyStats?.attendancePercentage;
+            if (attendancePercent !== undefined && attendancePercent !== null) {
+                score += (attendancePercent || 0) * 0.4;
+                weight += 0.4;
+            }
+
+            // Exam component (60% weight)
+            const examPercent = examBadgeData?.stats?.avgPercentage;
+            if (examPercent !== undefined && examPercent !== null) {
+                score += (examPercent || 0) * 0.6;
+                weight += 0.6;
+            }
+
+            if (weight > 0) {
+                return `${Math.round(score / weight)}%`;
+            }
+            return '--';
+        })();
+
         // qucik access for parent
         const actionGroups = [
             {
                 title: 'Quick Actions',
                 actions: [
-                    { icon: TrendingUp, label: 'Performance', color: '#0469ff', bgColor: '#E3F2FD', href: "/payfees" },
+                    {
+                        icon: TrendingUp,
+                        label: 'Performance',
+                        color: '#0469ff',
+                        bgColor: '#E3F2FD',
+                        href: "/my-child/parent-performance",
+                        params: { childData: JSON.stringify(selectedChild) },
+                    },
                     {
                         icon: Calendar, label: 'Attendance', color: '#4ECDC4', bgColor: '#E0F7F4', href: "/my-child/attendance",
                         params: { childData: JSON.stringify(selectedChild) },
@@ -1136,12 +1277,53 @@ export default function HomeScreen() {
                         bgColor: '#F3E5F5',
                         href: "/syllabusview"
                     },
+                    {
+                        icon: Book,
+                        label: 'Homework',
+                        color: '#FF6B6B',
+                        bgColor: '#FFE9E9',
+                        href: '/my-child/parent-homework',
+                        params: { childData: JSON.stringify(selectedChild) },
+                        badge: pendingHomework > 0 ? pendingHomework : null,
+                    },
+                    {
+                        icon: FileText,
+                        label: 'Documents',
+                        color: '#8B5CF6',
+                        bgColor: '#F3E8FF',
+                        href: '/my-child/parent-documents',
+                        params: { childData: JSON.stringify(selectedChild) },
+                    },
+                    {
+                        icon: Calendar,
+                        label: 'Timetable',
+                        color: '#0EA5E9',
+                        bgColor: '#E0F2FE',
+                        href: '/my-child/parent-timetable',
+                        params: { childData: JSON.stringify(selectedChild) },
+                    },
+                    {
+                        icon: BookOpen,
+                        label: 'Library',
+                        color: '#6366F1',
+                        bgColor: '#EEF2FF',
+                        href: '/my-child/parent-library',
+                        params: { childData: JSON.stringify(selectedChild) },
+                    },
                 ],
             },
             {
                 title: 'Examination',
                 actions: [
-                    { icon: FileText, label: 'Report Card', color: '#FFD93D', bgColor: '#FFF9E0', href: "/payfees" },
+                    {
+                        icon: Award,
+                        label: 'Exam Results',
+                        color: '#FFD93D',
+                        bgColor: '#FFF9E0',
+                        href: '/my-child/parent-exams',
+                        params: { childData: JSON.stringify(selectedChild) },
+                        badge: newExamResults > 0 ? newExamResults : null,
+                    },
                     { icon: BookOpen, label: 'Assignments', color: '#FF9800', bgColor: '#FFF3E0', href: "/payfees" },
                 ],
             },
@@ -1189,7 +1371,9 @@ export default function HomeScreen() {
                 studentId: child.studentId,
                 name: child.name,
                 class: child.class,
+                classId: child.classId,
                 section: child.section,
+                sectionId: child.sectionId,
                 rollNo: child.rollNumber,
                 avatar: child.profilePicture,
                 attendance: Math.floor(Math.random() * 21) + 80,
@@ -1426,33 +1610,118 @@ export default function HomeScreen() {
                     </ScrollView>
                 </Animated.View>
 
+                {/* Updates & Alerts Widget */}
+                {(pendingHomework > 0 || newExamResults > 0 || recentNotice || nextEvent) && (
+                    <Animated.View entering={FadeInDown.delay(250).duration(500)} style={styles.updatesWidget}>
+                        {pendingHomework > 0 && (
+                            <HapticTouchable
+                                style={styles.updateItem}
+                                onPress={() => router.push({ pathname: '/my-child/parent-homework', params: { childData: JSON.stringify(selectedChild) } })}
+                            >
+                                <View style={[styles.updateIconBg, { backgroundColor: '#E3F2FD' }]}>
+                                    <BookOpen size={14} color="#3B82F6" />
+                                </View>
+                                <Text style={styles.updateText} numberOfLines={1}>
+                                    {pendingHomework} new homework
+                                </Text>
+                                <ArrowRight size={14} color="#999" />
+                            </HapticTouchable>
+                        )}
+                        {newExamResults > 0 && (
+                            <HapticTouchable
+                                style={styles.updateItem}
+                                onPress={() => router.push({ pathname: '/my-child/parent-exams', params: { childData: JSON.stringify(selectedChild) } })}
+                            >
+                                <View style={[styles.updateIconBg, { backgroundColor: '#FEF3C7' }]}>
+                                    <Award size={14} color="#F59E0B" />
+                                </View>
+                                <Text style={styles.updateText} numberOfLines={1}>
+                                    {newExamResults} new exam result{newExamResults > 1 ? 's' : ''}
+                                </Text>
+                                <ArrowRight size={14} color="#999" />
+                            </HapticTouchable>
+                        )}
+                        {recentNotice && (
+                            <HapticTouchable
+                                style={styles.updateItem}
+                                onPress={() => router.push('/(screens)/NoticeDetail')}
+                            >
+                                <View style={[styles.updateIconBg, { backgroundColor: '#FFEBEE' }]}>
+                                    <Bell size={14} color="#EF4444" />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.updateText} numberOfLines={1}>
+                                        🔴 {recentNotice.title}
+                                    </Text>
+                                    <Text style={styles.updateTime}>{recentNotice.time}</Text>
+                                </View>
+                                <ArrowRight size={14} color="#999" />
+                            </HapticTouchable>
+                        )}
+                        {nextEvent && (
+                            <HapticTouchable
+                                style={styles.updateItem}
+                                onPress={() => router.push('/(screens)/SchoolCalendar')}
+                            >
+                                <View style={[styles.updateIconBg, { backgroundColor: '#E8F5E9' }]}>
+                                    <Calendar size={14} color="#4CAF50" />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.updateText} numberOfLines={1}>
+                                        📅 {nextEvent.title || nextEvent.name}
+                                    </Text>
+                                    <Text style={styles.updateTime}>
+                                        {nextEvent.date ? new Date(nextEvent.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''}
+                                    </Text>
+                                </View>
+                                <ArrowRight size={14} color="#999" />
+                            </HapticTouchable>
+                        )}
+                    </Animated.View>
+                )}
+
                 {/* Quick Stats for Selected Child */}
                 <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.section}>
-                    <View style={styles.statsGrid}>
-                        <LinearGradient colors={['#4ECDC4', '#44A08D']} style={styles.statCard}>
-                            <View style={styles.statIcon}>
-                                <Clock size={24} color="#fff" />
-                            </View>
-                            <Text style={styles.statValue}>{selectedChild?.attendance}%</Text>
-                            <Text style={styles.statLabel}>Attendance</Text>
-                        </LinearGradient>
+                    {isStatsLoading ? (
+                        <View style={styles.statsLoadingContainer}>
+                            <ActivityIndicator size="small" color="#0469ff" />
+                            <Text style={styles.statsLoadingText}>Updating stats...</Text>
+                        </View>
+                    ) : (
+                        <View style={styles.statsGrid}>
+                            <HapticTouchable style={{ flex: 1 }} onPress={() => router.push({ pathname: '/my-child/attendance', params: { childData: JSON.stringify(selectedChild) } })}>
+                                <LinearGradient colors={['#4ECDC4', '#2FB8A8']} style={styles.statCard}>
+                                    <View style={styles.statIconBg}>
+                                        <CheckCircle2 size={20} color="#fff" />
+                                    </View>
+                                    <Text style={styles.statValue}>
+                                        {typeof childAttendance === 'number' ? `${Math.round(childAttendance)}%` : childAttendance}
+                                    </Text>
+                                    <Text style={styles.statLabel}>Attendance</Text>
+                                </LinearGradient>
+                            </HapticTouchable>
 
-                        <LinearGradient colors={['#FFD93D', '#F6C90E']} style={styles.statCard}>
-                            <View style={styles.statIcon}>
-                                <Award size={24} color="#fff" />
-                            </View>
-                            <Text style={styles.statValue}>{selectedChild?.performance}</Text>
-                            <Text style={styles.statLabel}>Performance</Text>
-                        </LinearGradient>
+                            <HapticTouchable style={{ flex: 1 }} onPress={() => router.push({ pathname: '/my-child/parent-exams', params: { childData: JSON.stringify(selectedChild) } })}>
+                                <LinearGradient colors={['#FFB020', '#F59E0B']} style={styles.statCard}>
+                                    <View style={styles.statIconBg}>
+                                        <TrendingUp size={20} color="#fff" />
+                                    </View>
+                                    <Text style={styles.statValue}>{childPerformance}</Text>
+                                    <Text style={styles.statLabel}>Performance</Text>
+                                </LinearGradient>
+                            </HapticTouchable>
 
-                        <LinearGradient colors={selectedChild?.pendingFee > 0 ? ['#FF6B6B', '#EE5A6F'] : ['#51CF66', '#37B24D']} style={styles.statCard}>
-                            <View style={styles.statIcon}>
-                                <DollarSign size={24} color="#fff" />
-                            </View>
-                            <Text style={styles.statValue}>{selectedChild?.feeStatus}</Text>
-                            <Text style={styles.statLabel}>Fee Status</Text>
-                        </LinearGradient>
-                    </View>
+                            <HapticTouchable style={{ flex: 1 }} onPress={() => router.push({ pathname: '/(screens)/payfees', params: { childData: JSON.stringify(selectedChild) } })}>
+                                <LinearGradient colors={childFeePending > 0 ? ['#FF6B6B', '#EE5A6F'] : ['#51CF66', '#37B24D']} style={styles.statCard}>
+                                    <View style={styles.statIconBg}>
+                                        <DollarSign size={20} color="#fff" />
+                                    </View>
+                                    <Text style={styles.statValue}>{childFeeStatus}</Text>
+                                    <Text style={styles.statLabel}>Fee Status</Text>
+                                </LinearGradient>
+                            </HapticTouchable>
+                        </View>
+                    )}
                 </Animated.View>
                 {/* Quick Actions */}
                 {actionGroups && actionGroups.map((group, groupIndex) => (
@@ -1480,9 +1749,15 @@ export default function HomeScreen() {
                                             }
                                         }}
                                     >
-                                        <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}>
+                                        <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}
+                                        >
                                             <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
                                                 <action.icon size={22} color={action.color} />
+                                                {action.badge && (
+                                                    <View style={styles.badgeContainer}>
+                                                        <Text style={styles.badgeText}>{action.badge > 99 ? '99+' : action.badge}</Text>
+                                                    </View>
+                                                )}
                                             </View>
                                             <Text style={styles.actionLabel} numberOfLines={1}>
                                                 {action.label}
@@ -2027,15 +2302,68 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '700',
     },
+    updatesWidget: {
+        backgroundColor: '#fff',
+        borderRadius: 16,
+        marginHorizontal: 16,
+        marginTop: 12,
+        marginBottom: 8,
+        padding: 10,
+        borderWidth: 1,
+        borderColor: '#f0f0f0',
+        gap: 6,
+    },
+    updateItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 8,
+        paddingHorizontal: 10,
+        backgroundColor: '#fafafa',
+        borderRadius: 10,
+        gap: 10,
+    },
+    updateIconBg: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    updateText: {
+        fontSize: 13,
+        color: '#333',
+        fontWeight: '500',
+    },
+    updateTime: {
+        fontSize: 11,
+        color: '#888',
+        marginTop: 2,
+    },
+    statsLoadingContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 10,
+        paddingVertical: 40,
+        backgroundColor: '#f8f9fa',
+        borderRadius: 16,
+    },
+    statsLoadingText: {
+        fontSize: 13,
+        color: '#666',
+        fontWeight: '500',
+    },
     statsGrid: {
         flexDirection: 'row',
-        gap: 12,
+        gap: 10,
     },
     statCard: {
         flex: 1,
-        padding: 16,
+        padding: 14,
         borderRadius: 16,
         alignItems: 'center',
+        minHeight: 110,
+        justifyContent: 'center',
     },
     statIcon: {
         width: 48,
@@ -2046,16 +2374,26 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: 12,
     },
+    statIconBg: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: 'rgba(255,255,255,0.25)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 8,
+    },
     statValue: {
-        fontSize: 18,
+        fontSize: 16,
         fontWeight: '700',
         color: '#fff',
-        marginBottom: 4,
+        marginBottom: 2,
+        textAlign: 'center',
     },
     statLabel: {
-        fontSize: 12,
+        fontSize: 11,
         color: 'rgba(255,255,255,0.9)',
-        fontWeight: '500',
+        fontWeight: '600',
     },
     actionsGrid: {
         flexDirection: 'row',

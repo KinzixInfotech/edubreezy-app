@@ -1,10 +1,12 @@
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Modal, Dimensions, TouchableWithoutFeedback } from 'react-native';
-import { router } from 'expo-router';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Modal, Dimensions, TouchableWithoutFeedback, Animated as RNAnimated, RefreshControl, Linking, Alert } from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
 import { Settings, Edit, LogOut, Mail, Phone, Calendar, MapPin, Award, BookOpen, School, X, Users, ClipboardList, FileText, Bell, Shield } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../components/HapticTouch';
 import { useCallback, useEffect, useState } from 'react';
+import fetchUser from '../../lib/queries/user';
+import { supabase } from '../../lib/supabase';
 import Animated, { FadeInDown, FadeInUp, FadeInRight } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
 
@@ -162,6 +164,7 @@ const PROFILE_CONFIG = {
       emergencyContactName: 'parentData.emergencyContactName',
       emergencyContactNumber: 'parentData.emergencyContactNumber',
     },
+    childrenSection: true, // Show linked children section
     stats: [], // Stats will be fetched dynamically if needed
     contactInfo: [
       { key: 'email', label: 'Email', icon: Mail, color: '#0469ff', dataPath: 'parentData.email' },
@@ -179,8 +182,9 @@ const PROFILE_CONFIG = {
     ],
     menuItems: [
       { id: 1, label: 'View Children', icon: Users, route: '/(tabs)/home', color: '#ec4899' },
-      { id: 2, label: 'Notifications', icon: Bell, route: '/(tabs)/notifications', color: '#f59e0b' },
-      { id: 3, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#06b6d4' },
+      { id: 2, label: 'School Profile', icon: School, action: 'viewSchoolProfile', color: '#8b5cf6' },
+      { id: 3, label: 'Notifications', icon: Bell, route: '/(tabs)/notifications', color: '#f59e0b' },
+      { id: 4, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#06b6d4' },
     ],
   },
 
@@ -256,7 +260,11 @@ export default function ProfileScreen() {
   const [user, setUser] = useState(null);
   const [role, setRole] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const { schoolConfig: schoolConfigParam } = useLocalSearchParams();
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [fadeAnim] = useState(new RNAnimated.Value(0));
   const getInitials = useCallback((name) => {
     if (!name) return '';
     const parts = name.trim().split(' ');
@@ -274,6 +282,9 @@ export default function ProfileScreen() {
         if (stored) {
           setUser(JSON.parse(stored));
           setRole(savedRole || 'STUDENT');
+        } else {
+          // Initial fetch if no stored data
+          handleRefresh();
         }
       } finally {
         setLoading(false);
@@ -281,10 +292,64 @@ export default function ProfileScreen() {
     })();
   }, []);
 
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        const userData = await fetchUser(session.user.id, session.access_token);
+        if (userData) {
+          setUser(userData);
+          await SecureStore.setItemAsync('user', JSON.stringify(userData));
+          // Role might also change/update
+          if (userData.role?.name) {
+            setRole(userData.role.name);
+            await SecureStore.setItemAsync('userRole', userData.role.name);
+          }
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
+      }
+    } catch (error) {
+      console.error("Refresh failed:", error);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleMenuPress = async (item) => {
+    if (item.action === 'viewSchoolProfile') {
+      if (user?.schoolId) {
+        // Construct URL - update base URL as per your environment
+        const url = `https://school.edubreezy.com/explore/schools/${user.schoolId}?ref=com.kinzix.edubreezy`;
+        try {
+          const supported = await Linking.canOpenURL(url);
+          if (supported) {
+            await Linking.openURL(url);
+          } else {
+            Alert.alert("Error", "Cannot open school profile URL.");
+          }
+        } catch (err) {
+          console.error("Link error:", err);
+          Alert.alert("Error", "Failed to open link.");
+        }
+      } else {
+        Alert.alert("Info", "School information is missing.");
+      }
+    } else if (item.route) {
+      router.push(item.route);
+    }
+  };
+
   const handleLogout = async () => {
-    await SecureStore.deleteItemAsync('user');
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-    router.replace('/(auth)/login');
+    setIsLoggingOut(true);
+
+    // Simulate logging out process
+    setTimeout(async () => {
+      await SecureStore.deleteItemAsync('user');
+      await SecureStore.deleteItemAsync('userRole');
+      router.replace('/(auth)/login');
+    }, 2000);
   };
 
   const openImageViewer = () => {
@@ -324,7 +389,14 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#0469ff" />
+        }
+      >
         {/* Profile Header */}
         <Animated.View entering={FadeInUp.duration(600)} style={styles.profileHeader}>
           <HapticTouchable onPress={openImageViewer}>
@@ -436,6 +508,44 @@ export default function ProfileScreen() {
           );
         })()}
 
+        {/* Linked Children Section */}
+        {config.childrenSection && user?.parentData?.studentLinks?.length > 0 && (
+          <Animated.View entering={FadeInDown.delay(480).duration(600)} style={styles.section}>
+            <Text style={styles.sectionTitle}>My Children</Text>
+            <View style={styles.menuContainer}>
+              {user.parentData.studentLinks.map((link, index) => (
+                <View
+                  key={link.id}
+                  style={[
+                    styles.menuItem,
+                    index === user.parentData.studentLinks.length - 1 && styles.lastMenuItem
+                  ]}
+                >
+                  <View style={styles.avatarContainer}>
+                    <Image
+                      source={{ uri: link.student?.user?.profilePicture || 'https://via.placeholder.com/100' }}
+                      style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#eee' }}
+                    />
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={{ fontSize: 16, fontWeight: '600', color: '#111' }}>
+                      {link.student?.name || 'Loading...'}
+                    </Text>
+                    <Text style={{ fontSize: 13, color: '#666' }}>
+                      {link.student?.class ? `Class ${link.student.class.className} - ${link.student.section?.name} • ` : ''}{link.relation}
+                    </Text>
+                  </View>
+                  <View style={{ backgroundColor: '#E0F2FE', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#0284C7' }}>
+                      {link.student?.admissionNo || 'ID'}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </Animated.View>
+        )}
+
         {/* Menu Items */}
         <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
@@ -445,7 +555,7 @@ export default function ProfileScreen() {
                 key={item.id}
                 entering={FadeInRight.delay(600 + index * 80).duration(500)}
               >
-                <HapticTouchable onPress={() => router.push(item.route)}>
+                <HapticTouchable onPress={() => handleMenuPress(item)}>
                   <View style={[
                     styles.menuItem,
                     index === config.menuItems.length - 1 && styles.lastMenuItem
@@ -508,6 +618,20 @@ export default function ProfileScreen() {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
+      {/* Logout Modal */}
+      <Modal
+        visible={isLoggingOut}
+        transparent={true}
+        animationType="fade"
+      >
+        <View style={styles.logoutModalOverlay}>
+          <View style={styles.logoutContent}>
+            <ActivityIndicator size="large" color="#ffffff" />
+            <Text style={styles.logoutText}>Logging Out...</Text>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -525,8 +649,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   content: {
-    flex: 1,
     padding: 16,
+    paddingBottom: 100,
   },
   profileHeader: {
     alignItems: 'center',
@@ -766,6 +890,26 @@ const styles = StyleSheet.create({
   overlayRole: {
     fontSize: 16,
     color: '#fff',
+    color: '#fff',
     opacity: 0.9,
+  },
+
+  // Logout Modal Styles
+  logoutModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  logoutContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+  },
+  logoutText: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '600',
+    marginTop: 12,
   },
 });

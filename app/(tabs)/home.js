@@ -717,13 +717,20 @@ export default function HomeScreen() {
                         bgColor: '#F3E5F5',
                         href: "/syllabusview"
                     },
+                    {
+                        icon: BookOpen,
+                        label: 'Library',
+                        color: '#10b981',
+                        bgColor: '#dcfce7',
+                        href: "/teachers/teacher-library"
+                    },
                 ],
             },
             {
                 title: 'Examination',
                 actions: [
                     { icon: FileText, label: 'Report Card', color: '#FFD93D', bgColor: '#FFF9E0', href: "/payfees" },
-                    { icon: BookOpen, label: 'Assignments', color: '#FF9800', bgColor: '#FFF3E0', href: "/payfees" },
+                    // { icon: BookOpen, label: 'Assignments', color: '#FF9800', bgColor: '#FFF3E0', href: "/payfees" },
                 ],
             },
         ];
@@ -1262,8 +1269,7 @@ export default function HomeScreen() {
                         icon: Calendar, label: 'Attendance', color: '#4ECDC4', bgColor: '#E0F7F4', href: "/my-child/attendance",
                         params: { childData: JSON.stringify(selectedChild) },
                     },
-
-                    { icon: MessageCircle, label: 'Messages', color: '#9C27B0', bgColor: '#F3E5F5', href: "/payfees" }, {
+                    {
                         icon: Calendar,
                         label: 'School Calendar',
                         color: '#4CAF50',     // green icon
@@ -1361,7 +1367,6 @@ export default function HomeScreen() {
                 return res.data;
             },
             enabled: Boolean(schoolId && parentId),
-            placeholderData: { parent: null, children: [] },
             staleTime: 1000 * 60,
         });
 
@@ -1778,25 +1783,33 @@ export default function HomeScreen() {
                         </HapticTouchable>
                     </View>
                     <View style={styles.eventsContainer}>
-                        {upcomingEvents.map((event, index) => (
-                            <Animated.View key={event.id} entering={FadeInRight.delay(700 + index * 100).duration(500)}>
-                                <HapticTouchable onPress={() => router.push(`/(screens)/calendarscreen?eventid=${event.id}`)}>
-                                    <View style={styles.eventCard}>
-                                        <View style={[styles.eventIcon, { backgroundColor: event.color + '20' }]}>
-                                            <Text style={styles.eventEmoji}>{event.icon}</Text>
-                                        </View>
-                                        <View style={styles.eventInfo}>
-                                            <Text style={styles.eventTitle}>{event.title}</Text>
-                                            <View style={styles.eventDate}>
-                                                <Calendar size={14} color="#666" />
-                                                <Text style={styles.eventDateText}>{event.date}</Text>
+                        {upcomingEvents && upcomingEvents.length > 0 ? (
+                            upcomingEvents.map((event, index) => (
+                                <Animated.View key={event.id} entering={FadeInRight.delay(700 + index * 100).duration(500)}>
+                                    <HapticTouchable onPress={() => router.push(`/(screens)/calendarscreen?eventid=${event.id}`)}>
+                                        <View style={styles.eventCard}>
+                                            <View style={[styles.eventIcon, { backgroundColor: event.color + '20' }]}>
+                                                <Text style={styles.eventEmoji}>{event.icon}</Text>
                                             </View>
+                                            <View style={styles.eventInfo}>
+                                                <Text style={styles.eventTitle}>{event.title}</Text>
+                                                <View style={styles.eventDate}>
+                                                    <Calendar size={14} color="#666" />
+                                                    <Text style={styles.eventDateText}>{event.date}</Text>
+                                                </View>
+                                            </View>
+                                            <ChevronRight size={20} color="#999" />
                                         </View>
-                                        <ChevronRight size={20} color="#999" />
-                                    </View>
-                                </HapticTouchable>
-                            </Animated.View>
-                        ))}
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))
+                        ) : (
+                            <View style={{ alignItems: 'center', padding: 20, backgroundColor: '#f9f9f9', borderRadius: 12 }}>
+                                <PartyPopperIcon size={40} color="#10b981" style={{ marginBottom: 8 }} />
+                                <Text style={{ color: '#666', fontSize: 14, fontWeight: '500' }}>You are all caught up!</Text>
+                                <Text style={{ color: '#999', fontSize: 12 }}>No upcoming events.</Text>
+                            </View>
+                        )}
                     </View>
                 </Animated.View>
 
@@ -1834,20 +1847,11 @@ export default function HomeScreen() {
                                 </Animated.View>
                             ))
                         ) : (
-                            <Animated.View
-                                entering={FadeInRight.delay(900).duration(500)}
-                                style={{
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    paddingVertical: 20,
-                                    opacity: 0.8,
-                                }}
-                            >
-                                <CheckCircle2 size={26} color="#0469ff" />
-                                <Text style={{ marginTop: 8, fontSize: 14, color: '#555' }}>
-                                    You’re all caught up!
-                                </Text>
-                            </Animated.View>
+                            <View style={{ alignItems: 'center', padding: 20, backgroundColor: '#f9f9f9', borderRadius: 12 }}>
+                                <PartyPopperIcon size={40} color="#10b981" style={{ marginBottom: 8 }} />
+                                <Text style={{ color: '#666', fontSize: 14, fontWeight: '500' }}>You are all caught up!</Text>
+                                <Text style={{ color: '#999', fontSize: 12 }}>No recent notices.</Text>
+                            </View>
                         )}
                     </View>
                 </Animated.View>

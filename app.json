@@ -54,7 +54,9 @@
       "expo-background-fetch",
       "expo-location",
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-router",
+      "expo-secure-store"
     ]
   }
 }

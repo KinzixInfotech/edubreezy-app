@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Switch, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Switch, Alert, Modal, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
 import {
     User, Lock, LogOut, Bell, Clock, FileText, DollarSign,
@@ -15,6 +15,7 @@ import { supabase } from '../../lib/supabase';
 export default function SettingsScreen() {
     const [notificationsEnabled, setNotificationsEnabled] = useState(true);
     const [darkMode, setDarkMode] = useState(false);
+    const [isLoggingOut, setIsLoggingOut] = useState(false);
 
     const handlePress = (item) => {
         if (item.action === 'logout') {
@@ -24,14 +25,22 @@ export default function SettingsScreen() {
                     text: 'Logout',
                     style: 'destructive',
                     onPress: async () => {
-                        try {
-                            await supabase.auth.signOut();
-                            await SecureStore.deleteItemAsync('user');
-                            router.replace('/(auth)/schoolcode');
-                        } catch (error) {
-                            console.log('Logout error:', error);
-                            Alert.alert('Error', 'Failed to logout. Please try again.');
-                        }
+                        setIsLoggingOut(true);
+                        // Simulate delay for better UX
+                        setTimeout(async () => {
+                            try {
+                                const { error } = await supabase.auth.signOut();
+                                if (error) throw error;
+
+                                await SecureStore.deleteItemAsync('user');
+                                await SecureStore.deleteItemAsync('userRole');
+                                router.replace('/(auth)/schoolcode'); // Or /login based on your flow
+                            } catch (error) {
+                                console.log('Logout error:', error);
+                                setIsLoggingOut(false);
+                                Alert.alert('Error', 'Failed to logout. Please try again.');
+                            }
+                        }, 2000);
                     },
                 },
             ]);
@@ -49,7 +58,7 @@ export default function SettingsScreen() {
     ];
 
     const schoolSettings = [
-    { id: '4', title: 'Attendance Settings', icon: Clock, color: '#10b981' },
+        { id: '4', title: 'Attendance Settings', icon: Clock, color: '#10b981' },
         { id: '5', title: 'Exam & Grading', icon: FileText, color: '#f59e0b' },
         { id: '6', title: 'Fee Management', icon: DollarSign, color: '#06b6d4' },
         { id: '7', title: 'Timetable', icon: Calendar, color: '#ec4899' },
@@ -201,6 +210,20 @@ export default function SettingsScreen() {
                 {/* Footer Space */}
                 <View style={{ height: 40 }} />
             </ScrollView>
+
+            {/* Logout Modal */}
+            <Modal
+                visible={isLoggingOut}
+                transparent={true}
+                animationType="fade"
+            >
+                <View style={styles.logoutModalOverlay}>
+                    <View style={styles.logoutContent}>
+                        <ActivityIndicator size="large" color="#ffffff" />
+                        <Text style={styles.logoutText}>Logging Out...</Text>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 }
@@ -302,5 +325,23 @@ const styles = StyleSheet.create({
     logo: {
         width: 60,
         height: 60,
+    },
+    // Logout Modal Styles
+    logoutModalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    logoutContent: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 16,
+    },
+    logoutText: {
+        color: '#ffffff',
+        fontSize: 18,
+        fontWeight: '600',
+        marginTop: 12,
     },
 });

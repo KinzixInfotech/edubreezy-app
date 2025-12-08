@@ -136,6 +136,7 @@ const PROFILE_CONFIG = {
     menuItems: [
       { id: 1, label: 'My Classes', icon: Users, route: '/my-classes', color: '#0469ff' },
       { id: 2, label: 'Mark Attendance', icon: Calendar, route: '/teacher/mark-attendance', color: '#10b981' },
+      { id: 8, label: 'Class Attendance', icon: ClipboardList, route: '/teachers/class-attendance', color: '#3B82F6' },
       { id: 3, label: 'Grade Submissions', icon: ClipboardList, route: '/grade-submissions', color: '#f59e0b' },
       { id: 4, label: 'My Schedule', icon: Calendar, route: '/schedule', color: '#8b5cf6' },
       { id: 5, label: 'Announcements', icon: Bell, route: '/announcements', color: '#ec4899' },

@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Dimensions, RefreshControl } from 'react-native';
 import { Link, router } from 'expo-router';
-import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings, Plus, CheckCircle2, TimerIcon, Book, CalendarDays, Umbrella, ChartPie, User, UserCheck, X, ArrowRight, Paperclip, PartyPopperIcon, ScrollText } from 'lucide-react-native';
+import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings, Plus, CheckCircle2, TimerIcon, Book, CalendarDays, Umbrella, ChartPie, User, UserCheck, X, ArrowRight, Paperclip, PartyPopperIcon, ScrollText, ClipboardList, Wallet } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../components/HapticTouch';
@@ -598,6 +598,43 @@ export default function HomeScreen() {
             unread: !n.read,
         })) || [];
 
+        // Get recent unread notice only (for updates widget)
+        const recentNotice = notices?.find(n => n.unread) || null;
+        const nextEvent = upcomingEvents?.[0] || null;
+
+        // Fetch attendance stats for teacher
+        const { data: attendanceStats, isFetching: isAttendanceFetching } = useQuery({
+            queryKey: ['teacher-attendance-stats', schoolId, userId],
+            queryFn: async () => {
+                if (!schoolId || !userId) return null;
+                const now = new Date();
+                const month = now.getMonth() + 1;
+                const year = now.getFullYear();
+                const res = await api.get(`/schools/${schoolId}/attendance/stats?userId=${userId}&month=${month}&year=${year}`);
+                return res.data;
+            },
+            enabled: !!schoolId && !!userId,
+            staleTime: 1000 * 60 * 5,
+        });
+
+        // Fetch leave balance for teacher
+        const { data: leaveData } = useQuery({
+            queryKey: ['teacher-leave-balance', schoolId, userId],
+            queryFn: async () => {
+                if (!schoolId || !userId) return null;
+                const res = await api.get(`/schools/${schoolId}/attendance/leaves/balance?userId=${userId}`);
+                return res.data;
+            },
+            enabled: !!schoolId && !!userId,
+            staleTime: 1000 * 60 * 10,
+        });
+
+        // Calculate stats for display
+        const totalDaysWorked = attendanceStats?.monthlyStats?.presentDays || 0;
+        const attendancePercent = attendanceStats?.monthlyStats?.attendancePercentage || 0;
+        const totalLeavesTaken = leaveData?.totalUsed || 0;
+
+
         // Handle delegation modal display
         // Handle delegation modal display
         useEffect(() => {
@@ -704,11 +741,11 @@ export default function HomeScreen() {
                         href: "/calendarscreen"
                     },
                     {
-                        icon: MessageCircle,
-                        label: 'View Student Attendance',
-                        color: '#9C27B0',
-                        bgColor: '#F3E5F5',
-                        href: "/payfees"
+                        icon: ClipboardList,
+                        label: 'Class Attendance',
+                        color: '#3B82F6',
+                        bgColor: '#DBEAFE',
+                        href: "/teachers/class-attendance"
                     },
                     {
                         icon: ScrollText,
@@ -724,13 +761,20 @@ export default function HomeScreen() {
                         bgColor: '#dcfce7',
                         href: "/teachers/teacher-library"
                     },
-                ],
-            },
-            {
-                title: 'Examination',
-                actions: [
-                    { icon: FileText, label: 'Report Card', color: '#FFD93D', bgColor: '#FFF9E0', href: "/payfees" },
-                    // { icon: BookOpen, label: 'Assignments', color: '#FF9800', bgColor: '#FFF3E0', href: "/payfees" },
+                    {
+                        icon: Award,
+                        label: 'Examination',
+                        color: '#F59E0B',
+                        bgColor: '#FEF3C7',
+                        href: "/teachers/exam-results"
+                    },
+                    {
+                        icon: Wallet,
+                        label: 'My Payroll',
+                        color: '#059669',
+                        bgColor: '#D1FAE5',
+                        href: "/teachers/my-payroll"
+                    },
                 ],
             },
         ];
@@ -843,33 +887,88 @@ export default function HomeScreen() {
                     </Animated.View>
                 )}
 
-                {/* Quick Stats for teacher */}
+                {/* Updates Widget - Shows when there are updates */}
+                {(recentNotice || nextEvent) && (
+                    <Animated.View entering={FadeInDown.delay(250).duration(500)} style={styles.updatesWidget}>
+                        {recentNotice && (
+                            <HapticTouchable
+                                style={styles.updateItem}
+                                onPress={() => router.push('/(tabs)/noticeboard')}
+                            >
+                                <View style={[styles.updateIconBg, { backgroundColor: '#FFEBEE' }]}>
+                                    <Bell size={14} color="#EF4444" />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.updateText} numberOfLines={1}>
+                                        🔴 {recentNotice.title}
+                                    </Text>
+                                    <Text style={styles.updateTime}>{recentNotice.time}</Text>
+                                </View>
+                                <ArrowRight size={14} color="#999" />
+                            </HapticTouchable>
+                        )}
+                        {nextEvent && (
+                            <HapticTouchable
+                                style={styles.updateItem}
+                                onPress={() => router.push('/(screens)/calendarscreen')}
+                            >
+                                <View style={[styles.updateIconBg, { backgroundColor: '#E8F5E9' }]}>
+                                    <Calendar size={14} color="#4CAF50" />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.updateText} numberOfLines={1}>
+                                        📅 {nextEvent.title}
+                                    </Text>
+                                    <Text style={styles.updateTime}>
+                                        {nextEvent.date}
+                                    </Text>
+                                </View>
+                                <ArrowRight size={14} color="#999" />
+                            </HapticTouchable>
+                        )}
+                    </Animated.View>
+                )}
+
+                {/* Quick Stats for teacher - Dynamic */}
                 <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.section}>
-                    <View style={styles.statsGrid}>
-                        <LinearGradient colors={['#4ECDC4', '#44A08D']} style={styles.statCard}>
-                            <View style={styles.statIcon}>
-                                <CalendarDays size={24} color="#fff" />
-                            </View>
-                            <Text style={styles.statValue}>520</Text>
-                            <Text style={styles.statLabel}>School Days</Text>
-                        </LinearGradient>
+                    {isAttendanceFetching ? (
+                        <View style={styles.statsLoadingContainer}>
+                            <ActivityIndicator size="small" color="#0469ff" />
+                            <Text style={styles.statsLoadingText}>Updating stats...</Text>
+                        </View>
+                    ) : (
+                        <View style={styles.statsGrid}>
+                            <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/teachers/stats-calendar')}>
+                                <LinearGradient colors={['#4ECDC4', '#44A08D']} style={styles.statCard}>
+                                    <View style={styles.statIcon}>
+                                        <CalendarDays size={24} color="#fff" />
+                                    </View>
+                                    <Text style={styles.statValue}>{totalDaysWorked}</Text>
+                                    <Text style={styles.statLabel}>Days Present</Text>
+                                </LinearGradient>
+                            </HapticTouchable>
 
-                        <LinearGradient colors={['#FFD93D', '#F6C90E']} style={styles.statCard}>
-                            <View style={styles.statIcon}>
-                                <Award size={24} color="#fff" />
-                            </View>
-                            <Text style={styles.statValue}>05</Text>
-                            <Text style={styles.statLabel}>Total Years</Text>
-                        </LinearGradient>
+                            <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/teachers/stats-calendar')}>
+                                <LinearGradient colors={['#FFD93D', '#F6C90E']} style={styles.statCard}>
+                                    <View style={styles.statIcon}>
+                                        <Award size={24} color="#fff" />
+                                    </View>
+                                    <Text style={styles.statValue}>{Math.round(attendancePercent)}%</Text>
+                                    <Text style={styles.statLabel}>Attendance</Text>
+                                </LinearGradient>
+                            </HapticTouchable>
 
-                        <LinearGradient colors={['#FF6B6B', '#EE5A6F']} style={styles.statCard}>
-                            <View style={styles.statIcon}>
-                                <Umbrella size={24} color="#fff" />
-                            </View>
-                            <Text style={styles.statValue}>25</Text>
-                            <Text style={styles.statLabel}>Leaves Only</Text>
-                        </LinearGradient>
-                    </View>
+                            <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/teachers/stats-calendar')}>
+                                <LinearGradient colors={['#FF6B6B', '#EE5A6F']} style={styles.statCard}>
+                                    <View style={styles.statIcon}>
+                                        <Umbrella size={24} color="#fff" />
+                                    </View>
+                                    <Text style={styles.statValue}>{totalLeavesTaken}</Text>
+                                    <Text style={styles.statLabel}>Leaves Taken</Text>
+                                </LinearGradient>
+                            </HapticTouchable>
+                        </View>
+                    )}
                 </Animated.View>
 
                 {/* Quick Actions */}
@@ -917,30 +1016,47 @@ export default function HomeScreen() {
                 <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
                     <View style={styles.sectionHeader}>
                         <Text style={styles.sectionTitle}>Upcoming Events</Text>
-                        <HapticTouchable>
+                        <HapticTouchable onPress={() => router.push('/(screens)/calendarscreen')}>
                             <Text style={styles.seeAll}>See All</Text>
                         </HapticTouchable>
                     </View>
                     <View style={styles.eventsContainer}>
-                        {upcomingEvents.map((event, index) => (
-                            <Animated.View key={event.id} entering={FadeInRight.delay(700 + index * 100).duration(500)}>
-                                <HapticTouchable onPress={() => router.push(`/(screens)/calendarscreen?eventid=${event.id}`)}>
-                                    <View style={styles.eventCard}>
-                                        <View style={[styles.eventIcon, { backgroundColor: event.color + '20' }]}>
-                                            <Text style={styles.eventEmoji}>{event.icon}</Text>
-                                        </View>
-                                        <View style={styles.eventInfo}>
-                                            <Text style={styles.eventTitle}>{event.title}</Text>
-                                            <View style={styles.eventDate}>
-                                                <Calendar size={14} color="#666" />
-                                                <Text style={styles.eventDateText}>{event.date}</Text>
+                        {upcomingEvents && upcomingEvents.length > 0 ? (
+                            upcomingEvents.map((event, index) => (
+                                <Animated.View key={event.id} entering={FadeInRight.delay(700 + index * 100).duration(500)}>
+                                    <HapticTouchable onPress={() => router.push(`/(screens)/calendarscreen?eventid=${event.id}`)}>
+                                        <View style={styles.eventCard}>
+                                            <View style={[styles.eventIcon, { backgroundColor: event.color + '20' }]}>
+                                                <Text style={styles.eventEmoji}>{event.icon}</Text>
                                             </View>
+                                            <View style={styles.eventInfo}>
+                                                <Text style={styles.eventTitle}>{event.title}</Text>
+                                                <View style={styles.eventDate}>
+                                                    <Calendar size={14} color="#666" />
+                                                    <Text style={styles.eventDateText}>{event.date}</Text>
+                                                </View>
+                                            </View>
+                                            <ChevronRight size={20} color="#999" />
                                         </View>
-                                        <ChevronRight size={20} color="#999" />
-                                    </View>
-                                </HapticTouchable>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))
+                        ) : (
+                            <Animated.View
+                                entering={FadeInRight.delay(700).duration(500)}
+                                style={{
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    paddingVertical: 20,
+                                    opacity: 0.8,
+                                }}
+                            >
+                                <CheckCircle2 size={26} color="#0469ff" />
+                                <Text style={{ marginTop: 8, fontSize: 14, color: '#555' }}>
+                                    You're all caught up!
+                                </Text>
                             </Animated.View>
-                        ))}
+                        )}
                     </View>
                 </Animated.View>
 
@@ -1838,6 +1954,7 @@ export default function HomeScreen() {
                                                     <Text style={[styles.noticeTitle, notice.unread && styles.unreadTitle]}>
                                                         {notice.title}
                                                     </Text>
+
                                                     <Text style={styles.noticeTime}>{notice.time}</Text>
                                                 </View>
                                             </View>

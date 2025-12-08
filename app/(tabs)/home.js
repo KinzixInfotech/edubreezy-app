@@ -210,12 +210,14 @@ export default function HomeScreen() {
 
         const placeholders = {
             student: {
-                '{name}': user_acc?.studentdatafull?.name || '',
+                '{name}': user_acc?.studentdatafull?.name || user_acc?.studentData?.name || user_acc?.name || 'Student',
                 '{role.name}': user_acc?.role?.name || '',
                 '{school.name}': user_acc?.school?.name || '',
-                '{department}': user_acc?.department || 'N/A',
-                '{child.class}': user_acc?.classs?.className || 'N/A',
-                '{child.section}': user_acc?.section?.name || 'N/A',
+                '{department}': user_acc?.department || '',
+                '{child.class}': user_acc?.class?.className || user_acc?.classs?.className || '',
+                '{child.section}': user_acc?.section?.name || '',
+                '{admissionNo}': user_acc?.studentdatafull?.admissionNo || user_acc?.studentData?.admissionNo || '',
+                '{classSection}': `Class ${user_acc?.class?.className || user_acc?.classs?.className || ''}${user_acc?.section?.name ? ' - ' + user_acc.section.name : ''}`,
             },
             teaching_staff: {
                 '{name}': user_acc?.name || '',
@@ -365,137 +367,290 @@ export default function HomeScreen() {
     };
 
     // === STUDENT VIEW ===
-    const StudentView = ({ refreshing, onRefresh }) => (
-        <ScrollView
-            style={styles.content}
-            showsVerticalScrollIndicator={false}
-            refreshControl={
-                <RefreshControl
-                    refreshing={refreshing}
-                    onRefresh={onRefresh}
-                    tintColor="#0469ff"
-                    colors={['#0469ff']}
-                />
-            }
-        >
-            {todaysEvents.length > 0 && (
-                <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                            <Text style={styles.sectionTitle}>Today's Events</Text>
-                            <View style={styles.todayBadge}>
-                                <Text style={styles.todayBadgeText}>NOW</Text>
+    const StudentView = ({ refreshing, onRefresh }) => {
+        // Fetch notices for student
+        const { data: recentNotices } = useQuery({
+            queryKey: ['student-notices', schoolId, userId],
+            queryFn: async () => {
+                if (!schoolId || !userId) return { notices: [] };
+                const res = await api.get(`/notices/${schoolId}?userId=${userId}&limit=4&page=1`);
+                return res.data;
+            },
+            enabled: !!schoolId && !!userId,
+            staleTime: 1000 * 60 * 2,
+        });
+
+        const notices = recentNotices?.notices?.map((n) => ({
+            id: n.id,
+            title: n.title,
+            time: new Date(n.createdAt).toLocaleString(),
+            unread: !n.read,
+        })) || [];
+
+        // Quick access actions for student
+        const actionGroups = [
+            {
+                title: 'Quick Actions',
+                actions: [
+                    { icon: Clock, label: 'My Timetable', color: '#8B5CF6', bgColor: '#EDE9FE', href: '/student/timetable' },
+                    { icon: Calendar, label: 'My Attendance', color: '#10B981', bgColor: '#D1FAE5', href: '/student/attendance' },
+                    { icon: BookOpen, label: 'Homework', color: '#0469ff', bgColor: '#DBEAFE', href: '/homework/view' },
+                    { icon: Book, label: 'Library', color: '#F59E0B', bgColor: '#FEF3C7', href: '/student/library' },
+                    { icon: Award, label: 'Exam Results', color: '#EF4444', bgColor: '#FEE2E2', href: '/student/exam-results' },
+                    { icon: FileText, label: 'Certificates', color: '#06B6D4', bgColor: '#CFFAFE', href: '/student/certificates' },
+                    { icon: ScrollText, label: 'Syllabus', color: '#9C27B0', bgColor: '#F3E5F5', href: '/syllabusview' },
+                    { icon: Calendar, label: 'Calendar', color: '#4CAF50', bgColor: '#E8F5E9', href: '/calendarscreen' },
+                ],
+            },
+        ];
+
+        // Get recent unread notice only (for updates widget)
+        const recentNotice = upcomingEvents?.[0] || null;
+        const nextEvent = upcomingEvents?.[1] || null;
+
+        return (
+            <ScrollView
+                style={styles.container}
+                showsVerticalScrollIndicator={false}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
+                        tintColor="#0469ff"
+                        colors={['#0469ff']}
+                    />
+                }
+            >
+                {/* Today's Events */}
+                {todaysEvents.length > 0 && (
+                    <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.section}>
+                        <View style={styles.sectionHeader}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                <Text style={styles.sectionTitle}>Today's Events</Text>
+                                <View style={styles.todayBadge}>
+                                    <Text style={styles.todayBadgeText}>NOW</Text>
+                                </View>
                             </View>
                         </View>
-                    </View>
-                    <View style={styles.eventsContainer}>
-                        {todaysEvents.map((event, index) => (
-                            <Animated.View key={event.id} entering={FadeInRight.delay(600 + index * 100).duration(500)}>
-                                <HapticTouchable>
-                                    <LinearGradient
-                                        colors={[event.color, event.color + 'DD']}
-                                        style={styles.todayEventCard}
-                                    >
-                                        <View style={styles.todayEventIcon}>
-                                            <Text style={styles.eventEmoji}>{event.icon}</Text>
-                                        </View>
-                                        <View style={styles.eventInfo}>
-                                            <Text style={styles.todayEventTitle}>{event.title}</Text>
-                                            {event.location && (
-                                                <Text style={styles.todayEventLocation}>📍 {event.location}</Text>
-                                            )}
-                                        </View>
-                                        <View style={styles.pulsingDot} />
-                                    </LinearGradient>
-                                </HapticTouchable>
-                            </Animated.View>
-                        ))}
-                    </View>
-                </Animated.View>
-            )}
-            {/* Upcoming Exam */}
-            <Animated.View
-                entering={FadeInDown.delay(100).duration(600)}
-                style={[styles.examCard, { backgroundColor: uiData.upcomingExam.backgroundColor }]}
-            >
-                <View style={styles.examContent}>
-                    <View style={styles.examTextContainer}>
-                        <Text style={styles.examTitle}>{uiData.upcomingExam.title}</Text>
-                        <Text style={styles.examDate}>{uiData.upcomingExam.date}</Text>
-                        <Text style={styles.examSubject}>{uiData.upcomingExam.subject}</Text>
-                    </View>
-                    <View style={styles.examIcon}>
-                        <Text style={styles.examEmoji}>{uiData.upcomingExam.icon}</Text>
-                    </View>
-                </View>
-            </Animated.View>
+                        <View style={styles.eventsContainer}>
+                            {todaysEvents.map((event, index) => (
+                                <Animated.View key={event.id} entering={FadeInRight.delay(200 + index * 100).duration(500)}>
+                                    <HapticTouchable>
+                                        <LinearGradient
+                                            colors={[event.color, event.color + 'DD']}
+                                            style={styles.todayEventCard}
+                                        >
+                                            <View style={styles.todayEventIcon}>
+                                                <Text style={styles.eventEmoji}>{event.icon}</Text>
+                                            </View>
+                                            <View style={styles.eventInfo}>
+                                                <Text style={styles.todayEventTitle}>{event.title}</Text>
+                                                {event.location && (
+                                                    <Text style={styles.todayEventLocation}>📍 {event.location}</Text>
+                                                )}
+                                            </View>
+                                            <View style={styles.pulsingDot} />
+                                        </LinearGradient>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))}
+                        </View>
+                    </Animated.View>
+                )}
 
-            {/* Today's Classes */}
-            <View style={styles.section}>
-                <Animated.View entering={FadeInDown.delay(200).duration(600)} style={styles.sectionHeader}>
-                    <Text style={styles.sectionTitle}>Today's Classes</Text>
-                    <HapticTouchable>
-                        <Text style={styles.seeAll}>See All</Text>
-                    </HapticTouchable>
-                </Animated.View>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.classesRow}>
-                    {uiData.todaysClasses.map((cls, index) => (
-                        <Animated.View
-                            key={cls.id}
-                            entering={FadeInRight.delay(300 + index * 100).duration(600)}
-                            style={[styles.classCard, { backgroundColor: cls.backgroundColor }]}
-                        >
-                            <Text style={styles.classSubject}>{cls.subject}</Text>
-                            <Text style={styles.classTime}>{cls.time}</Text>
-                            <Text style={styles.classTopic} numberOfLines={2}>{cls.topic}</Text>
-                            <View style={styles.classTeacher}>
-                                <Image source={{ uri: cls.teacher.avatar }} style={styles.teacherAvatar} />
-                                <Text style={styles.teacherName} numberOfLines={1}>{cls.teacher.name}</Text>
-                            </View>
-                        </Animated.View>
-                    ))}
-                </ScrollView>
-            </View>
-
-            {/* Quick Access */}
-            <View style={styles.section}>
-                <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.sectionHeader}>
-                    <Text style={styles.sectionTitle}>Quick Access</Text>
-                    <HapticTouchable>
-                        <Text style={styles.seeAll}>See All</Text>
-                    </HapticTouchable>
-                </Animated.View>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.quickAccessScrollView}>
-                    {uiData.quickAccess.map((item, index) => (
-                        <Animated.View key={item.id} entering={FadeInRight.delay(600 + index * 80).duration(500)}>
-                            <HapticTouchable>
-                                <View style={[styles.quickAccessButton, { backgroundColor: item.backgroundColor }]}>
-                                    <Text style={[styles.quickAccessText, { color: item.textColor }]} numberOfLines={1}>
-                                        {item.label}
-                                    </Text>
+                {/* Updates Widget */}
+                {(recentNotice || nextEvent) && (
+                    <Animated.View entering={FadeInDown.delay(200).duration(500)} style={styles.updatesWidget}>
+                        {recentNotice && (
+                            <HapticTouchable
+                                style={styles.updateItem}
+                                onPress={() => router.push('/(screens)/calendarscreen')}
+                            >
+                                <View style={[styles.updateIconBg, { backgroundColor: '#E8F5E9' }]}>
+                                    <Calendar size={14} color="#4CAF50" />
                                 </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.updateText} numberOfLines={1}>
+                                        📅 {recentNotice.title}
+                                    </Text>
+                                    <Text style={styles.updateTime}>{recentNotice.date}</Text>
+                                </View>
+                                <ArrowRight size={14} color="#999" />
                             </HapticTouchable>
-                        </Animated.View>
-                    ))}
-                </ScrollView>
-            </View>
+                        )}
+                    </Animated.View>
+                )}
 
-            {/* Subjects Grid */}
-            <View style={styles.subjectsGrid}>
-                {uiData.subjects.map((subject, index) => (
+                {/* Quick Stats - Gradient Cards like Teacher */}
+                <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.section}>
+                    <View style={styles.statsGrid}>
+                        <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/student/attendance')}>
+                            <LinearGradient colors={['#4ECDC4', '#44A08D']} style={styles.statCard}>
+                                <View style={styles.statIcon}>
+                                    <CheckCircle2 size={24} color="#fff" />
+                                </View>
+                                <Text style={styles.statValue}>95%</Text>
+                                <Text style={styles.statLabel}>Attendance</Text>
+                            </LinearGradient>
+                        </HapticTouchable>
+
+                        <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/homework/view')}>
+                            <LinearGradient colors={['#667eea', '#764ba2']} style={styles.statCard}>
+                                <View style={styles.statIcon}>
+                                    <BookOpen size={24} color="#fff" />
+                                </View>
+                                <Text style={styles.statValue}>3</Text>
+                                <Text style={styles.statLabel}>Pending Work</Text>
+                            </LinearGradient>
+                        </HapticTouchable>
+
+                        <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/student/exam-results')}>
+                            <LinearGradient colors={['#f093fb', '#f5576c']} style={styles.statCard}>
+                                <View style={styles.statIcon}>
+                                    <Award size={24} color="#fff" />
+                                </View>
+                                <Text style={styles.statValue}>A+</Text>
+                                <Text style={styles.statLabel}>Last Grade</Text>
+                            </LinearGradient>
+                        </HapticTouchable>
+                    </View>
+                </Animated.View>
+
+                {/* Quick Actions - Grid like Teacher */}
+                {actionGroups.map((group, groupIndex) => (
                     <Animated.View
-                        key={subject.id}
-                        entering={FadeInDown.delay(800 + index * 100).duration(600)}
-                        style={[styles.subjectCard, { backgroundColor: subject.backgroundColor }]}
+                        key={group.title}
+                        entering={FadeInDown.delay(400 + groupIndex * 100).duration(600)}
+                        style={styles.section}
                     >
-                        <Text style={styles.subjectName} numberOfLines={1}>{subject.name}</Text>
-                        <Text style={styles.subjectChapter} numberOfLines={1}>{subject.chapter}</Text>
-                        <Text style={styles.subjectSubmission} numberOfLines={1}>{subject.submission}</Text>
+                        <Text style={styles.sectionTitle}>{group.title}</Text>
+                        <View style={styles.actionsGrid}>
+                            {group.actions.map((action, index) => (
+                                <Animated.View
+                                    key={action.label}
+                                    entering={FadeInDown.delay(500 + index * 50).duration(400)}
+                                >
+                                    <HapticTouchable onPress={() => router.push(action.href || '')}>
+                                        <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}>
+                                            <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
+                                                <action.icon size={22} color={action.color} />
+                                            </View>
+                                            <Text style={styles.actionLabel} numberOfLines={1}>
+                                                {action.label}
+                                            </Text>
+                                        </View>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))}
+                        </View>
                     </Animated.View>
                 ))}
-            </View>
-        </ScrollView>
-    );
+
+                {/* Upcoming Events */}
+                <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Upcoming Events</Text>
+                        <HapticTouchable onPress={() => router.push('/(screens)/calendarscreen')}>
+                            <Text style={styles.seeAll}>See All</Text>
+                        </HapticTouchable>
+                    </View>
+                    <View style={styles.eventsContainer}>
+                        {upcomingEvents && upcomingEvents.length > 0 ? (
+                            upcomingEvents.slice(0, 4).map((event, index) => (
+                                <Animated.View key={event.id} entering={FadeInRight.delay(700 + index * 100).duration(500)}>
+                                    <HapticTouchable onPress={() => router.push(`/(screens)/calendarscreen?eventid=${event.id}`)}>
+                                        <View style={styles.eventCard}>
+                                            <View style={[styles.eventIcon, { backgroundColor: event.color + '20' }]}>
+                                                <Text style={styles.eventEmoji}>{event.icon}</Text>
+                                            </View>
+                                            <View style={styles.eventInfo}>
+                                                <Text style={styles.eventTitle}>{event.title}</Text>
+                                                <View style={styles.eventDate}>
+                                                    <Calendar size={14} color="#666" />
+                                                    <Text style={styles.eventDateText}>{event.date}</Text>
+                                                </View>
+                                            </View>
+                                            <ChevronRight size={20} color="#999" />
+                                        </View>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))
+                        ) : (
+                            <Animated.View
+                                entering={FadeInRight.delay(700).duration(500)}
+                                style={{
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    paddingVertical: 20,
+                                    opacity: 0.8,
+                                }}
+                            >
+                                <CheckCircle2 size={26} color="#0469ff" />
+                                <Text style={{ marginTop: 8, fontSize: 14, color: '#555' }}>
+                                    You're all caught up!
+                                </Text>
+                            </Animated.View>
+                        )}
+                    </View>
+                </Animated.View>
+                {/* Recent Notices */}
+                <Animated.View entering={FadeInDown.delay(800).duration(600)} style={[styles.section, { marginBottom: 30 }]}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Recent Notices</Text>
+                        <HapticTouchable onPress={() => router.push('/(tabs)/noticeboard')}>
+                            <Text style={styles.seeAll}>View All</Text>
+                        </HapticTouchable>
+                    </View>
+                    <View style={styles.noticesContainer}>
+                        {notices && notices.length > 0 ? (
+                            notices.map((notice, index) => (
+                                <Animated.View
+                                    key={notice.id}
+                                    entering={FadeInRight.delay(900 + index * 100).duration(500)}
+                                >
+                                    <HapticTouchable onPress={() => router.push('/(tabs)/noticeboard')}>
+                                        <View style={styles.noticeCard}>
+                                            <View style={styles.noticeLeft}>
+                                                <View style={[styles.noticeIcon, notice.unread && styles.unreadIcon]}>
+                                                    <Bell size={16} color={notice.unread ? '#0469ff' : '#999'} />
+                                                </View>
+                                                <View style={styles.noticeInfo}>
+                                                    <Text style={[styles.noticeTitle, notice.unread && styles.unreadTitle]} numberOfLines={1}>
+                                                        {notice.title}
+                                                    </Text>
+                                                    <Text style={styles.noticeTime}>
+                                                        {notice.time}
+                                                    </Text>
+                                                </View>
+                                            </View>
+                                            {notice.unread && <View style={styles.unreadDot} />}
+                                        </View>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))
+                        ) : (
+                            <Animated.View
+                                entering={FadeInRight.delay(900).duration(500)}
+                                style={{
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    paddingVertical: 20,
+                                    opacity: 0.8,
+                                }}
+                            >
+                                <CheckCircle2 size={26} color="#0469ff" />
+                                <Text style={{ marginTop: 8, fontSize: 14, color: '#555' }}>
+                                    No notices yet
+                                </Text>
+                            </Animated.View>
+                        )}
+                    </View>
+                </Animated.View>
+
+                <View style={{ height: 100 }} />
+            </ScrollView>
+        );
+    };
 
     // === TEACHER VIEW ===
     // TeacherView.js
@@ -774,6 +929,13 @@ export default function HomeScreen() {
                         color: '#059669',
                         bgColor: '#D1FAE5',
                         href: "/teachers/my-payroll"
+                    },
+                    {
+                        icon: Clock,
+                        label: 'My Timetable',
+                        color: '#8B5CF6',
+                        bgColor: '#EDE9FE',
+                        href: "/teachers/timetable"
                     },
                 ],
             },
@@ -2701,6 +2863,113 @@ const styles = StyleSheet.create({
     eventLocation: {
         fontSize: 11,
         color: '#888',
+        marginTop: 2,
+    },
+
+    // Student View Styles
+    statsContainer: {
+        flexDirection: 'row',
+        paddingHorizontal: isSmallDevice ? 12 : 16,
+        paddingVertical: 16,
+        gap: 12,
+    },
+    studentStatCard: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#f8f9fa',
+        borderRadius: 12,
+        padding: 12,
+        gap: 10,
+    },
+    studentStatIcon: {
+        width: 36,
+        height: 36,
+        borderRadius: 10,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    studentStatValue: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#111',
+    },
+    studentStatLabel: {
+        fontSize: 11,
+        color: '#666',
+    },
+    quickAccessGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        paddingHorizontal: isSmallDevice ? 12 : 16,
+        gap: 12,
+    },
+    quickAccessCard: {
+        width: (SCREEN_WIDTH - 56) / 3,
+        alignItems: 'center',
+        padding: 16,
+        borderRadius: 16,
+        gap: 10,
+    },
+    quickAccessIconContainer: {
+        width: 48,
+        height: 48,
+        borderRadius: 14,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    quickAccessLabel: {
+        fontSize: 12,
+        fontWeight: '600',
+        textAlign: 'center',
+    },
+    studentEventCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 14,
+        borderRadius: 12,
+        borderLeftWidth: 4,
+        marginBottom: 8,
+        gap: 12,
+    },
+    studentEventTitle: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#111',
+    },
+    studentEventLocation: {
+        fontSize: 12,
+        color: '#666',
+        marginTop: 2,
+    },
+    upcomingEventCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#f8f9fa',
+        borderRadius: 12,
+        padding: 12,
+        marginHorizontal: isSmallDevice ? 12 : 16,
+        marginBottom: 8,
+        gap: 12,
+    },
+    upcomingEventIcon: {
+        width: 44,
+        height: 44,
+        borderRadius: 12,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    upcomingEventInfo: {
+        flex: 1,
+    },
+    upcomingEventTitle: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#111',
+    },
+    upcomingEventDate: {
+        fontSize: 12,
+        color: '#666',
         marginTop: 2,
     },
 });

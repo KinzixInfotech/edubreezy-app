@@ -81,67 +81,57 @@ const PROFILE_CONFIG = {
     ],
   },
 
-  TEACHER: {
+  TEACHING_STAFF: {
     fieldMappings: {
-      name: 'name',
-      email: 'email',
-      phone: 'phone',
+      name: 'teacherData.name',
+      email: 'teacherData.email',
+      phone: 'teacherData.contactNumber',
       role: 'role.name',
       school: 'school.name',
       profilePicture: 'profilePicture',
-      // Teacher-specific fields
-      teacherId: 'teacherId',
-      department: 'department.name',
-      subjects: 'subjects',
-      joiningDate: 'joiningDate',
-      qualification: 'qualification',
+      // Teacher-specific fields from TeachingStaff schema
+      employeeId: 'teacherData.employeeId',
+      designation: 'teacherData.designation',
+      gender: 'teacherData.gender',
+      age: 'teacherData.age',
+      bloodGroup: 'teacherData.bloodGroup',
+      dob: 'teacherData.dob',
+      address: 'teacherData.address',
+      city: 'teacherData.City',
+      district: 'teacherData.district',
+      state: 'teacherData.state',
+      country: 'teacherData.country',
+      postalCode: 'teacherData.PostalCode',
+      department: 'teacherData.department.name',
     },
-    stats: [
-      {
-        key: 'classes',
-        label: 'Classes',
-        value: '6',
-        color: '#0469ff',
-        icon: '👥',
-        dataPath: 'stats.totalClasses'
-      },
-      {
-        key: 'students',
-        label: 'Students',
-        value: '180',
-        color: '#10b981',
-        icon: '🎓',
-        dataPath: 'stats.totalStudents'
-      },
-      {
-        key: 'attendance',
-        label: 'Avg. Attendance',
-        value: '92%',
-        color: '#f59e0b',
-        icon: '📊',
-        dataPath: 'stats.avgAttendance'
-      },
-    ],
+    stats: [], // Will be fetched dynamically - remove static stats
     contactInfo: [
-      { key: 'email', label: 'Email', icon: Mail, color: '#0469ff', dataPath: 'email' },
-      { key: 'phone', label: 'Phone', icon: Phone, color: '#10b981', dataPath: 'phone' },
-      { key: 'department', label: 'Department', icon: BookOpen, color: '#8b5cf6', dataPath: 'department.name' },
-      { key: 'joiningDate', label: 'Joining Date', icon: Calendar, color: '#f59e0b', dataPath: 'joiningDate' },
+      { key: 'email', label: 'Email', icon: Mail, color: '#0469ff', dataPath: 'teacherData.email' },
+      { key: 'phone', label: 'Phone', icon: Phone, color: '#10b981', dataPath: 'teacherData.contactNumber' },
+      { key: 'address', label: 'Address', icon: MapPin, color: '#8b5cf6', dataPath: 'teacherData.address' },
+      { key: 'city', label: 'City', icon: MapPin, color: '#f59e0b', dataPath: 'teacherData.City' },
     ],
     additionalInfo: [
-      { key: 'teacherId', label: 'Teacher ID', dataPath: 'teacherId' },
-      { key: 'qualification', label: 'Qualification', dataPath: 'qualification' },
-      { key: 'subjects', label: 'Subjects', dataPath: 'subjects', isArray: true },
+      { key: 'employeeId', label: 'Employee ID', dataPath: 'teacherData.employeeId' },
+      { key: 'designation', label: 'Designation', dataPath: 'teacherData.designation' },
+      { key: 'department', label: 'Department', dataPath: 'teacherData.department.name' },
+      { key: 'gender', label: 'Gender', dataPath: 'teacherData.gender' },
+      { key: 'dob', label: 'Date of Birth', dataPath: 'teacherData.dob' },
+      { key: 'age', label: 'Age', dataPath: 'teacherData.age' },
+      { key: 'bloodGroup', label: 'Blood Group', dataPath: 'teacherData.bloodGroup' },
+      { key: 'district', label: 'District', dataPath: 'teacherData.district' },
+      { key: 'state', label: 'State', dataPath: 'teacherData.state' },
+      { key: 'country', label: 'Country', dataPath: 'teacherData.country' },
+      { key: 'postalCode', label: 'Postal Code', dataPath: 'teacherData.PostalCode' },
     ],
     menuItems: [
       { id: 1, label: 'My Classes', icon: Users, route: '/my-classes', color: '#0469ff' },
       { id: 2, label: 'Mark Attendance', icon: Calendar, route: '/teacher/mark-attendance', color: '#10b981' },
       { id: 8, label: 'Class Attendance', icon: ClipboardList, route: '/teachers/class-attendance', color: '#3B82F6' },
-      { id: 3, label: 'Grade Submissions', icon: ClipboardList, route: '/grade-submissions', color: '#f59e0b' },
-      { id: 4, label: 'My Schedule', icon: Calendar, route: '/schedule', color: '#8b5cf6' },
+      { id: 3, label: 'Assign Homework', icon: BookOpen, route: '/homework/assign', color: '#f59e0b' },
+      { id: 4, label: 'My Timetable', icon: Calendar, route: '/teachers/timetable', color: '#8b5cf6' },
       { id: 5, label: 'Announcements', icon: Bell, route: '/announcements', color: '#ec4899' },
       { id: 6, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#06b6d4' },
-      { id: 7, label: 'Edit Profile', icon: Edit, route: '/edit-profile', color: '#ef4444' },
     ],
   },
 
@@ -491,6 +481,20 @@ export default function ProfileScreen() {
                       value = value.map(item => item[info.displayKey]).join(', ');
                     } else {
                       value = value.join(', ');
+                    }
+                  }
+
+                  // Format date fields
+                  if (info.key === 'dob' && value && value !== 'N/A') {
+                    try {
+                      const date = new Date(value);
+                      value = date.toLocaleDateString('en-IN', {
+                        day: 'numeric',
+                        month: 'long',
+                        year: 'numeric'
+                      });
+                    } catch (e) {
+                      // Keep original value if parsing fails
                     }
                   }
 

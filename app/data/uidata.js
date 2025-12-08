@@ -4,10 +4,7 @@ export const dataUi = {
     "student": {
       "title": "{name}",
       "subtitle": [
-        { "text": "{role.name}", "type": "role" },
-        { "text": "|", "type": "separator" },
-        { "text": "{child.class}", "type": "childClass" },
-        { "text": "{child.section}", "type": "childSection" }
+        { "text": "{classSection}", "type": "childClass" }
       ],
       "icons": ["refresh", "bell"]
     },
@@ -76,25 +73,43 @@ export const dataUi = {
       "id": "qa_1",
       "label": "Homework",
       "backgroundColor": "#4A90E2",
-      "textColor": "#FFFFFF"
+      "textColor": "#FFFFFF",
+      "route": "/homework/view"
     },
     {
       "id": "qa_2",
-      "label": "Assignment",
-      "backgroundColor": "#E8F4FF",
-      "textColor": "#0469ff"
+      "label": "Timetable",
+      "backgroundColor": "#8B5CF6",
+      "textColor": "#FFFFFF",
+      "route": "/student/timetable"
     },
     {
       "id": "qa_3",
-      "label": "Exam",
-      "backgroundColor": "#E8F4FF",
-      "textColor": "#0469ff"
+      "label": "Attendance",
+      "backgroundColor": "#10B981",
+      "textColor": "#FFFFFF",
+      "route": "/student/attendance"
     },
     {
       "id": "qa_4",
-      "label": "Attendance",
-      "backgroundColor": "#E8F4FF",
-      "textColor": "#0469ff"
+      "label": "Library",
+      "backgroundColor": "#F59E0B",
+      "textColor": "#FFFFFF",
+      "route": "/student/library"
+    },
+    {
+      "id": "qa_5",
+      "label": "Results",
+      "backgroundColor": "#EF4444",
+      "textColor": "#FFFFFF",
+      "route": "/student/exam-results"
+    },
+    {
+      "id": "qa_6",
+      "label": "Certificates",
+      "backgroundColor": "#06B6D4",
+      "textColor": "#FFFFFF",
+      "route": "/student/certificates"
     }
   ],
   "subjects": [

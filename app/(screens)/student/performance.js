@@ -89,7 +89,6 @@ export default function StudentPerformanceScreen() {
     });
 
     const isLoading = attendanceLoading || examLoading || homeworkLoading;
-
     // Extract stats
     const monthlyStats = attendanceData?.monthlyStats || {};
     const yearlyAggregate = attendanceData?.yearlyAggregate || {};
@@ -205,7 +204,6 @@ export default function StudentPerformanceScreen() {
                 </View>
                 <View style={{ width: 40 }} />
             </Animated.View>
-
             <ScrollView
                 style={styles.content}
                 showsVerticalScrollIndicator={false}

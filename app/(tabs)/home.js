@@ -380,6 +380,115 @@ export default function HomeScreen() {
             staleTime: 1000 * 60 * 2,
         });
 
+        // Fetch student stats (attendance + exams + homework)
+        const { data: studentStats } = useQuery({
+            queryKey: ['student-home-stats', schoolId, userId],
+            queryFn: async () => {
+                if (!schoolId || !userId) return null;
+                const now = new Date();
+                const month = now.getMonth() + 1;
+                const year = now.getFullYear();
+
+                const [attendanceRes, examsRes, homeworkRes] = await Promise.all([
+                    api.get(`/schools/${schoolId}/attendance/stats?userId=${userId}&month=${month}&year=${year}`).catch(() => ({ data: null })),
+                    api.get(`/schools/${schoolId}/examination/student-results?studentId=${userId}`).catch(() => ({ data: null })),
+                    api.get(`/homework/user/${userId}`).catch(() => ({ data: [] }))
+                ]);
+
+                return {
+                    attendance: attendanceRes.data,
+                    exams: examsRes.data,
+                    homework: homeworkRes.data
+                };
+            },
+            enabled: !!schoolId && !!userId,
+            staleTime: 1000 * 60 * 5,
+        });
+
+        // Helper function to get grade label
+        const getGradeLabel = (percentage) => {
+            if (percentage >= 90) return 'A+';
+            if (percentage >= 80) return 'A';
+            if (percentage >= 70) return 'B+';
+            if (percentage >= 60) return 'B';
+            if (percentage >= 50) return 'C';
+            if (percentage >= 40) return 'D';
+            return 'F';
+        };
+
+        // Extract stats
+        const monthlyStats = studentStats?.attendance?.monthlyStats || {};
+        const attendancePercentage = monthlyStats.attendancePercentage || 0;
+        const totalAbsent = monthlyStats.totalAbsent || 0;
+        const totalWorkingDays = monthlyStats.totalWorkingDays || 0;
+
+        const avgExamPercentage = studentStats?.exams?.stats?.avgPercentage || 0;
+        const totalExams = studentStats?.exams?.stats?.totalExams || 0;
+        const recentExamResults = studentStats?.exams?.results || [];
+
+        // Count pending homework
+        const allHomework = studentStats?.homework || [];
+        const completedHomework = allHomework.filter(hw => hw.status === 'completed' || hw.status === 'submitted').length;
+        const totalHomework = allHomework.length;
+        const pendingHomework = allHomework.filter(hw => hw.status === 'pending' || hw.status === 'assigned').length;
+        const homeworkCompletionRate = totalHomework > 0 ? (completedHomework / totalHomework) * 100 : 0;
+
+        // Calculate holistic performance score based on ALL activities
+        const calculateOverallScore = () => {
+            // If absolutely no data exists, return 0
+            if (totalWorkingDays === 0 && totalExams === 0 && totalHomework === 0) {
+                return 0;
+            }
+
+            let totalScore = 0;
+            let totalWeight = 0;
+
+            // 1. Attendance Component (30% weight)
+            // If there are working days, attendance matters (even if 0%)
+            if (totalWorkingDays > 0) {
+                // Attendance percentage directly contributes
+                totalScore += attendancePercentage * 0.3;
+                totalWeight += 0.3;
+
+                // Additional penalty for excessive absences (>20% absent = further reduction)
+                const absentRate = (totalAbsent / totalWorkingDays) * 100;
+                if (absentRate > 20) {
+                    const penalty = Math.min((absentRate - 20) * 0.2, 10); // Max 10 point penalty
+                    totalScore -= penalty;
+                }
+            }
+
+            // 2. Exam Performance (40% weight)
+            if (totalExams > 0) {
+                totalScore += avgExamPercentage * 0.4;
+                totalWeight += 0.4;
+            }
+
+            // 3. Homework Completion (20% weight)
+            if (totalHomework > 0) {
+                totalScore += homeworkCompletionRate * 0.2;
+                totalWeight += 0.2;
+            }
+
+            // 4. Consistency Bonus (10% weight)
+            // Reward consistent performance across all areas
+            if (totalWorkingDays > 0 && totalExams > 0 && totalHomework > 0) {
+                const consistency = (attendancePercentage + avgExamPercentage + homeworkCompletionRate) / 3;
+                totalScore += consistency * 0.1;
+                totalWeight += 0.1;
+            }
+
+            // Calculate final score
+            let finalScore = totalWeight > 0 ? totalScore / totalWeight : 0;
+
+            // Ensure score is between 0-100
+            finalScore = Math.max(0, Math.min(100, Math.round(finalScore)));
+
+            return finalScore;
+        };
+
+        const overallScore = calculateOverallScore();
+
         const notices = recentNotices?.notices?.map((n) => ({
             id: n.id,
             title: n.title,
@@ -392,6 +501,7 @@ export default function HomeScreen() {
             {
                 title: 'Quick Actions',
                 actions: [
+                    { icon: TrendingUp, label: 'Performance', color: '#667eea', bgColor: '#EDE9FE', href: '/student/performance' },
                     { icon: Clock, label: 'My Timetable', color: '#8B5CF6', bgColor: '#EDE9FE', href: '/student/timetable' },
                     { icon: Calendar, label: 'My Attendance', color: '#10B981', bgColor: '#D1FAE5', href: '/student/attendance' },
                     { icon: BookOpen, label: 'Homework', color: '#0469ff', bgColor: '#DBEAFE', href: '/homework/view' },
@@ -399,7 +509,6 @@ export default function HomeScreen() {
                     { icon: Award, label: 'Exam Results', color: '#EF4444', bgColor: '#FEE2E2', href: '/student/exam-results' },
                     { icon: FileText, label: 'Certificates', color: '#06B6D4', bgColor: '#CFFAFE', href: '/student/certificates' },
                     { icon: ScrollText, label: 'Syllabus', color: '#9C27B0', bgColor: '#F3E5F5', href: '/syllabusview' },
-                    { icon: Calendar, label: 'Calendar', color: '#4CAF50', bgColor: '#E8F5E9', href: '/calendarscreen' },
                 ],
             },
         ];
@@ -481,7 +590,7 @@ export default function HomeScreen() {
                     </Animated.View>
                 )}
 
-                {/* Quick Stats - Gradient Cards like Teacher */}
+                {/* Quick Stats - Gradient Cards with Real Data */}
                 <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.section}>
                     <View style={styles.statsGrid}>
                         <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/student/attendance')}>
@@ -489,28 +598,28 @@ export default function HomeScreen() {
                                 <View style={styles.statIcon}>
                                     <CheckCircle2 size={24} color="#fff" />
                                 </View>
-                                <Text style={styles.statValue}>95%</Text>
+                                <Text style={styles.statValue}>{Math.round(attendancePercentage)}%</Text>
                                 <Text style={styles.statLabel}>Attendance</Text>
                             </LinearGradient>
                         </HapticTouchable>
 
-                        <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/homework/view')}>
+                        <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/student/performance')}>
                             <LinearGradient colors={['#667eea', '#764ba2']} style={styles.statCard}>
                                 <View style={styles.statIcon}>
-                                    <BookOpen size={24} color="#fff" />
+                                    <TrendingUp size={24} color="#fff" />
                                 </View>
-                                <Text style={styles.statValue}>3</Text>
-                                <Text style={styles.statLabel}>Pending Work</Text>
+                                <Text style={styles.statValue}>{overallScore}</Text>
+                                <Text style={styles.statLabel}>Performance</Text>
                             </LinearGradient>
                         </HapticTouchable>
 
-                        <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/student/exam-results')}>
+                        <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/homework/view')}>
                             <LinearGradient colors={['#f093fb', '#f5576c']} style={styles.statCard}>
                                 <View style={styles.statIcon}>
-                                    <Award size={24} color="#fff" />
+                                    <BookOpen size={24} color="#fff" />
                                 </View>
-                                <Text style={styles.statValue}>A+</Text>
-                                <Text style={styles.statLabel}>Last Grade</Text>
+                                <Text style={styles.statValue}>{pendingHomework}</Text>
+                                <Text style={styles.statLabel}>Pending Work</Text>
                             </LinearGradient>
                         </HapticTouchable>
                     </View>

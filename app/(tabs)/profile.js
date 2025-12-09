@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Modal, Dimensions, TouchableWithoutFeedback, Animated as RNAnimated, RefreshControl, Linking, Alert } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Settings, Edit, LogOut, Mail, Phone, Calendar, MapPin, Award, BookOpen, School, X, Users, ClipboardList, FileText, Bell, Shield } from 'lucide-react-native';
+import { Settings, Edit, LogOut, Mail, Phone, Calendar, MapPin, Award, BookOpen, School, X, Users, ClipboardList, FileText, Bell, Shield, Clock } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../components/HapticTouch';
@@ -15,81 +15,48 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 // ==================== ROLE-BASED CONFIGURATION ====================
 const PROFILE_CONFIG = {
   STUDENT: {
-    // Field mappings - customize these paths based on your API response structure
     fieldMappings: {
-      name: 'name',
-      email: 'email',
-      phone: 'phone',
+      name: 'studentData.name',
+      email: 'studentData.email',
+      phone: 'studentData.contactNumber',
       role: 'role.name',
-      school: 'school.name',
+      school: 'studentData.school.name',
       profilePicture: 'profilePicture',
-      // Student-specific fields
-      studentId: 'studentId',
-      class: 'class.name',
-      section: 'section',
-      rollNumber: 'rollNumber',
-      admissionDate: 'admissionDate',
     },
-    // Stats to show
-    stats: [
-      {
-        key: 'attendance',
-        label: 'Attendance',
-        value: '95%',
-        color: '#10b981',
-        icon: '📊',
-        dataPath: 'stats.attendance' // Path in user object
-      },
-      {
-        key: 'grade',
-        label: 'Grade',
-        value: 'A+',
-        color: '#f59e0b',
-        icon: '🎯',
-        dataPath: 'stats.grade'
-      },
-      {
-        key: 'assignments',
-        label: 'Assignments',
-        value: '24/26',
-        color: '#8b5cf6',
-        icon: '📝',
-        dataPath: 'stats.assignments'
-      },
-    ],
-    // Contact info fields
+    stats: [],
     contactInfo: [
-      { key: 'email', label: 'Email', icon: Mail, color: '#0469ff', dataPath: 'email' },
-      { key: 'phone', label: 'Phone', icon: Phone, color: '#10b981', dataPath: 'phone' },
-      { key: 'admissionDate', label: 'Admission Date', icon: Calendar, color: '#8b5cf6', dataPath: 'admissionDate' },
+      { key: 'email', label: 'Email', icon: Mail, color: '#0469ff', dataPath: 'studentData.email' },
+      { key: 'phone', label: 'Phone', icon: Phone, color: '#10b981', dataPath: 'studentData.contactNumber' },
+      { key: 'address', label: 'Address', icon: MapPin, color: '#8b5cf6', dataPath: 'studentData.Address' },
+      { key: 'city', label: 'City', icon: MapPin, color: '#f59e0b', dataPath: 'studentData.city' },
     ],
-    // Additional info sections
     additionalInfo: [
-      { key: 'studentId', label: 'Student ID', dataPath: 'studentId' },
-      { key: 'class', label: 'Class', dataPath: 'class.name' },
-      { key: 'section', label: 'Section', dataPath: 'section' },
-      { key: 'rollNumber', label: 'Roll Number', dataPath: 'rollNumber' },
+      { key: 'admissionNo', label: 'Admission No', dataPath: 'studentData.admissionNo' },
+      { key: 'rollNumber', label: 'Roll Number', dataPath: 'studentData.rollNumber' },
+      { key: 'class', label: 'Class', dataPath: 'studentData.class.className' },
+      { key: 'section', label: 'Section', dataPath: 'studentData.section.name' },
+      { key: 'gender', label: 'Gender', dataPath: 'studentData.gender' },
+      { key: 'dob', label: 'Date of Birth', dataPath: 'studentData.dob' },
+      { key: 'bloodGroup', label: 'Blood Group', dataPath: 'studentData.bloodGroup' },
+      { key: 'admissionDate', label: 'Admission Date', dataPath: 'studentData.admissionDate' },
+      { key: 'fatherName', label: "Father's Name", dataPath: 'studentData.FatherName' },
+      { key: 'motherName', label: "Mother's Name", dataPath: 'studentData.MotherName' },
+      { key: 'state', label: 'State', dataPath: 'studentData.state' },
     ],
-    // Menu items
     menuItems: [
-      { id: 1, label: 'Academic Performance', icon: Award, route: '/performance', color: '#10b981' },
-      { id: 2, label: 'Attendance Record', icon: Calendar, route: '/attendance', color: '#0469ff' },
-      { id: 3, label: 'My Courses', icon: BookOpen, route: '/courses', color: '#f59e0b' },
-      { id: 4, label: 'Assignments', icon: ClipboardList, route: '/assignments', color: '#8b5cf6' },
-      { id: 5, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#06b6d4' },
-      { id: 6, label: 'Edit Profile', icon: Edit, route: '/edit-profile', color: '#ec4899' },
+      { id: 1, label: 'My Performance', icon: Award, route: '/student/performance', color: '#10b981' },
+      { id: 2, label: 'Attendance Record', icon: Calendar, route: '/student/attendance', color: '#0469ff' },
+      { id: 3, label: 'Exam Results', icon: BookOpen, route: '/student/exam-results', color: '#f59e0b' },
+      { id: 4, label: 'Homework', icon: ClipboardList, route: '/homework/view', color: '#8b5cf6' },
+      { id: 5, label: 'My Timetable', icon: Calendar, route: '/student/timetable', color: '#06b6d4' },
+      { id: 6, label: 'Certificates', icon: FileText, route: '/student/certificates', color: '#ec4899' },
+      { id: 7, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#64748b' },
     ],
   },
 
   TEACHING_STAFF: {
+    // Field mappings - customize these paths based on your API response structure
     fieldMappings: {
-      name: 'teacherData.name',
-      email: 'teacherData.email',
-      phone: 'teacherData.contactNumber',
-      role: 'role.name',
-      school: 'school.name',
-      profilePicture: 'profilePicture',
-      // Teacher-specific fields from TeachingStaff schema
       employeeId: 'teacherData.employeeId',
       designation: 'teacherData.designation',
       gender: 'teacherData.gender',

@@ -100,7 +100,7 @@ const NoticeBoardScreen = () => {
   // ──────────────────────────────────────────────────────
   // 4. React-Query: fetch notices
   // ──────────────────────────────────────────────────────
-const {
+  const {
     data,
     isFetching,
     isLoading,
@@ -119,8 +119,8 @@ const {
       return res.data; // { notices: [], pagination: { totalPages, currentPage } }
     },
     enabled: !!schoolId && !!userId,
-    keepPreviousData: true,
-    staleTime: 0,               // ← force fresh data on mount / category change
+    staleTime: 1000 * 60, // Cache for 1 minute
+    refetchOnMount: 'always', // Always fetch on mount to ensure fresh data
   });
 
   // ──────────────────────────────────────────────────────
@@ -134,7 +134,7 @@ const {
     } else {
       setAllNotices(prev => [...prev, ...data.notices]);
     }
-    setHasMore((data.pagination?.currentPage ?? 0) < (data.pagination?.totalPages ?? 0));
+    setHasMore((data.pagination?.page ?? 0) < (data.pagination?.totalPages ?? 0));
   }, [data, page]);
 
   // ──────────────────────────────────────────────────────
@@ -253,7 +253,7 @@ const {
       </Animated.View>
 
       {/* Loading / List */}
-      {isLoading && page === 1 ? (
+      {(!schoolId || !userId || (isLoading && page === 1)) ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#0469ff" />
         </View>

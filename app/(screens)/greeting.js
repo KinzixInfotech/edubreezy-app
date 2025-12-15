@@ -32,13 +32,48 @@ export default function GreetingScreen() {
     useEffect(() => {
         loadUser();
     }, [user])
-    const userName =
-        user?.role?.name === "PARENT"
-            ? `Mr. ${user?.name}`
-            : user?.name;
+
+    // Get title based on gender
+    const getGenderTitle = (gender) => {
+        if (!gender || gender === 'Unknown') return ''; // No title if unknown
+        const genderLower = gender.toLowerCase();
+        if (genderLower === 'male') return 'Mr.';
+        if (genderLower === 'female') return 'Ms.';
+        return ''; // No title for other cases
+    };
+
+    const userName = (() => {
+        const role = user?.role?.name?.toUpperCase();
+        let name = '';
+        let gender = user?.gender || 'Unknown';
+
+        switch (role) {
+            case 'PARENT':
+                name = user?.parentData?.name || '';
+                gender = user?.gender || user?.parentData?.user?.gender || 'Unknown';
+                break;
+            case 'STUDENT':
+                name = user?.studentData?.name || user?.studentdatafull?.name || user?.name || '';
+                gender = user?.gender || user?.studentData?.gender || 'Unknown';
+                break;
+            case 'TEACHING_STAFF':
+            case 'NON_TEACHING_STAFF':
+                name = user?.name || user?.staffData?.name || '';
+                gender = user?.gender || user?.staffData?.gender || 'Unknown';
+                break;
+            case 'ADMIN':
+                name = user?.name || '';
+                break;
+            default:
+                name = user?.name || '';
+        }
+
+        const title = getGenderTitle(gender);
+        return title ? `${title} ${name}` : name;
+    })();
 
 
-     const getGreeting = () => {
+    const getGreeting = () => {
         const hour = new Date().getHours();
         if (hour >= 5 && hour < 12) {
             return {

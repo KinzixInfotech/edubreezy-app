@@ -12,7 +12,7 @@ import {
     RefreshControl,
 } from 'react-native';
 import { router } from 'expo-router';
-import { ArrowLeft, Bell, BellOff, X, ExternalLink, Trash2 } from 'lucide-react-native';
+import { ArrowLeft, Bell, BellOff, X, ExternalLink, Trash2, CheckCheck } from 'lucide-react-native';
 import Animated, {
     FadeInDown,
     FadeOutRight,
@@ -23,8 +23,8 @@ import Animated, {
     withTiming,
     runOnJS,
     FadeIn,
-    SlideInRight,
-    SlideOutRight
+    SlideInDown,
+    SlideOutDown
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import HapticTouchable from '../components/HapticTouch';
@@ -50,7 +50,7 @@ const getNotificationStyle = (type) => {
     return styles[type] || styles.GENERAL;
 };
 
-// Priority Badge Component
+// Priority Badge Componentd
 const PriorityBadge = ({ priority }) => {
     if (priority === 'NORMAL' || priority === 'LOW') return null;
 
@@ -174,14 +174,14 @@ const NotificationDetailModal = ({ visible, notification, onClose, onDelete }) =
     return (
         <Modal
             visible={visible}
-            animationType="slide"
+            animationType="fade"
             transparent={true}
             onRequestClose={onClose}
         >
             <View style={styles.modalOverlay}>
                 <Animated.View
-                    entering={SlideInRight.duration(300)}
-                    exiting={SlideOutRight.duration(300)}
+                    entering={SlideInDown.duration(400).damping(20)}
+                    exiting={SlideOutDown.duration(300)}
                     style={styles.modalContent}
                 >
                     {/* Modal Header */}
@@ -299,13 +299,13 @@ export default function NotificationScreen() {
     const userId = userData?.id;
     // Fetch notifications
     const { data, isLoading, refetch } = useQuery({
-        queryKey: ['notifications'],
+        queryKey: ['notifications', userId, schoolId],
         queryFn: async () => {
-            // const userId = await SecureStore.getItemAsync('userId');
-            // const schoolId = await SecureStore.getItemAsync('schoolId');
-            const response = await api.get(`/notifications?userId=${userId}&schoolId=${schoolId}`);
+            const response = await api.get(`/notifications?userId=${userId}&schoolId=${schoolId}&limit=20`);
             return response.data;
         },
+        enabled: !!userId && !!schoolId, // Only run when IDs are available
+        staleTime: 1000 * 60, // Cache for 1 minute
     });
 
     // Mark as read mutation
@@ -399,7 +399,7 @@ export default function NotificationScreen() {
         );
     };
 
-    if (isLoading) {
+    if (!userId || !schoolId || isLoading) {
         return (
             <View style={[styles.container, styles.centered]}>
                 <ActivityIndicator size="large" color="#0469ff" />
@@ -426,7 +426,7 @@ export default function NotificationScreen() {
                 </View>
                 {hasNotifications && (
                     <HapticTouchable onPress={handleMarkAllRead}>
-                        <Text style={styles.markAllRead}>Mark all as read</Text>
+                        <CheckCheck size={24} color="#0469ff" />
                     </HapticTouchable>
                 )}
             </Animated.View>
@@ -736,7 +736,7 @@ const styles = StyleSheet.create({
     modalFooter: {
         flexDirection: 'row',
         gap: 12,
-        marginBottom:20,
+        marginBottom: 20,
         paddingHorizontal: 20,
         paddingTop: 16,
     },

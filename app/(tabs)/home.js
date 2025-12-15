@@ -1,10 +1,11 @@
 import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Dimensions, RefreshControl } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, router } from 'expo-router';
 import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings, Plus, CheckCircle2, TimerIcon, Book, CalendarDays, Umbrella, ChartPie, User, UserCheck, X, ArrowRight, Paperclip, PartyPopperIcon, ScrollText, ClipboardList, Wallet } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../components/HapticTouch';
-import { useEffect, useMemo, useState, useCallback, act } from 'react';
+import { useEffect, useMemo, useState, useCallback, act, memo } from 'react';
 import Animated, { FadeInDown, FadeInRight, FadeInUp } from 'react-native-reanimated';
 import { dataUi } from '../data/uidata';
 
@@ -221,13 +222,15 @@ export default function HomeScreen() {
             },
             teaching_staff: {
                 '{name}': user_acc?.name || '',
-                '{class}': teacher?.sectionsAssigned[0]?.class?.className + "'" + teacher?.sectionsAssigned[0]?.name || 'N/A',
+                '{class}': (teacher?.sectionsAssigned?.[0]?.class?.className && teacher?.sectionsAssigned?.[0]?.name)
+                    ? `${teacher.sectionsAssigned[0].class.className}'${teacher.sectionsAssigned[0].name}`
+                    : '',
             },
             parent: {
-                '{name}': user_acc?.name || '',
+                '{name}': user_acc?.parentData?.name || user_acc?.name || '',
                 '{role.name}': user_acc?.role?.name || '',
                 '{child.name}': user_acc?.studentdatafull?.name || '',
-                '{emailparent}': user_acc?.email || '',
+                '{emailparent}': user_acc?.parentData?.email || user_acc?.email || '',
                 '{child.class}': user_acc?.classs?.className || 'N/A',
                 '{child.section}': user_acc?.section?.name || 'N/A',
                 '{school.name}': user_acc?.school?.name || '',
@@ -247,7 +250,7 @@ export default function HomeScreen() {
     };
 
     // === DYNAMIC HEADER ===
-    const Header = () => {
+    const Header = memo(() => {
         const roleKey = user_acc?.role?.name?.toLowerCase() ?? '';
         const config = uiData.header[roleKey] || uiData.header.student;
         const title = replaceDynamic(config.title, roleKey);
@@ -282,20 +285,12 @@ export default function HomeScreen() {
                     <View style={styles.iconButton}>
                         <Icon size={isSmallDevice ? 18 : 20} color="#0469ff" />
 
-                        {/* {isBell && unreadCount > 0 && (
-                            <Animated.View entering={FadeInDown.springify()} style={styles.badge}>
-                                <Text style={styles.badgeText}>{unreadCount}</Text>
-                            </Animated.View>
-                        )} */}
                         {isBell && unreadCount > 0 && (
-                            <Animated.View
-                                entering={FadeInDown.springify()}
-                                style={styles.badge}
-                            >
+                            <View style={styles.badge}>
                                 <Text style={styles.badgeText}>
                                     {unreadCount > 99 ? '99+' : unreadCount}
                                 </Text>
-                            </Animated.View>
+                            </View>
                         )}
                     </View>
                 </HapticTouchable>
@@ -317,7 +312,7 @@ export default function HomeScreen() {
 
 
         return (
-            <Animated.View entering={FadeInUp.duration(600)} style={styles.header}>
+            <View style={styles.header}>
                 <View style={styles.headerLeft}>
                     <HapticTouchable onPress={() => router.push('(tabs)/profile')}>
                         {user_acc?.profilePicture && user_acc.profilePicture !== 'default.png' ? (
@@ -327,7 +322,7 @@ export default function HomeScreen() {
                         ) : (
                             <View style={[styles.avatar, styles.parentAvatar]}>
                                 <Text style={styles.fallbackText}>
-                                    {user_acc?.name ? getInitials(user_acc.name) : 'U'}
+                                    {user_acc?.parentData?.name ? getInitials(user_acc.parentData.name) : (user_acc?.name ? getInitials(user_acc.name) : 'U')}
                                 </Text>
                             </View>
                         )}
@@ -339,9 +334,9 @@ export default function HomeScreen() {
                     </View>
                 </View>
                 <View style={styles.iconRow}>{icons}</View>
-            </Animated.View>
+            </View>
         );
-    };
+    });
 
     // === ROLE-BASED CONTENT ===
     const renderContent = () => {
@@ -351,7 +346,7 @@ export default function HomeScreen() {
             case 'student':
                 return <StudentView refreshing={refreshing} onRefresh={onRefresh} />;
             case 'teaching_staff':
-                return <TeacherView refreshing={refreshing} schoolId={schoolId} userId={userId} onRefresh={onRefresh} />;
+                return <TeacherView refreshing={refreshing} schoolId={schoolId} userId={userId} onRefresh={onRefresh} upcomingEvents={upcomingEvents} todaysEvents={todaysEvents} />;
             case 'admin':
                 return <AdminView refreshing={refreshing} onRefresh={onRefresh} />;
             case 'parent':
@@ -516,6 +511,18 @@ export default function HomeScreen() {
         // Get recent unread notice only (for updates widget)
         const recentNotice = upcomingEvents?.[0] || null;
         const nextEvent = upcomingEvents?.[1] || null;
+
+        // Wait for critical stats to load before rendering
+        const isStatsLoading = !studentStats;
+
+        if (isStatsLoading) {
+            return (
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                    <ActivityIndicator size="large" color="#0469ff" />
+                    <Text style={{ marginTop: 12, color: '#666', fontSize: 14 }}>Loading...</Text>
+                </View>
+            );
+        }
 
         return (
             <ScrollView
@@ -761,638 +768,6 @@ export default function HomeScreen() {
         );
     };
 
-    // === TEACHER VIEW ===
-    // TeacherView.js
-    const DELEGATION_STORAGE_KEY = 'delegation_shown_versions';
-
-    const TeacherView = ({ schoolId, parentId, userId, refreshing, onRefresh }) => {
-        const [showAddChildModal, setShowAddChildModal] = useState(false);
-        const [selectedChild, setSelectedChild] = useState(null);
-        const [showDelegationModal, setShowDelegationModal] = useState(false);
-        const [activeDelegations, setActiveDelegations] = useState([]);
-        const [shownDelegations, setShownDelegations] = useState({});
-        const queryClient = useQueryClient();
-
-        // Load shown delegations from secure storage
-        useEffect(() => {
-            loadShownDelegations();
-        }, []);
-
-        const loadShownDelegations = async () => {
-            try {
-                const stored = await SecureStore.getItemAsync(DELEGATION_STORAGE_KEY);
-                if (stored) {
-                    setShownDelegations(JSON.parse(stored));
-                }
-            } catch (error) {
-                console.error('Error loading shown delegations:', error);
-            }
-        };
-
-        const saveDelegationAsShown = async (delegationId, version) => {
-            try {
-                const updated = {
-                    ...shownDelegations,
-                    [delegationId]: version
-                };
-                await SecureStore.setItemAsync(DELEGATION_STORAGE_KEY, JSON.stringify(updated));
-                setShownDelegations(updated);
-            } catch (error) {
-                console.error('Error saving delegation status:', error);
-            }
-        };
-
-        // Check for active delegations
-        // Check for active delegations
-        const { data: delegationCheck, refetch: refetchDelegations } = useQuery({
-            queryKey: ['delegation-check', schoolId, userId],
-            queryFn: async () => {
-                const res = await api.get(
-                    `/schools/${schoolId}/attendance/delegations/check?teacherId=${userId}`
-                );
-
-                // ADD THESE CONSOLE LOGS
-                // console.log('=== API RESPONSE ===');
-                // console.log('Full response:', JSON.stringify(res.data, null, 2));
-                // console.log('Has delegations:', res.data.hasDelegations);
-                // console.log('Delegations array:', res.data.delegations);
-
-                // if (res.data.delegations) {
-                //     res.data.delegations.forEach((d, i) => {
-                //         console.log(`\nDelegation ${i + 1}:`);
-                //         console.log('  ID:', d.id);
-                //         console.log('  className:', d.className);
-                //         console.log('  acknowledgedAt:', d.acknowledgedAt);
-                //         console.log('  acknowledgedAt type:', typeof d.acknowledgedAt);
-                //         console.log('  Is null?:', d.acknowledgedAt === null);
-                //         console.log('  Is undefined?:', d.acknowledgedAt === undefined);
-                //         console.log('  Falsy check (!acknowledgedAt):', !d.acknowledgedAt);
-                //     });
-                // }
-
-                return res.data;
-            },
-            enabled: !!schoolId && !!userId,
-            staleTime: 1000 * 60 * 2,
-            refetchInterval: 1000 * 60 * 5,
-        });
-        // Fetch recent notices
-        const {
-            data: recentNotices,
-            isFetching,
-            isLoading,
-            refetch,
-        } = useQuery({
-            queryKey: ['notices', schoolId, userId],
-            queryFn: async () => {
-                if (!schoolId || !userId) return { notices: [], pagination: {} };
-                const res = await api.get(
-                    `/notices/${schoolId}?userId=${userId}&limit=4&page=1`
-                );
-                return res.data;
-            },
-            enabled: !!schoolId && !!userId,
-            staleTime: 0,
-        });
-
-        const notices = recentNotices?.notices?.map((n) => ({
-            id: n.id,
-            title: n.title,
-            time: new Date(n.createdAt).toLocaleString(),
-            unread: !n.read,
-        })) || [];
-
-        // Get recent unread notice only (for updates widget)
-        const recentNotice = notices?.find(n => n.unread) || null;
-        const nextEvent = upcomingEvents?.[0] || null;
-
-        // Fetch attendance stats for teacher
-        const { data: attendanceStats, isFetching: isAttendanceFetching } = useQuery({
-            queryKey: ['teacher-attendance-stats', schoolId, userId],
-            queryFn: async () => {
-                if (!schoolId || !userId) return null;
-                const now = new Date();
-                const month = now.getMonth() + 1;
-                const year = now.getFullYear();
-                const res = await api.get(`/schools/${schoolId}/attendance/stats?userId=${userId}&month=${month}&year=${year}`);
-                return res.data;
-            },
-            enabled: !!schoolId && !!userId,
-            staleTime: 1000 * 60 * 5,
-        });
-
-        // Fetch leave balance for teacher
-        const { data: leaveData } = useQuery({
-            queryKey: ['teacher-leave-balance', schoolId, userId],
-            queryFn: async () => {
-                if (!schoolId || !userId) return null;
-                const res = await api.get(`/schools/${schoolId}/attendance/leaves/balance?userId=${userId}`);
-                return res.data;
-            },
-            enabled: !!schoolId && !!userId,
-            staleTime: 1000 * 60 * 10,
-        });
-
-        // Calculate stats for display
-        const totalDaysWorked = attendanceStats?.monthlyStats?.presentDays || 0;
-        const attendancePercent = attendanceStats?.monthlyStats?.attendancePercentage || 0;
-        const totalLeavesTaken = leaveData?.totalUsed || 0;
-
-
-        // Handle delegation modal display
-        // Handle delegation modal display
-        useEffect(() => {
-            // console.log('\n=== DELEGATION FILTER LOGIC ===');
-            // console.log('delegationCheck:', delegationCheck);
-
-            if (delegationCheck?.hasDelegations && delegationCheck.delegations.length > 0) {
-                // console.log('Total delegations:', delegationCheck.delegations.length);
-
-                // Filter ONLY unacknowledged delegations for the modal
-                const unacknowledgedDelegations = delegationCheck.delegations.filter(
-                    delegation => {
-                        const isUnack = !delegation.acknowledgedAt;
-                        // console.log(`Delegation ${delegation.id}: acknowledgedAt=${delegation.acknowledgedAt}, isUnacknowledged=${isUnack}`);
-                        return isUnack;
-                    }
-                );
-
-                // console.log('Unacknowledged count:', unacknowledgedDelegations.length);
-                // console.log('Should show modal?:', unacknowledgedDelegations.length > 0);
-
-                if (unacknowledgedDelegations.length > 0) {
-                    // console.log('✅ SHOWING MODAL - Unacknowledged delegations found');
-                    setActiveDelegations(unacknowledgedDelegations);
-                    setShowDelegationModal(true);
-                } else {
-                    // console.log('✅ NOT SHOWING MODAL - All delegations acknowledged');
-                    // All delegations are acknowledged, but still show banner
-                    setActiveDelegations(delegationCheck.delegations);
-                    setShowDelegationModal(false);
-                }
-            } else {
-                // console.log('❌ No delegations found');
-                setActiveDelegations([]);
-                setShowDelegationModal(false);
-            }
-        }, [delegationCheck]);
-        const handleSelectDelegation = async (delegation) => {
-            // Mark this delegation as shown
-            await saveDelegationAsShown(delegation.id, delegation.version);
-
-            setShowDelegationModal(false);
-
-            // Navigate to marking page
-            router.push({
-                pathname: 'teachers/delegationmarking',
-                params: {
-                    delegationId: delegation.id,
-                    classId: delegation.classId,
-                    sectionId: delegation.sectionId || 'all',
-                    className: delegation.className,
-                    sectionName: delegation.sectionName || '',
-                    isDelegation: 'true'
-                }
-            });
-        };
-
-        const handleDismissDelegationModal = async () => {
-            // Mark all shown delegations as seen
-            for (const delegation of activeDelegations) {
-                await saveDelegationAsShown(delegation.id, delegation.version);
-            }
-            setShowDelegationModal(false);
-        };
-
-        const handleDismissBanner = async (delegationId) => {
-            // Temporarily hide banner (will show again on refresh unless delegation is complete)
-            setActiveDelegations(prev => prev.filter(d => d.id !== delegationId));
-        };
-
-        // Quick access actions for teacher
-        const actionGroups = [
-            {
-                title: 'Quick Actions',
-                actions: [
-                    { icon: Book, label: 'Add Homework', color: '#0469ff', bgColor: '#E3F2FD', href: "/homework/assign" },
-                    {
-                        icon: Calendar,
-                        label: 'Self Attendance',
-                        color: '#F9A825',
-                        bgColor: '#FFF8E1',
-                        href: "attendance",
-                    },
-                    {
-                        icon: Calendar,
-                        label: 'Mark Attendance',
-                        color: '#F9A825',
-                        bgColor: '#FFF8E1',
-                        href: "teacher/mark-attendance",
-                    },
-                    {
-                        icon: ChartPie,
-                        label: 'Attendance Stats',
-                        color: '#F9A825',
-                        params: { teacherData: JSON.stringify({ schoolId, userId }) },
-                        bgColor: '#FFF8E1',
-                        href: "/teachers/stats-calendar"
-                    },
-                    {
-                        icon: Calendar,
-                        label: 'School Calendar',
-                        color: '#4CAF50',
-                        bgColor: '#E8F5E9',
-                        href: "/calendarscreen"
-                    },
-                    {
-                        icon: ClipboardList,
-                        label: 'Class Attendance',
-                        color: '#3B82F6',
-                        bgColor: '#DBEAFE',
-                        href: "/teachers/class-attendance"
-                    },
-                    {
-                        icon: ScrollText,
-                        label: 'Syllabus',
-                        color: '#9C27B0',
-                        bgColor: '#F3E5F5',
-                        href: "/syllabusview"
-                    },
-                    {
-                        icon: BookOpen,
-                        label: 'Library',
-                        color: '#10b981',
-                        bgColor: '#dcfce7',
-                        href: "/teachers/teacher-library"
-                    },
-                    {
-                        icon: Award,
-                        label: 'Examination',
-                        color: '#F59E0B',
-                        bgColor: '#FEF3C7',
-                        href: "/teachers/exam-results"
-                    },
-                    {
-                        icon: Wallet,
-                        label: 'My Payroll',
-                        color: '#059669',
-                        bgColor: '#D1FAE5',
-                        href: "/teachers/my-payroll"
-                    },
-                    {
-                        icon: Clock,
-                        label: 'My Timetable',
-                        color: '#8B5CF6',
-                        bgColor: '#EDE9FE',
-                        href: "/teachers/timetable"
-                    },
-                ],
-            },
-        ];
-
-        return (
-            <ScrollView
-                style={styles.container}
-                showsVerticalScrollIndicator={false}
-                refreshControl={
-                    <RefreshControl
-                        refreshing={refreshing}
-                        onRefresh={() => {
-                            onRefresh();
-                            refetchDelegations();
-                        }}
-                        tintColor="#0469ff"
-                        colors={['#0469ff']}
-                    />
-                }
-            >
-                {/* Delegation Banner - Shows when there are active delegations */}
-                {activeDelegations.length > 0 && (
-                    <Animated.View entering={FadeInDown.duration(400)} style={styles.delegationBannerContainer}>
-                        {activeDelegations.map((delegation, index) => (
-                            <Animated.View
-                                key={delegation.id}
-                                entering={FadeInDown.delay(index * 100).duration(400)}
-                                style={styles.delegationBanner}
-                            >
-                                <HapticTouchable
-                                    onPress={() => handleSelectDelegation(delegation)}
-                                    style={{ flex: 1 }}
-                                >
-                                    <View style={styles.delegationBannerContent}>
-                                        <View style={styles.delegationBannerIcon}>
-                                            <UserCheck size={20} color="#fff" />
-                                        </View>
-                                        <View style={styles.delegationBannerText}>
-                                            <Text style={styles.delegationBannerTitle}>
-                                                Substitute Teacher Assignment
-                                            </Text>
-                                            <Text style={styles.delegationBannerSubtitle}>
-                                                You are assigned to {delegation.className}
-                                                {delegation.sectionName && ` - ${delegation.sectionName}`} For Attendance Marking!
-                                            </Text>
-                                            <View style={styles.delegationBannerDate}>
-                                                <Calendar size={12} color="rgba(255, 255, 255, 0.9)" />
-                                                <Text style={styles.delegationBannerDateText}>
-                                                    Until {new Date(delegation.endDate).toLocaleDateString()}
-                                                </Text>
-                                            </View>
-                                            <Text style={{
-                                                fontSize: 12,
-                                                marginTop: 5,
-                                                color: 'rgba(255, 255, 255, 0.9)',
-                                            }}>
-                                                Click To Mark
-                                            </Text>
-                                        </View>
-                                        {/* <HapticTouchable
-                                            onPress={(e) => {
-                                                e.stopPropagation();
-                                                handleDismissBanner(delegation.id);
-                                            }}
-                                            style={styles.delegationBannerClose}
-                                        >
-                                            <X size={18} color="rgba(255, 255, 255, 0.9)" />
-                                        </HapticTouchable> */}
-                                    </View>
-                                </HapticTouchable>
-                            </Animated.View>
-                        ))}
-                    </Animated.View>
-                )}
-
-                {/* Today's Events */}
-                {todaysEvents.length > 0 && (
-                    <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
-                        <View style={styles.sectionHeader}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                                <Text style={styles.sectionTitle}>Today's Events</Text>
-                                <View style={styles.todayBadge}>
-                                    <Text style={styles.todayBadgeText}>NOW</Text>
-                                </View>
-                            </View>
-                        </View>
-                        <View style={styles.eventsContainer}>
-                            {todaysEvents.map((event, index) => (
-                                <Animated.View key={event.id} entering={FadeInRight.delay(600 + index * 100).duration(500)}>
-                                    <HapticTouchable>
-                                        <LinearGradient
-                                            colors={[event.color, event.color + 'DD']}
-                                            style={styles.todayEventCard}
-                                        >
-                                            <View style={styles.todayEventIcon}>
-                                                <Text style={styles.eventEmoji}>{event.icon}</Text>
-                                            </View>
-                                            <View style={styles.eventInfo}>
-                                                <Text style={styles.todayEventTitle}>{event.title}</Text>
-                                                {event.location && (
-                                                    <Text style={styles.todayEventLocation}>📍 {event.location}</Text>
-                                                )}
-                                            </View>
-                                            <View style={styles.pulsingDot} />
-                                        </LinearGradient>
-                                    </HapticTouchable>
-                                </Animated.View>
-                            ))}
-                        </View>
-                    </Animated.View>
-                )}
-
-                {/* Updates Widget - Shows when there are updates */}
-                {(recentNotice || nextEvent) && (
-                    <Animated.View entering={FadeInDown.delay(250).duration(500)} style={styles.updatesWidget}>
-                        {recentNotice && (
-                            <HapticTouchable
-                                style={styles.updateItem}
-                                onPress={() => router.push('/(tabs)/noticeboard')}
-                            >
-                                <View style={[styles.updateIconBg, { backgroundColor: '#FFEBEE' }]}>
-                                    <Bell size={14} color="#EF4444" />
-                                </View>
-                                <View style={{ flex: 1 }}>
-                                    <Text style={styles.updateText} numberOfLines={1}>
-                                        🔴 {recentNotice.title}
-                                    </Text>
-                                    <Text style={styles.updateTime}>{recentNotice.time}</Text>
-                                </View>
-                                <ArrowRight size={14} color="#999" />
-                            </HapticTouchable>
-                        )}
-                        {nextEvent && (
-                            <HapticTouchable
-                                style={styles.updateItem}
-                                onPress={() => router.push('/(screens)/calendarscreen')}
-                            >
-                                <View style={[styles.updateIconBg, { backgroundColor: '#E8F5E9' }]}>
-                                    <Calendar size={14} color="#4CAF50" />
-                                </View>
-                                <View style={{ flex: 1 }}>
-                                    <Text style={styles.updateText} numberOfLines={1}>
-                                        📅 {nextEvent.title}
-                                    </Text>
-                                    <Text style={styles.updateTime}>
-                                        {nextEvent.date}
-                                    </Text>
-                                </View>
-                                <ArrowRight size={14} color="#999" />
-                            </HapticTouchable>
-                        )}
-                    </Animated.View>
-                )}
-
-                {/* Quick Stats for teacher - Dynamic */}
-                <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.section}>
-                    {isAttendanceFetching ? (
-                        <View style={styles.statsLoadingContainer}>
-                            <ActivityIndicator size="small" color="#0469ff" />
-                            <Text style={styles.statsLoadingText}>Updating stats...</Text>
-                        </View>
-                    ) : (
-                        <View style={styles.statsGrid}>
-                            <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/teachers/stats-calendar')}>
-                                <LinearGradient colors={['#4ECDC4', '#44A08D']} style={styles.statCard}>
-                                    <View style={styles.statIcon}>
-                                        <CalendarDays size={24} color="#fff" />
-                                    </View>
-                                    <Text style={styles.statValue}>{totalDaysWorked}</Text>
-                                    <Text style={styles.statLabel}>Days Present</Text>
-                                </LinearGradient>
-                            </HapticTouchable>
-
-                            <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/teachers/stats-calendar')}>
-                                <LinearGradient colors={['#FFD93D', '#F6C90E']} style={styles.statCard}>
-                                    <View style={styles.statIcon}>
-                                        <Award size={24} color="#fff" />
-                                    </View>
-                                    <Text style={styles.statValue}>{Math.round(attendancePercent)}%</Text>
-                                    <Text style={styles.statLabel}>Attendance</Text>
-                                </LinearGradient>
-                            </HapticTouchable>
-
-                            <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/teachers/stats-calendar')}>
-                                <LinearGradient colors={['#FF6B6B', '#EE5A6F']} style={styles.statCard}>
-                                    <View style={styles.statIcon}>
-                                        <Umbrella size={24} color="#fff" />
-                                    </View>
-                                    <Text style={styles.statValue}>{totalLeavesTaken}</Text>
-                                    <Text style={styles.statLabel}>Leaves Taken</Text>
-                                </LinearGradient>
-                            </HapticTouchable>
-                        </View>
-                    )}
-                </Animated.View>
-
-                {/* Quick Actions */}
-                {actionGroups && actionGroups.map((group, groupIndex) => (
-                    <Animated.View
-                        key={group.title}
-                        entering={FadeInDown.delay(400 + groupIndex * 100).duration(600)}
-                        style={styles.section}
-                    >
-                        <Text style={styles.sectionTitle}>{group.title}</Text>
-                        <View style={styles.actionsGrid}>
-                            {group.actions.map((action, index) => (
-                                <Animated.View
-                                    key={action.label}
-                                    entering={FadeInDown.delay(500 + index * 50).duration(400)}
-                                >
-                                    <HapticTouchable
-                                        onPress={() => {
-                                            if (action.params) {
-                                                router.push({
-                                                    pathname: action.href,
-                                                    params: action.params,
-                                                });
-                                            } else {
-                                                router.push(action.href || '');
-                                            }
-                                        }}
-                                    >
-                                        <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}>
-                                            <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
-                                                <action.icon size={22} color={action.color} />
-                                            </View>
-                                            <Text style={styles.actionLabel} numberOfLines={1}>
-                                                {action.label}
-                                            </Text>
-                                        </View>
-                                    </HapticTouchable>
-                                </Animated.View>
-                            ))}
-                        </View>
-                    </Animated.View>
-                ))}
-
-                {/* Upcoming Events */}
-                <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>Upcoming Events</Text>
-                        <HapticTouchable onPress={() => router.push('/(screens)/calendarscreen')}>
-                            <Text style={styles.seeAll}>See All</Text>
-                        </HapticTouchable>
-                    </View>
-                    <View style={styles.eventsContainer}>
-                        {upcomingEvents && upcomingEvents.length > 0 ? (
-                            upcomingEvents.map((event, index) => (
-                                <Animated.View key={event.id} entering={FadeInRight.delay(700 + index * 100).duration(500)}>
-                                    <HapticTouchable onPress={() => router.push(`/(screens)/calendarscreen?eventid=${event.id}`)}>
-                                        <View style={styles.eventCard}>
-                                            <View style={[styles.eventIcon, { backgroundColor: event.color + '20' }]}>
-                                                <Text style={styles.eventEmoji}>{event.icon}</Text>
-                                            </View>
-                                            <View style={styles.eventInfo}>
-                                                <Text style={styles.eventTitle}>{event.title}</Text>
-                                                <View style={styles.eventDate}>
-                                                    <Calendar size={14} color="#666" />
-                                                    <Text style={styles.eventDateText}>{event.date}</Text>
-                                                </View>
-                                            </View>
-                                            <ChevronRight size={20} color="#999" />
-                                        </View>
-                                    </HapticTouchable>
-                                </Animated.View>
-                            ))
-                        ) : (
-                            <Animated.View
-                                entering={FadeInRight.delay(700).duration(500)}
-                                style={{
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    paddingVertical: 20,
-                                    opacity: 0.8,
-                                }}
-                            >
-                                <CheckCircle2 size={26} color="#0469ff" />
-                                <Text style={{ marginTop: 8, fontSize: 14, color: '#555' }}>
-                                    You're all caught up!
-                                </Text>
-                            </Animated.View>
-                        )}
-                    </View>
-                </Animated.View>
-
-                {/* Recent Notices */}
-                <Animated.View entering={FadeInDown.delay(800).duration(600)} style={[styles.section, { marginBottom: 30 }]}>
-                    <View style={styles.sectionHeader}>
-                        <Text style={styles.sectionTitle}>Recent Notices</Text>
-                        <HapticTouchable onPress={() => router.push('/(tabs)/noticeboard')}>
-                            <Text style={styles.seeAll}>View All</Text>
-                        </HapticTouchable>
-                    </View>
-                    <View style={styles.noticesContainer}>
-                        {notices && notices.length > 0 ? (
-                            notices.map((notice, index) => (
-                                <Animated.View
-                                    key={notice.id}
-                                    entering={FadeInRight.delay(900 + index * 100).duration(500)}
-                                >
-                                    <HapticTouchable onPress={() => router.push('/(tabs)/noticeboard')}>
-                                        <View style={styles.noticeCard}>
-                                            <View style={styles.noticeLeft}>
-                                                <View style={[styles.noticeIcon, notice.unread && styles.unreadIcon]}>
-                                                    <Bell size={16} color={notice.unread ? '#0469ff' : '#999'} />
-                                                </View>
-                                                <View style={styles.noticeInfo}>
-                                                    <Text style={[styles.noticeTitle, notice.unread && styles.unreadTitle]}>
-                                                        {notice.title}
-                                                    </Text>
-                                                    <Text style={styles.noticeTime}>{notice.time}</Text>
-                                                </View>
-                                            </View>
-                                            {notice.unread && <View style={styles.unreadDot} />}
-                                        </View>
-                                    </HapticTouchable>
-                                </Animated.View>
-                            ))
-                        ) : (
-                            <Animated.View
-                                entering={FadeInRight.delay(900).duration(500)}
-                                style={{
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    paddingVertical: 20,
-                                    opacity: 0.8,
-                                }}
-                            >
-                                <CheckCircle2 size={26} color="#0469ff" />
-                                <Text style={{ marginTop: 8, fontSize: 14, color: '#555' }}>
-                                    You're all caught up!
-                                </Text>
-                            </Animated.View>
-                        )}
-                    </View>
-                </Animated.View>
-
-                {/* Delegation Modal */}
-                <DelegationCheckModal
-                    visible={showDelegationModal}
-                    delegations={activeDelegations}
-                    onSelectDelegation={handleSelectDelegation}
-                    onClose={handleDismissDelegationModal}
-                />
-            </ScrollView>
-        );
-    };
     // === ADMIN VIEW ===
     const AdminView = ({ refreshing, onRefresh }) => (
         <ScrollView
@@ -1474,7 +849,7 @@ export default function HomeScreen() {
             },
             enabled: !!schoolId && !!userId,
             keepPreviousData: true,
-            staleTime: 0,               // ← force fresh data on mount / category change
+            staleTime: 1000 * 60,               // ← cache for 1 min instead of forcing refetch
         });
         // console.log(recentNotices);
         const notices = recentNotices?.notices?.map((n) => ({
@@ -1484,68 +859,74 @@ export default function HomeScreen() {
             unread: !n.read,
         })) || [];
 
-        // Fetch homework for selected child (for badge count)
-        const { data: homeworkData } = useQuery({
-            queryKey: ['parent-homework-badge', schoolId, selectedChild?.studentId],
-            queryFn: async () => {
-                if (!schoolId || !selectedChild?.studentId) return { homework: [], lastViewed: null };
-                const res = await api.get(`/schools/homework?schoolId=${schoolId}&studentId=${selectedChild.studentId}`);
-                // Get last viewed timestamp for this child
-                const lastViewedKey = `homework_last_viewed_${selectedChild.studentId}`;
-                const lastViewed = await SecureStore.getItemAsync(lastViewedKey);
-                return { ...res.data, lastViewed };
-            },
-            enabled: !!schoolId && !!selectedChild?.studentId,
-            staleTime: 1000 * 60 * 2,
-        });
 
-        // Fetch attendance stats for selected child (for dashboard card)
-        const { data: attendanceStats, isFetching: isAttendanceFetching } = useQuery({
-            queryKey: ['parent-child-attendance', schoolId, selectedChild?.studentId],
+        // Batch child stats queries for faster loading
+        const { data: childStats, isFetching: isChildStatsFetching } = useQuery({
+            queryKey: ['parent-child-stats', schoolId, selectedChild?.studentId],
             queryFn: async () => {
                 if (!schoolId || !selectedChild?.studentId) return null;
                 const now = new Date();
                 const month = now.getMonth() + 1;
                 const year = now.getFullYear();
-                const res = await api.get(`/schools/${schoolId}/attendance/stats?userId=${selectedChild.studentId}&month=${month}&year=${year}`);
-                return res.data;
+
+                const [attendanceRes, homeworkRes, examRes] = await Promise.all([
+                    api.get(`/schools/${schoolId}/attendance/stats?userId=${selectedChild.studentId}&month=${month}&year=${year}`).catch(() => ({ data: null })),
+                    api.get(`/schools/homework?schoolId=${schoolId}&studentId=${selectedChild.studentId}`).catch(() => ({ data: { homework: [] } })),
+                    api.get(`/schools/${schoolId}/examination/student-results?studentId=${selectedChild.studentId}`).catch(() => ({ data: { stats: {}, results: [] } })),
+                ]);
+
+                // Get last viewed timestamps
+                const homeworkLastViewedKey = `homework_last_viewed_${selectedChild.studentId}`;
+                const examLastViewedKey = `exam_last_viewed_${selectedChild.studentId}`;
+
+                const [homeworkLastViewed, examLastViewed] = await Promise.all([
+                    SecureStore.getItemAsync(homeworkLastViewedKey),
+                    SecureStore.getItemAsync(examLastViewedKey),
+                ]);
+
+                return {
+                    attendance: attendanceRes.data,
+                    homework: { ...homeworkRes.data, lastViewed: homeworkLastViewed },
+                    exams: { ...examRes.data, lastViewed: examLastViewed },
+                };
             },
             enabled: !!schoolId && !!selectedChild?.studentId,
-            staleTime: 1000 * 60 * 5,
+            staleTime: 1000 * 60 * 2,
         });
 
-        // Fetch fee status for selected child (for dashboard card)
-        const { data: academicYearData } = useQuery({
-            queryKey: ['academic-years-parent', schoolId],
-            queryFn: async () => {
-                const res = await api.get(`/schools/academic-years?schoolId=${schoolId}`);
-                return res.data?.find(y => y.isActive);
-            },
-            enabled: !!schoolId,
-            staleTime: 1000 * 60 * 10,
-        });
+        // Extract stats from batched query
+        const attendanceStats = childStats?.attendance;
+        const homeworkData = childStats?.homework;
+        const examBadgeData = childStats?.exams;
 
-        const { data: feeData } = useQuery({
-            queryKey: ['parent-child-fee', selectedChild?.studentId, academicYearData?.id],
-            queryFn: async () => {
-                if (!selectedChild?.studentId || !academicYearData?.id) return null;
-                const params = new URLSearchParams({ academicYearId: academicYearData.id });
-                const res = await api.get(`/schools/fee/students/${selectedChild.studentId}?${params}`);
-                return res.data;
-            },
-            enabled: !!selectedChild?.studentId && !!academicYearData?.id,
-            staleTime: 1000 * 60 * 5,
-        });
+        // Fetch fee status for selected child (for dashboard card) - DISABLED due to 404s
+        // const { data: academicYearData } = useQuery({
+        //     queryKey: ['academic-years-parent', schoolId],
+        //     queryFn: async () => {
+        //         const res = await api.get(`/schools/academic-years?schoolId=${schoolId}`);
+        //         return res.data?.find(y => y.isActive);
+        //     },
+        //     enabled: !!schoolId,
+        //     staleTime: 1000 * 60 * 10,
+        // });
 
-        // Calculate dashboard card values (moved childPerformance after examBadgeData query below)
+        // const { data: feeData } = useQuery({
+        //     queryKey: ['parent-child-fee', selectedChild?.studentId, academicYearData?.id],
+        //     queryFn: async () => {
+        //         if (!selectedChild?.studentId || !academicYearData?.id) return null;
+        //         const params = new URLSearchParams({ academicYearId: academicYearData.id });
+        //         const res = await api.get(`/schools/fee/students/${selectedChild.studentId}?${params}`);
+        //         return res.data;
+        //     },
+        //     enabled: !!selectedChild?.studentId && !!academicYearData?.id,
+        //     staleTime: 1000 * 60 * 5,
+        // });
+
+        // Calculate dashboard card values
         const childAttendance = attendanceStats?.monthlyStats?.attendancePercentage ?? '--';
-        // Fee status: show actual balance, or 'N/A' if no fee data, or 'Paid' if balance is 0
-        const childFeeStatus = feeData === undefined || feeData === null
-            ? 'N/A'
-            : feeData.balanceAmount > 0
-                ? `₹${Math.round(feeData.balanceAmount / 1000)}K Due`
-                : 'Paid';
-        const childFeePending = feeData?.balanceAmount || 0;
+        // Fee status: Disabled due to API 404s
+        const childFeeStatus = 'N/A';
+        const childFeePending = 0;
 
         // Fetch upcoming events for parent
         const { data: upcomingEvents } = useQuery({
@@ -1578,23 +959,8 @@ export default function HomeScreen() {
             return true; // No lastViewed = show all pending
         }).length;
 
-        // Fetch exam results for selected child (for badge count)
-        const { data: examBadgeData, isFetching: isExamFetching } = useQuery({
-            queryKey: ['parent-exams-badge', schoolId, selectedChild?.studentId],
-            queryFn: async () => {
-                if (!schoolId || !selectedChild?.studentId) return { stats: { latestResultDate: null }, lastViewed: null };
-                const res = await api.get(`/schools/${schoolId}/examination/student-results?studentId=${selectedChild.studentId}`);
-                // Get last viewed timestamp for this child
-                const lastViewedKey = `exam_last_viewed_${selectedChild.studentId}`;
-                const lastViewed = await SecureStore.getItemAsync(lastViewedKey);
-                return { ...res.data, lastViewed };
-            },
-            enabled: !!schoolId && !!selectedChild?.studentId,
-            staleTime: 1000 * 60 * 2,
-        });
-
         // Combined loading state for stats cards
-        const isStatsLoading = isAttendanceFetching || isExamFetching;
+        const isStatsLoading = isChildStatsFetching;
 
         // Count new exam results (created after last viewed)
         const newExamResults = (() => {
@@ -1743,6 +1109,43 @@ export default function HomeScreen() {
                                 parentId
                             })
                         }
+                    },
+                ],
+            },
+            {
+                title: 'Transport',
+                actions: [
+                    {
+                        icon: Users,
+                        label: 'Bus Request',
+                        color: '#3B82F6',
+                        bgColor: '#DBEAFE',
+                        href: "/(screens)/transport/bus-request",
+                        params: { childData: JSON.stringify(selectedChild) },
+                    },
+                    {
+                        icon: Calendar,
+                        label: 'Track Bus',
+                        color: '#10B981',
+                        bgColor: '#D1FAE5',
+                        href: "/(screens)/transport/bus-tracking",
+                        params: { childData: JSON.stringify(selectedChild) },
+                    },
+                    {
+                        icon: CheckCircle2,
+                        label: 'Bus Attendance',
+                        color: '#8B5CF6',
+                        bgColor: '#EDE9FE',
+                        href: "/(screens)/transport/attendance-history",
+                        params: { childData: JSON.stringify(selectedChild) },
+                    },
+                    {
+                        icon: DollarSign,
+                        label: 'Transport Fee',
+                        color: '#F59E0B',
+                        bgColor: '#FEF3C7',
+                        href: "/(screens)/transport/transport-fee",
+                        params: { childData: JSON.stringify(selectedChild) },
                     },
                 ],
             },
@@ -1903,7 +1306,19 @@ export default function HomeScreen() {
             );
         };
 
-        // Main view with children
+        // Loading state - wait for ALL critical data before rendering
+        const isCriticalDataLoading = isPending || !selectedChild || isChildStatsFetching;
+
+        if (isCriticalDataLoading) {
+            return (
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                    <ActivityIndicator size="large" color="#0469ff" />
+                    <Text style={{ marginTop: 12, color: '#666', fontSize: 14 }}>Loading...</Text>
+                </View>
+            );
+        }
+
+        // Main content - child selected
         return (
             <ScrollView
                 style={styles.container}
@@ -2256,13 +1671,13 @@ export default function HomeScreen() {
         );
     };
     return (
-        <View style={styles.container}>
-            <Header />
+        <SafeAreaView style={styles.container} edges={['top']}>
+            {!loading && <Header />}
             <StatusBar style='dark' />
             {/* Today's Events (if any) */}
 
             {renderContent()}
-        </View>
+        </SafeAreaView>
     );
 }
 
@@ -2276,8 +1691,8 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: isSmallDevice ? 12 : 16,
-        paddingBottom: 12,
-        paddingTop: 50,
+        paddingBottom: 8,
+        paddingTop: 8,
         borderBottomColor: '#f0f0f0',
         borderBottomWidth: 1,
         backgroundColor: '#fff',
@@ -2587,7 +2002,7 @@ const styles = StyleSheet.create({
     },
     section: {
         paddingHorizontal: isSmallDevice ? 12 : 16,
-        marginTop: 20,
+        marginTop: 12,
     },
     sectionHeader: {
         flexDirection: 'row',
@@ -3081,4 +2496,415 @@ const styles = StyleSheet.create({
         color: '#666',
         marginTop: 2,
     },
+});
+
+// === TEACHER VIEW (MOVED) ===
+const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEvents, todaysEvents }) => {
+    const [showDelegationModal, setShowDelegationModal] = useState(false);
+    const [activeDelegations, setActiveDelegations] = useState([]);
+    const [shownDelegations, setShownDelegations] = useState({});
+    // const queryClient = useQueryClient(); // Unused here if we don't use it directly
+
+    // Load shown delegations from secure storage
+    useEffect(() => {
+        loadShownDelegations();
+    }, []);
+
+    const loadShownDelegations = async () => {
+        try {
+            const stored = await SecureStore.getItemAsync('delegation_shown_versions');
+            if (stored) {
+                setShownDelegations(JSON.parse(stored));
+            }
+        } catch (error) {
+            console.error('Error loading shown delegations:', error);
+        }
+    };
+
+    const saveDelegationAsShown = async (delegationId, version) => {
+        try {
+            const updated = {
+                ...shownDelegations,
+                [delegationId]: version
+            };
+            await SecureStore.setItemAsync('delegation_shown_versions', JSON.stringify(updated));
+            setShownDelegations(updated);
+        } catch (error) {
+            console.error('Error saving delegation status:', error);
+        }
+    };
+
+    // --- BATCHED QUERY FOR TEACHER DASHBOARD ---
+    const { data: dashboardData, isLoading: isDashboardLoading, refetch: refetchDashboard } = useQuery({
+        queryKey: ['teacher-dashboard-combined', schoolId, userId],
+        queryFn: async () => {
+            if (!schoolId || !userId) return null;
+
+            const now = new Date();
+            const month = now.getMonth() + 1;
+            const year = now.getFullYear();
+
+            const [delegationRes, noticesRes, attendanceRes, leavesRes] = await Promise.all([
+                api.get(`/schools/${schoolId}/attendance/delegations/check?teacherId=${userId}`),
+                api.get(`/notices/${schoolId}?userId=${userId}&limit=4&page=1`),
+                api.get(`/schools/${schoolId}/attendance/stats?userId=${userId}&month=${month}&year=${year}`),
+                api.get(`/schools/${schoolId}/attendance/leaves/balance?userId=${userId}`)
+            ]);
+
+            return {
+                delegations: delegationRes.data,
+                notices: noticesRes.data,
+                attendance: attendanceRes.data,
+                leaves: leavesRes.data
+            };
+        },
+        enabled: !!schoolId && !!userId,
+        staleTime: 1000 * 60 * 2, // 2 minutes
+    });
+
+    // Extract data
+    const delegationCheck = dashboardData?.delegations;
+    const recentNotices = dashboardData?.notices;
+    const attendanceStats = dashboardData?.attendance;
+    const leaveData = dashboardData?.leaves;
+
+    const notices = recentNotices?.notices?.map((n) => ({
+        id: n.id,
+        title: n.title,
+        time: new Date(n.createdAt).toLocaleString(),
+        unread: !n.read,
+    })) || [];
+
+    const recentNotice = notices?.find(n => n.unread) || null;
+    const nextEvent = upcomingEvents?.[0] || null;
+
+    // Calculate stats
+    const totalDaysWorked = attendanceStats?.monthlyStats?.presentDays || 0;
+    const attendancePercent = attendanceStats?.monthlyStats?.attendancePercentage || 0;
+    const totalLeavesTaken = leaveData?.totalUsed || 0;
+
+    // Handle delegation modal logic
+    useEffect(() => {
+        if (delegationCheck?.hasDelegations && delegationCheck.delegations.length > 0) {
+            const unacknowledgedDelegations = delegationCheck.delegations.filter(
+                delegation => !delegation.acknowledgedAt
+            );
+
+            if (unacknowledgedDelegations.length > 0) {
+                setActiveDelegations(unacknowledgedDelegations);
+                setShowDelegationModal(true);
+            } else {
+                setActiveDelegations(delegationCheck.delegations);
+                setShowDelegationModal(false);
+            }
+        } else {
+            setActiveDelegations([]);
+            setShowDelegationModal(false);
+        }
+    }, [delegationCheck]);
+
+    const handleSelectDelegation = async (delegation) => {
+        await saveDelegationAsShown(delegation.id, delegation.version);
+        setShowDelegationModal(false);
+        router.push({
+            pathname: 'teachers/delegationmarking',
+            params: {
+                delegationId: delegation.id,
+                classId: delegation.classId,
+                sectionId: delegation.sectionId || 'all',
+                className: delegation.className,
+                sectionName: delegation.sectionName || '',
+                isDelegation: 'true'
+            }
+        });
+    };
+
+    const handleDismissDelegationModal = async () => {
+        for (const delegation of activeDelegations) {
+            await saveDelegationAsShown(delegation.id, delegation.version);
+        }
+        setShowDelegationModal(false);
+    };
+
+    // Quick Actions
+    const actionGroups = [
+        {
+            title: 'Quick Actions',
+            actions: [
+                { icon: Book, label: 'Add Homework', color: '#0469ff', bgColor: '#E3F2FD', href: "/homework/assign" },
+                { icon: Calendar, label: 'Self Attendance', color: '#F9A825', bgColor: '#FFF8E1', href: "attendance" },
+                { icon: Calendar, label: 'Mark Attendance', color: '#F9A825', bgColor: '#FFF8E1', href: "teacher/mark-attendance" },
+                { icon: ChartPie, label: 'Attendance Stats', color: '#F9A825', params: { teacherData: JSON.stringify({ schoolId, userId }) }, bgColor: '#FFF8E1', href: "/teachers/stats-calendar" },
+                { icon: Calendar, label: 'School Calendar', color: '#4CAF50', bgColor: '#E8F5E9', href: "/calendarscreen" },
+                { icon: ClipboardList, label: 'Class Attendance', color: '#3B82F6', bgColor: '#DBEAFE', href: "/teachers/class-attendance" },
+                { icon: ScrollText, label: 'Syllabus', color: '#9C27B0', bgColor: '#F3E5F5', href: "/syllabusview" },
+                { icon: BookOpen, label: 'Library', color: '#10b981', bgColor: '#dcfce7', href: "/teachers/teacher-library" },
+                { icon: Award, label: 'Examination', color: '#F59E0B', bgColor: '#FEF3C7', href: "/teachers/exam-results" },
+                { icon: Wallet, label: 'My Payroll', color: '#059669', bgColor: '#D1FAE5', href: "/teachers/my-payroll" },
+                { icon: Clock, label: 'My Timetable', color: '#8B5CF6', bgColor: '#EDE9FE', href: "/teachers/timetable" },
+            ],
+        },
+    ];
+
+    // MAIN LOADER - Shows until EVERYTHING is ready
+    if (isDashboardLoading && !refreshing) {
+        return (
+            <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 50 }}>
+                <ActivityIndicator size="large" color="#0469ff" />
+                <Text style={{ marginTop: 12, color: '#666', fontSize: 14 }}>Loading Dashboard...</Text>
+            </View>
+        );
+    }
+
+    return (
+        <ScrollView
+            style={styles.container}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+                <RefreshControl
+                    refreshing={refreshing}
+                    onRefresh={() => {
+                        onRefresh();
+                        refetchDashboard();
+                    }}
+                    tintColor="#0469ff"
+                    colors={['#0469ff']}
+                />
+            }
+        >
+            {/* Delegation Banner */}
+            {activeDelegations.length > 0 && (
+                <Animated.View entering={FadeInDown.duration(400)} style={styles.delegationBannerContainer}>
+                    {activeDelegations.map((delegation, index) => (
+                        <Animated.View key={delegation.id} entering={FadeInDown.delay(index * 100).duration(400)} style={styles.delegationBanner}>
+                            <HapticTouchable onPress={() => handleSelectDelegation(delegation)} style={{ flex: 1 }}>
+                                <View style={styles.delegationBannerContent}>
+                                    <View style={styles.delegationBannerIcon}><UserCheck size={20} color="#fff" /></View>
+                                    <View style={styles.delegationBannerText}>
+                                        <Text style={styles.delegationBannerTitle}>Substitute Teacher Assignment</Text>
+                                        <Text style={styles.delegationBannerSubtitle}>You are assigned to {delegation.className}{delegation.sectionName && ` - ${delegation.sectionName}`} For Attendance Marking!</Text>
+                                        <View style={styles.delegationBannerDate}>
+                                            <Calendar size={12} color="rgba(255, 255, 255, 0.9)" />
+                                            <Text style={styles.delegationBannerDateText}>Until {new Date(delegation.endDate).toLocaleDateString()}</Text>
+                                        </View>
+                                        <Text style={{ fontSize: 12, marginTop: 5, color: 'rgba(255, 255, 255, 0.9)' }}>Click To Mark</Text>
+                                    </View>
+                                </View>
+                            </HapticTouchable>
+                        </Animated.View>
+                    ))}
+                </Animated.View>
+            )}
+
+            {/* Today's Events */}
+            {todaysEvents && todaysEvents.length > 0 && (
+                <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
+                    <View style={styles.sectionHeader}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <Text style={styles.sectionTitle}>Today's Events</Text>
+                            <View style={styles.todayBadge}>
+                                <Text style={styles.todayBadgeText}>NOW</Text>
+                            </View>
+                        </View>
+                    </View>
+                    <View style={styles.eventsContainer}>
+                        {todaysEvents.map((event, index) => (
+                            <Animated.View key={event.id} entering={FadeInRight.delay(600 + index * 100).duration(500)}>
+                                <HapticTouchable>
+                                    <LinearGradient
+                                        colors={[event.color, event.color + 'DD']}
+                                        style={styles.todayEventCard}
+                                    >
+                                        <View style={styles.todayEventIcon}>
+                                            <Text style={styles.eventEmoji}>{event.icon}</Text>
+                                        </View>
+                                        <View style={styles.eventInfo}>
+                                            <Text style={styles.todayEventTitle}>{event.title}</Text>
+                                            {event.location && (
+                                                <Text style={styles.todayEventLocation}>📍 {event.location}</Text>
+                                            )}
+                                        </View>
+                                        <View style={styles.pulsingDot} />
+                                    </LinearGradient>
+                                </HapticTouchable>
+                            </Animated.View>
+                        ))}
+                    </View>
+                </Animated.View>
+            )}
+
+            {/* Updates Widget */}
+            {(recentNotice || nextEvent) && (
+                <Animated.View entering={FadeInDown.delay(250).duration(500)} style={styles.updatesWidget}>
+                    {recentNotice && (
+                        <HapticTouchable style={styles.updateItem} onPress={() => router.push('/(tabs)/noticeboard')}>
+                            <View style={[styles.updateIconBg, { backgroundColor: '#FFEBEE' }]}>
+                                <Bell size={14} color="#EF4444" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.updateText} numberOfLines={1}>🔴 {recentNotice.title}</Text>
+                                <Text style={styles.updateTime}>{recentNotice.time}</Text>
+                            </View>
+                            <ArrowRight size={14} color="#999" />
+                        </HapticTouchable>
+                    )}
+                    {nextEvent && (
+                        <HapticTouchable
+                            style={styles.updateItem}
+                            onPress={() => router.push('/(screens)/calendarscreen')}
+                        >
+                            <View style={[styles.updateIconBg, { backgroundColor: '#E8F5E9' }]}>
+                                <Calendar size={14} color="#4CAF50" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <Text style={styles.updateText} numberOfLines={1}>
+                                    📅 {nextEvent.title}
+                                </Text>
+                                <Text style={styles.updateTime}>
+                                    {nextEvent.date}
+                                </Text>
+                            </View>
+                            <ArrowRight size={14} color="#999" />
+                        </HapticTouchable>
+                    )}
+                </Animated.View>
+            )}
+
+            {/* Quick Stats */}
+            <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.section}>
+                <View style={styles.statsGrid}>
+                    <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/teachers/stats-calendar')}>
+                        <LinearGradient colors={['#4ECDC4', '#44A08D']} style={styles.statCard}>
+                            <View style={styles.statIcon}><CalendarDays size={24} color="#fff" /></View>
+                            <Text style={styles.statValue}>{totalDaysWorked}</Text>
+                            <Text style={styles.statLabel}>Days Present</Text>
+                        </LinearGradient>
+                    </HapticTouchable>
+                    <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/teachers/stats-calendar')}>
+                        <LinearGradient colors={['#FFD93D', '#F6C90E']} style={styles.statCard}>
+                            <View style={styles.statIcon}><Award size={24} color="#fff" /></View>
+                            <Text style={styles.statValue}>{Math.round(attendancePercent)}%</Text>
+                            <Text style={styles.statLabel}>Attendance</Text>
+                        </LinearGradient>
+                    </HapticTouchable>
+                    <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/teachers/stats-calendar')}>
+                        <LinearGradient colors={['#FF6B6B', '#EE5A6F']} style={styles.statCard}>
+                            <View style={styles.statIcon}><Umbrella size={24} color="#fff" /></View>
+                            <Text style={styles.statValue}>{totalLeavesTaken}</Text>
+                            <Text style={styles.statLabel}>Leaves Taken</Text>
+                        </LinearGradient>
+                    </HapticTouchable>
+                </View>
+            </Animated.View>
+
+            {/* Quick Actions */}
+            {actionGroups.map((group, groupIndex) => (
+                <Animated.View key={group.title} entering={FadeInDown.delay(400 + groupIndex * 100).duration(600)} style={styles.section}>
+                    <Text style={styles.sectionTitle}>{group.title}</Text>
+                    <View style={styles.actionsGrid}>
+                        {group.actions.map((action, index) => (
+                            <Animated.View key={action.label} entering={FadeInDown.delay(500 + index * 50).duration(400)}>
+                                <HapticTouchable onPress={() => action.params ? router.push({ pathname: action.href, params: action.params }) : router.push(action.href || '')}>
+                                    <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}>
+                                        <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}><action.icon size={22} color={action.color} /></View>
+                                        <Text style={styles.actionLabel} numberOfLines={1}>{action.label}</Text>
+                                    </View>
+                                </HapticTouchable>
+                            </Animated.View>
+                        ))}
+                    </View>
+                </Animated.View>
+            ))}
+
+            {/* Upcoming Events */}
+            <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
+                <View style={styles.sectionHeader}>
+                    <Text style={styles.sectionTitle}>Upcoming Events</Text>
+                    <HapticTouchable onPress={() => router.push('/(screens)/calendarscreen')}>
+                        <Text style={styles.seeAll}>See All</Text>
+                    </HapticTouchable>
+                </View>
+                <View style={styles.eventsContainer}>
+                    {upcomingEvents && upcomingEvents.length > 0 ? (
+                        upcomingEvents.map((event, index) => (
+                            <Animated.View key={event.id} entering={FadeInRight.delay(700 + index * 100).duration(500)}>
+                                <HapticTouchable onPress={() => router.push(`/(screens)/calendarscreen?eventid=${event.id}`)}>
+                                    <View style={styles.eventCard}>
+                                        <View style={[styles.eventIcon, { backgroundColor: event.color + '20' }]}>
+                                            <Text style={styles.eventEmoji}>{event.icon}</Text>
+                                        </View>
+                                        <View style={styles.eventInfo}>
+                                            <Text style={styles.eventTitle}>{event.title}</Text>
+                                            <View style={styles.eventDate}>
+                                                <Calendar size={14} color="#666" />
+                                                <Text style={styles.eventDateText}>{event.date}</Text>
+                                            </View>
+                                        </View>
+                                        <ChevronRight size={20} color="#999" />
+                                    </View>
+                                </HapticTouchable>
+                            </Animated.View>
+                        ))
+                    ) : (
+                        <Animated.View
+                            entering={FadeInRight.delay(700).duration(500)}
+                            style={{
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                paddingVertical: 20,
+                                opacity: 0.8,
+                            }}
+                        >
+                            <CheckCircle2 size={26} color="#0469ff" />
+                            <Text style={{ marginTop: 8, fontSize: 14, color: '#555' }}>
+                                You're all caught up!
+                            </Text>
+                        </Animated.View>
+                    )}
+                </View>
+            </Animated.View>
+
+            {/* Recent Notices */}
+            <Animated.View entering={FadeInDown.delay(800).duration(600)} style={[styles.section, { marginBottom: 30 }]}>
+                <View style={styles.sectionHeader}>
+                    <Text style={styles.sectionTitle}>Recent Notices</Text>
+                    <HapticTouchable onPress={() => router.push('/(tabs)/noticeboard')}><Text style={styles.seeAll}>View All</Text></HapticTouchable>
+                </View>
+                <View style={styles.noticesContainer}>
+                    {notices.length > 0 ? (
+                        notices.map((notice, index) => (
+                            <Animated.View key={notice.id} entering={FadeInRight.delay(900 + index * 100).duration(500)}>
+                                <HapticTouchable onPress={() => router.push('/(tabs)/noticeboard')}>
+                                    <View style={styles.noticeCard}>
+                                        <View style={styles.noticeLeft}>
+                                            <View style={[styles.noticeIcon, notice.unread && styles.unreadIcon]}>
+                                                <Bell size={16} color={notice.unread ? '#0469ff' : '#999'} />
+                                            </View>
+                                            <View style={styles.noticeInfo}>
+                                                <Text style={[styles.noticeTitle, notice.unread && styles.unreadTitle]}>{notice.title}</Text>
+                                                <Text style={styles.noticeTime}>{notice.time}</Text>
+                                            </View>
+                                        </View>
+                                        {notice.unread && <View style={styles.unreadDot} />}
+                                    </View>
+                                </HapticTouchable>
+                            </Animated.View>
+                        ))
+                    ) : (
+                        <View style={{ alignItems: 'center', padding: 20 }}>
+                            <Text style={{ color: '#666' }}>No notices yet</Text>
+                        </View>
+                    )}
+                </View>
+            </Animated.View>
+
+            {/* Delegation Modal */}
+            <DelegationCheckModal
+                visible={showDelegationModal}
+                delegations={activeDelegations}
+                onSelectDelegation={handleSelectDelegation}
+                onClose={handleDismissDelegationModal}
+            />
+        </ScrollView>
+    );
 });

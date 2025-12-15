@@ -14,6 +14,8 @@ import fcmService from '../services/fcmService';
 import { NotificationProvider, useNotification } from '../contexts/NotificationContext';
 import messaging from '@react-native-firebase/messaging';
 
+const BADGE_KEY = 'noticeBadgeCount';
+
 // Keep splash visible while fonts load
 SplashScreen.preventAutoHideAsync();
 
@@ -202,7 +204,7 @@ function RootLayoutContent() {
 
     return (
         <>
-            <StatusBar backgroundColor='white' />
+            <StatusBar style="dark" />
             <View onLayout={onLayoutRootView} style={{ flex: 1 }}>
                 <Stack screenOptions={{ headerShown: false }}>
                     <Stack.Screen name="index" />

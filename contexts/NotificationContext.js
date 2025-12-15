@@ -33,7 +33,7 @@ export const NotificationProvider = ({ children }) => {
       const newCount = noticeBadgeCount + 1;
       setNoticeBadgeCount(newCount);
       await SecureStore.setItemAsync(BADGE_KEY, newCount.toString());
-      console.log('✅ Badge incremented to:', newCount);
+      // console.log('✅ Badge incremented to:', newCount);
     } catch (error) {
       console.error('Error incrementing badge:', error);
     }
@@ -43,7 +43,7 @@ export const NotificationProvider = ({ children }) => {
     try {
       setNoticeBadgeCount(0);
       await SecureStore.setItemAsync(BADGE_KEY, '0');
-      console.log('✅ Badge cleared');
+      // console.log('✅ Badge cleared');
     } catch (error) {
       console.error('Error clearing badge:', error);
     }

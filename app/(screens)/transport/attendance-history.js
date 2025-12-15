@@ -206,6 +206,7 @@ export default function AttendanceHistoryScreen() {
                             <HapticTouchable
                                 key={filter}
                                 onPress={() => setDateFilter(filter)}
+
                             >
                                 <View style={[
                                     styles.filterBtn,
@@ -406,6 +407,7 @@ const styles = StyleSheet.create({
     filterBtn: {
         flex: 1,
         paddingVertical: 10,
+        paddingHorizontal: 20,
         backgroundColor: '#f8f9fa',
         borderRadius: 10,
         alignItems: 'center',

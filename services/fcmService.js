@@ -168,7 +168,7 @@ class FCMService {
             authStatus === messaging.AuthorizationStatus.PROVISIONAL;
 
         if (enabled) {
-            console.log('Authorization status:', authStatus);
+            // console.log('Authorization status:', authStatus);
             return true;
         }
         return false;
@@ -177,7 +177,7 @@ class FCMService {
     async getToken() {
         try {
             const token = await messaging().getToken();
-            console.log('📱 FCM Token:', token);
+            // console.log('📱 FCM Token:', token);
             return token;
         } catch (error) {
             console.error('Error getting FCM token:', error);
@@ -214,7 +214,7 @@ class FCMService {
             const current = saved ? parseInt(saved, 10) : 0;
             const newCount = isNaN(current) ? 1 : current + 1;
             await SecureStore.setItemAsync(BADGE_KEY, newCount.toString());
-            console.log('🔔 Badge incremented in storage to:', newCount);
+            // console.log('🔔 Badge incremented in storage to:', newCount);
             return newCount;
         } catch (error) {
             console.error('Error incrementing badge in storage:', error);
@@ -223,7 +223,7 @@ class FCMService {
     }
 
     setupNotificationListeners(onNotificationReceived) {
-        console.log('🔔 Setting up FCM notification listeners...');
+        // console.log('🔔 Setting up FCM notification listeners...');
 
         const handleEventReminder = (remoteMessage) => {
             if (remoteMessage?.data?.type === 'EVENT_REMINDER') {
@@ -234,7 +234,7 @@ class FCMService {
 
         // Foreground notification handler
         const unsubscribeForeground = messaging().onMessage(async remoteMessage => {
-            console.log('📲 FCM foreground message received:', remoteMessage);
+            // console.log('📲 FCM foreground message received:', remoteMessage);
 
             if (onNotificationReceived) onNotificationReceived(remoteMessage);
 
@@ -243,7 +243,7 @@ class FCMService {
 
         // Notification opened from background
         const unsubscribeBackground = messaging().onNotificationOpenedApp(async remoteMessage => {
-            console.log('📬 Notification opened from background:', remoteMessage);
+            // console.log('📬 Notification opened from background:', remoteMessage);
 
             await this.incrementBadgeInStorage();
 
@@ -260,7 +260,7 @@ class FCMService {
         // App opened from quit state
         messaging().getInitialNotification().then(async remoteMessage => {
             if (remoteMessage) {
-                console.log('📭 Notification opened from quit state:', remoteMessage);
+                // console.log('📭 Notification opened from quit state:', remoteMessage);
 
                 await this.incrementBadgeInStorage();
 
@@ -277,7 +277,7 @@ class FCMService {
 
         // Return cleanup function
         return () => {
-            console.log('🧹 Cleaning up FCM listeners');
+            // console.log('🧹 Cleaning up FCM listeners');
             unsubscribeForeground();
             unsubscribeBackground();
         };
@@ -286,7 +286,7 @@ class FCMService {
     // This must be called at the TOP LEVEL of your index.js (not inside a component)
     async setupBackgroundHandler() {
         messaging().setBackgroundMessageHandler(async remoteMessage => {
-            console.log('📨 FCM Background Message:', remoteMessage);
+            // console.log('📨 FCM Background Message:', remoteMessage);
 
             // Increment badge
             try {
@@ -294,14 +294,14 @@ class FCMService {
                 const current = saved ? parseInt(saved, 10) : 0;
                 const newCount = isNaN(current) ? 1 : current + 1;
                 await SecureStore.setItemAsync(BADGE_KEY, newCount.toString());
-                console.log('🔔 Background handler: Badge incremented to:', newCount);
+                // console.log('🔔 Background handler: Badge incremented to:', newCount);
             } catch (error) {
                 console.error('Error incrementing badge in background:', error);
             }
 
             // FALLBACK: If "notification" payload is missing (Data-only), show Local Notification
             if (!remoteMessage.notification && remoteMessage.data?.title) {
-                console.log('⚠️ Showing Local Notification for Data-Only Message (Service)');
+                // console.log('⚠️ Showing Local Notification for Data-Only Message (Service)');
                 await Notifications.scheduleNotificationAsync({
                     content: {
                         title: remoteMessage.data.title,

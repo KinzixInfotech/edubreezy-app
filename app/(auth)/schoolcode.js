@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import React, { useState, useEffect } from 'react';
+import { getProfilesForSchool } from '../../lib/profileManager';
 import {
   View,
   Text,
@@ -107,10 +108,29 @@ export default function SchoolCodePage() {
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [savedCode, setSavedCode] = useState(null); // Store last saved code
 
   const fadeIn = useSharedValue(0);
   const cardScale = useSharedValue(0.95);
   const buttonPulse = useSharedValue(1);
+
+  // Load saved school code on mount
+  useEffect(() => {
+    const loadSavedCode = async () => {
+      try {
+        const saved = await SecureStore.getItemAsync('lastSchoolCode');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          setSavedCode(parsed);
+          // Optionally pre-fill the code
+          // setCode(parsed.code);
+        }
+      } catch (error) {
+        console.log('No saved code found');
+      }
+    };
+    loadSavedCode();
+  }, []);
 
   useEffect(() => {
     fadeIn.value = withTiming(1, { duration: 800 });
@@ -143,10 +163,36 @@ export default function SchoolCodePage() {
       const { data } = await refetch();
 
       if (data?.school) {
-        router.push({
-          pathname: '/(auth)/login',
-          params: { schoolConfig: JSON.stringify(data) },
-        });
+        const fullCode = `${prefix}-${code}`;
+
+        // Save the successful school code
+        await SecureStore.setItemAsync('lastSchoolCode', JSON.stringify({
+          prefix,
+          code,
+          fullCode,
+          schoolName: data.school.name,
+          timestamp: new Date().toISOString(),
+        }));
+
+        // Check if there are saved profiles for this school
+        const savedProfiles = await getProfilesForSchool(fullCode);
+
+        if (savedProfiles.length > 0) {
+          // Navigate to profile selector
+          router.push({
+            pathname: '/(auth)/profile-selector',
+            params: {
+              schoolCode: fullCode,
+              schoolData: JSON.stringify(data),
+            },
+          });
+        } else {
+          // Navigate to login (no saved profiles)
+          router.push({
+            pathname: '/(auth)/login',
+            params: { schoolConfig: JSON.stringify(data) },
+          });
+        }
       } else {
         setError('Invalid school code');
       }
@@ -211,7 +257,7 @@ export default function SchoolCodePage() {
               </View>
 
               {/* Heading */}
-              <View style={styles.headingContainer}>
+              {/* <View style={styles.headingContainer}>
                 <Text style={styles.mainHeading}>
                   All-in-One{'\n'}
                   <Text style={styles.gradientText}>Cloud Platform</Text>
@@ -220,13 +266,22 @@ export default function SchoolCodePage() {
                 <Text style={styles.subtitle}>
                   One smart, seamless platform designed for modern education
                 </Text>
-              </View>
+              </View> */}
 
               {/* Glassmorphism Card */}
               <Animated.View style={[styles.cardWrapper, cardAnimatedStyle]}>
                 <BlurView intensity={40} tint="light" style={styles.blurCard}>
                   <View style={styles.inputCard}>
                     <Text style={styles.inputLabel}>Enter Your School Code</Text>
+                    {savedCode && (
+                      <TouchableOpacity
+                        style={styles.savedCodeHint}
+                        onPress={() => setCode(savedCode.code)}
+                      >
+                        <Text style={styles.savedCodeText}>Last used: {savedCode.fullCode}</Text>
+                        <Text style={styles.savedCodeSubtext}>Tap to use</Text>
+                      </TouchableOpacity>
+                    )}
 
                     <View style={[styles.inputWrapper, error && styles.inputWrapperError]}>
                       <LinearGradient
@@ -431,6 +486,28 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     marginBottom: 16,
     letterSpacing: -0.3,
+  },
+  savedCodeHint: {
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  savedCodeText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1E40AF',
+  },
+  savedCodeSubtext: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#60A5FA',
   },
   inputWrapper: {
     flexDirection: 'row',

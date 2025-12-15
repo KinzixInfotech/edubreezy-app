@@ -204,6 +204,79 @@ const PROFILE_CONFIG = {
       { id: 7, label: 'Edit Profile', icon: Edit, route: '/edit-profile', color: '#ef4444' },
     ],
   },
+
+  DRIVER: {
+    fieldMappings: {
+      name: 'transportStaffData.name',
+      email: 'transportStaffData.email',
+      phone: 'transportStaffData.contactNumber',
+      role: 'role.name',
+      school: 'school.name',
+      profilePicture: 'profilePicture',
+      employeeId: 'transportStaffData.employeeId',
+      licenseNumber: 'transportStaffData.licenseNumber',
+      licenseExpiry: 'transportStaffData.licenseExpiry',
+    },
+    stats: [],
+    contactInfo: [
+      { key: 'email', label: 'Email', icon: Mail, color: '#0469ff', dataPath: 'transportStaffData.email' },
+      { key: 'phone', label: 'Phone', icon: Phone, color: '#10b981', dataPath: 'transportStaffData.contactNumber' },
+      { key: 'emergencyContact', label: 'Emergency Contact', icon: Phone, color: '#ef4444', dataPath: 'transportStaffData.emergencyContact' },
+      { key: 'address', label: 'Address', icon: MapPin, color: '#8b5cf6', dataPath: 'transportStaffData.address' },
+    ],
+    additionalInfo: [
+      { key: 'employeeId', label: 'Employee ID', dataPath: 'transportStaffData.employeeId' },
+      { key: 'licenseNumber', label: 'License Number', dataPath: 'transportStaffData.licenseNumber' },
+      { key: 'licenseExpiry', label: 'License Expiry', dataPath: 'transportStaffData.licenseExpiry' },
+      { key: 'gender', label: 'Gender', dataPath: 'transportStaffData.gender' },
+      { key: 'dob', label: 'Date of Birth', dataPath: 'transportStaffData.dob' },
+      { key: 'bloodGroup', label: 'Blood Group', dataPath: 'transportStaffData.bloodGroup' },
+      { key: 'experience', label: 'Experience', dataPath: 'transportStaffData.experience' },
+      { key: 'joiningDate', label: 'Joining Date', dataPath: 'transportStaffData.joiningDate' },
+    ],
+    menuItems: [
+      { id: 1, label: 'My Trips', icon: Clock, route: '/driver/trips', color: '#0469ff' },
+      { id: 2, label: 'Vehicle Details', icon: FileText, route: '/driver/vehicle', color: '#10b981' },
+      { id: 3, label: 'Route Map', icon: MapPin, route: '/driver/route', color: '#f59e0b' },
+      { id: 4, label: 'Notifications', icon: Bell, route: '/(tabs)/notifications', color: '#8b5cf6' },
+      { id: 5, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#06b6d4' },
+    ],
+  },
+
+  CONDUCTOR: {
+    fieldMappings: {
+      name: 'transportStaffData.name',
+      email: 'transportStaffData.email',
+      phone: 'transportStaffData.contactNumber',
+      role: 'role.name',
+      school: 'school.name',
+      profilePicture: 'profilePicture',
+      employeeId: 'transportStaffData.employeeId',
+    },
+    stats: [],
+    contactInfo: [
+      { key: 'email', label: 'Email', icon: Mail, color: '#0469ff', dataPath: 'transportStaffData.email' },
+      { key: 'phone', label: 'Phone', icon: Phone, color: '#10b981', dataPath: 'transportStaffData.contactNumber' },
+      { key: 'emergencyContact', label: 'Emergency Contact', icon: Phone, color: '#ef4444', dataPath: 'transportStaffData.emergencyContact' },
+      { key: 'address', label: 'Address', icon: MapPin, color: '#8b5cf6', dataPath: 'transportStaffData.address' },
+    ],
+    additionalInfo: [
+      { key: 'employeeId', label: 'Employee ID', dataPath: 'transportStaffData.employeeId' },
+      { key: 'gender', label: 'Gender', dataPath: 'transportStaffData.gender' },
+      { key: 'dob', label: 'Date of Birth', dataPath: 'transportStaffData.dob' },
+      { key: 'bloodGroup', label: 'Blood Group', dataPath: 'transportStaffData.bloodGroup' },
+      { key: 'experience', label: 'Experience', dataPath: 'transportStaffData.experience' },
+      { key: 'joiningDate', label: 'Joining Date', dataPath: 'transportStaffData.joiningDate' },
+    ],
+    menuItems: [
+      { id: 1, label: 'My Trips', icon: Clock, route: '/conductor/trips', color: '#0469ff' },
+      { id: 2, label: 'Mark Attendance', icon: ClipboardList, route: '/conductor/attendance', color: '#10b981' },
+      { id: 3, label: 'Student List', icon: Users, route: '/conductor/students', color: '#f59e0b' },
+      { id: 4, label: 'Route Info', icon: MapPin, route: '/conductor/route', color: '#8b5cf6' },
+      { id: 5, label: 'Notifications', icon: Bell, route: '/(tabs)/notifications', color: '#ec4899' },
+      { id: 6, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#06b6d4' },
+    ],
+  },
 };
 
 // ==================== HELPER FUNCTIONS ====================
@@ -306,7 +379,8 @@ export default function ProfileScreen() {
     setTimeout(async () => {
       await SecureStore.deleteItemAsync('user');
       await SecureStore.deleteItemAsync('userRole');
-      router.replace('/(auth)/login');
+      // Redirect to school code instead of login to show profile selector
+      router.replace('/(auth)/schoolcode');
     }, 2000);
   };
 

@@ -32,6 +32,7 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '../../lib/supabase';
 import { StatusBar } from 'expo-status-bar';
+import { saveProfile } from '../../lib/profileManager';
 
 const { width, height } = Dimensions.get('window');
 
@@ -208,6 +209,23 @@ export default function LoginScreen() {
 
             await SecureStore.setItemAsync('user', JSON.stringify(user));
             await SecureStore.setItemAsync('userRole', JSON.stringify(user?.role?.name));
+
+            // Save profile for this school code
+            const schoolCode = schoolConfig?.schoolcode || schoolConfig?.schoolCode;
+            console.log('Saving profile for school code:', schoolCode);
+            // console.log('School config:', schoolConfig);
+
+            if (schoolCode) {
+                try {
+                    await saveProfile(schoolCode, user);
+                    console.log('✅ Profile saved successfully for', schoolCode);
+                } catch (saveError) {
+                    console.error('❌ Failed to save profile:', saveError);
+                    // Continue to home even if profile save fails
+                }
+            } else {
+                console.warn('⚠️ No school code found, profile not saved');
+            }
 
             router.replace('/(screens)/greeting');
         } catch (err) {

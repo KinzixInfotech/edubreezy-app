@@ -1,13 +1,15 @@
-import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Dimensions, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Dimensions, RefreshControl, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, router } from 'expo-router';
-import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings, Plus, CheckCircle2, TimerIcon, Book, CalendarDays, Umbrella, ChartPie, User, UserCheck, X, ArrowRight, Paperclip, PartyPopperIcon, ScrollText, ClipboardList, Wallet } from 'lucide-react-native';
+import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings, Plus, CheckCircle2, TimerIcon, Book, CalendarDays, Umbrella, ChartPie, User, UserCheck, X, ArrowRight, Paperclip, PartyPopperIcon, ScrollText, ClipboardList, Wallet, BellOff } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
+import * as Notifications from 'expo-notifications';
+import * as Location from 'expo-location';
 import HapticTouchable from '../components/HapticTouch';
 import { useEffect, useMemo, useState, useCallback, act, memo } from 'react';
 import Animated, { FadeInDown, FadeInRight, FadeInUp } from 'react-native-reanimated';
-import { dataUi } from '../data/uidata';
+import { dataUi } from '../data/_uidata';
 
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -44,11 +46,53 @@ export default function HomeScreen() {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [notificationPermission, setNotificationPermission] = useState('undetermined');
+    const [showPermissionBanner, setShowPermissionBanner] = useState(false);
     const queryClient = useQueryClient();
     const uiData = dataUi;
     const user_acc = useMemo(() => user, [user]);
     const userId = user_acc?.id;
     const schoolId = user_acc?.schoolId;
+
+    // Check notification permission status
+    const checkNotificationPermission = useCallback(async () => {
+        try {
+            const { status } = await Notifications.getPermissionsAsync();
+            setNotificationPermission(status);
+            // Show banner if not granted and not explicitly denied
+            if (status !== 'granted') {
+                // Check if user has dismissed the banner before
+                const dismissed = await SecureStore.getItemAsync('notificationBannerDismissed');
+                if (!dismissed) {
+                    setShowPermissionBanner(true);
+                }
+            } else {
+                setShowPermissionBanner(false);
+            }
+        } catch (error) {
+            console.error('Error checking notification permission:', error);
+        }
+    }, []);
+
+    // Request notification permission
+    const requestNotificationPermission = useCallback(async () => {
+        try {
+            const { status } = await Notifications.requestPermissionsAsync();
+            setNotificationPermission(status);
+            if (status === 'granted') {
+                setShowPermissionBanner(false);
+            }
+        } catch (error) {
+            console.error('Error requesting notification permission:', error);
+        }
+    }, []);
+
+    // Dismiss notification banner
+    const dismissPermissionBanner = useCallback(async () => {
+        setShowPermissionBanner(false);
+        await SecureStore.setItemAsync('notificationBannerDismissed', 'true');
+    }, []);
+
     // Fetch notifications with unread count
     const { data: notificationData, refetch: refetchNotifications } = useQuery({
         queryKey: ['notifications', userId, schoolId],
@@ -63,10 +107,12 @@ export default function HomeScreen() {
         refetchInterval: 1000 * 60 * 2, // Auto-refresh every 2 minutes
     });
     const unreadCount = notificationData?.unreadCount || 0;
+
     useEffect(() => {
         loadUser();
+        checkNotificationPermission();
         // router.replace('/(screens)/wish')
-    }, []);
+    }, [checkNotificationPermission]);
 
     const loadUser = async () => {
         try {
@@ -240,6 +286,16 @@ export default function HomeScreen() {
                 '{role.name}': user_acc?.role?.name || '',
                 '{school.name}': user_acc?.school?.name || '',
             },
+            driver: {
+                '{name}': user_acc?.name || 'Driver',
+                '{role.name}': user_acc?.role?.name || 'Transport Staff',
+                '{school.name}': user_acc?.school?.name || '',
+            },
+            conductor: {
+                '{name}': user_acc?.name || 'Conductor',
+                '{role.name}': user_acc?.role?.name || 'Transport Staff',
+                '{school.name}': user_acc?.school?.name || '',
+            },
         };
 
         const map = placeholders[role.toLowerCase()] || {};
@@ -356,6 +412,10 @@ export default function HomeScreen() {
                     refreshing={refreshing}
                     onRefresh={onRefresh}
                 />;
+            case 'driver':
+            // return <DriverView refreshing={refreshing} onRefresh={onRefresh} schoolId={schoolId} userId={userId} />;
+            case 'conductor':
+            // return <ConductorView refreshing={refreshing} onRefresh={onRefresh} schoolId={schoolId} userId={userId} />;
             default:
                 return <StudentView refreshing={refreshing} onRefresh={onRefresh} />;
         }
@@ -1670,10 +1730,258 @@ export default function HomeScreen() {
             </ScrollView>
         );
     };
+
+    // === DRIVER VIEW ===
+    const DriverView = ({ refreshing, onRefresh, schoolId, userId }) => {
+        const { data: tripsData, refetch } = useQuery({
+            queryKey: ['driver-trips-today', schoolId, userId],
+            queryFn: async () => {
+                const today = new Date().toISOString().split('T')[0];
+                const res = await api.get(`/schools/transport/trips?schoolId=${schoolId}&driverId=${userId}&startDate=${today}&endDate=${today}`);
+                return res.data;
+            },
+            enabled: !!schoolId && !!userId,
+            staleTime: 1000 * 60,
+        });
+
+        const trips = tripsData?.trips || [];
+        const activeTrip = trips.find(t => t.status === 'IN_PROGRESS');
+        const completedTrips = trips.filter(t => t.status === 'COMPLETED').length;
+        const totalTrips = trips.length;
+
+        const quickActions = [
+            { icon: Clock, label: 'Active Trip', color: '#10B981', bgColor: '#D1FAE5', href: activeTrip ? { pathname: '/(screens)/transport/active-trip', params: { tripId: activeTrip.id } } : null },
+            { icon: MapPin, label: 'Track Bus', color: '#0469ff', bgColor: '#DBEAFE', href: '/(screens)/transport/bus-tracking' },
+            { icon: Users, label: 'Attendance', color: '#8B5CF6', bgColor: '#EDE9FE', href: activeTrip ? { pathname: '/(screens)/transport/attendance-marking', params: { tripId: activeTrip.id } } : '/(screens)/transport/attendance-history' },
+            { icon: Calendar, label: 'History', color: '#F59E0B', bgColor: '#FEF3C7', href: '/(screens)/transport/attendance-history' },
+            { icon: FileText, label: 'Reports', color: '#EF4444', bgColor: '#FEE2E2', href: '/(screens)/transport/attendance-history' },
+            { icon: Settings, label: 'Profile', color: '#64748B', bgColor: '#F1F5F9', href: '/profile' },
+        ];
+
+        return (
+            <ScrollView style={styles.container} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" colors={['#0469ff']} />}>
+                {activeTrip && (
+                    <Animated.View entering={FadeInDown.delay(50).duration(600)} style={styles.section}>
+                        <HapticTouchable onPress={() => router.push({ pathname: '/(screens)/transport/active-trip', params: { tripId: activeTrip.id } })}>
+                            <LinearGradient colors={['#10B981', '#059669']} style={{ borderRadius: 16, padding: 16 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                                    <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.3)', alignItems: 'center', justifyContent: 'center' }}>
+                                        <Clock size={24} color="#fff" />
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={{ fontSize: 16, fontWeight: '700', color: '#fff' }}>Trip in Progress</Text>
+                                        <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.9)', marginTop: 2 }}>{activeTrip.route?.name} • {activeTrip.tripType}</Text>
+                                    </View>
+                                    <ChevronRight size={24} color="#fff" />
+                                </View>
+                            </LinearGradient>
+                        </HapticTouchable>
+                    </Animated.View>
+                )}
+
+                <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.section}>
+                    <View style={styles.statsGrid}>
+                        <HapticTouchable style={{ flex: 1 }}>
+                            <LinearGradient colors={['#667eea', '#764ba2']} style={styles.statCard}>
+                                <View style={styles.statIcon}><Calendar size={24} color="#fff" /></View>
+                                <Text style={styles.statValue}>{totalTrips}</Text>
+                                <Text style={styles.statLabel}>Today's Trips</Text>
+                            </LinearGradient>
+                        </HapticTouchable>
+                        <HapticTouchable style={{ flex: 1 }}>
+                            <LinearGradient colors={['#4ECDC4', '#44A08D']} style={styles.statCard}>
+                                <View style={styles.statIcon}><CheckCircle2 size={24} color="#fff" /></View>
+                                <Text style={styles.statValue}>{completedTrips}</Text>
+                                <Text style={styles.statLabel}>Completed</Text>
+                            </LinearGradient>
+                        </HapticTouchable>
+                        <HapticTouchable style={{ flex: 1 }}>
+                            <LinearGradient colors={['#f093fb', '#f5576c']} style={styles.statCard}>
+                                <View style={styles.statIcon}><Users size={24} color="#fff" /></View>
+                                <Text style={styles.statValue}>{activeTrip ? 'Active' : 'Idle'}</Text>
+                                <Text style={styles.statLabel}>Status</Text>
+                            </LinearGradient>
+                        </HapticTouchable>
+                    </View>
+                </Animated.View>
+
+                <Animated.View entering={FadeInDown.delay(200).duration(600)} style={styles.section}>
+                    <Text style={styles.sectionTitle}>Quick Actions</Text>
+                    <View style={styles.actionsGrid}>
+                        {quickActions.map((action, index) => (
+                            <Animated.View key={action.label} entering={FadeInDown.delay(300 + index * 50).duration(400)}>
+                                <HapticTouchable onPress={() => action.href && router.push(action.href)} disabled={!action.href}>
+                                    <View style={[styles.actionButton, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5 }]}>
+                                        <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
+                                            <action.icon size={22} color={action.color} />
+                                        </View>
+                                        <Text style={styles.actionLabel} numberOfLines={1}>{action.label}</Text>
+                                    </View>
+                                </HapticTouchable>
+                            </Animated.View>
+                        ))}
+                    </View>
+                </Animated.View>
+
+                {trips.length > 0 && (
+                    <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.section}>
+                        <Text style={styles.sectionTitle}>Today's Schedule</Text>
+                        {trips.map((trip, index) => (
+                            <Animated.View key={trip.id} entering={FadeInDown.delay(350 + index * 50).duration(400)}>
+                                <HapticTouchable onPress={() => trip.status === 'IN_PROGRESS' && router.push({ pathname: '/(screens)/transport/active-trip', params: { tripId: trip.id } })}>
+                                    <View style={[styles.tripCard, { borderLeftWidth: 4, borderLeftColor: trip.status === 'COMPLETED' ? '#10B981' : trip.status === 'IN_PROGRESS' ? '#F59E0B' : '#0469ff' }]}>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                                            <Text style={{ fontSize: 15, fontWeight: '700', color: '#0F172A' }}>{trip.route?.name || 'Unknown Route'}</Text>
+                                            <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: trip.status === 'COMPLETED' ? '#D1FAE5' : trip.status === 'IN_PROGRESS' ? '#FEF3C7' : '#DBEAFE' }}>
+                                                <Text style={{ fontSize: 11, fontWeight: '600', color: trip.status === 'COMPLETED' ? '#10B981' : trip.status === 'IN_PROGRESS' ? '#F59E0B' : '#0469ff' }}>{trip.status === 'IN_PROGRESS' ? 'Active' : trip.status}</Text>
+                                            </View>
+                                        </View>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                                <Clock size={14} color="#64748B" />
+                                                <Text style={{ fontSize: 13, color: '#64748B' }}>{trip.scheduledStartTime ? new Date(trip.scheduledStartTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</Text>
+                                            </View>
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                                <MapPin size={14} color="#64748B" />
+                                                <Text style={{ fontSize: 13, color: '#64748B' }}>{trip.tripType || 'N/A'}</Text>
+                                            </View>
+                                        </View>
+                                    </View>
+                                </HapticTouchable>
+                            </Animated.View>
+                        ))}
+                    </Animated.View>
+                )}
+            </ScrollView>
+        );
+    };
+
+    // === CONDUCTOR VIEW ===
+    const ConductorView = ({ refreshing, onRefresh, schoolId, userId }) => {
+        const { data: tripsData } = useQuery({
+            queryKey: ['conductor-trips-today', schoolId, userId],
+            queryFn: async () => {
+                const today = new Date().toISOString().split('T')[0];
+                const res = await api.get(`/schools/transport/trips?schoolId=${schoolId}&conductorId=${userId}&startDate=${today}&endDate=${today}`);
+                return res.data;
+            },
+            enabled: !!schoolId && !!userId,
+            staleTime: 1000 * 60,
+        });
+
+        const trips = tripsData?.trips || [];
+        const activeTrip = trips.find(t => t.status === 'IN_PROGRESS');
+        const totalStudents = activeTrip?.route?.busStops?.reduce((sum, stop) => sum + (stop.students?.length || 0), 0) || 0;
+        const completedTrips = trips.filter(t => t.status === 'COMPLETED').length;
+
+        const quickActions = [
+            { icon: Users, label: 'Attendance', color: '#10B981', bgColor: '#D1FAE5', href: activeTrip ? { pathname: '/(screens)/transport/attendance-marking', params: { tripId: activeTrip.id } } : '/(screens)/transport/attendance-history' },
+            { icon: MapPin, label: 'Track Bus', color: '#0469ff', bgColor: '#DBEAFE', href: '/(screens)/transport/bus-tracking' },
+            { icon: Calendar, label: 'History', color: '#F59E0B', bgColor: '#FEF3C7', href: '/(screens)/transport/attendance-history' },
+            { icon: FileText, label: 'Reports', color: '#EF4444', bgColor: '#FEE2E2', href: '/(screens)/transport/attendance-history' },
+            { icon: Clock, label: 'Schedule', color: '#8B5CF6', bgColor: '#EDE9FE', href: '/(screens)/transport/attendance-history' },
+            { icon: Settings, label: 'Profile', color: '#64748B', bgColor: '#F1F5F9', href: '/profile' },
+        ];
+
+        return (
+            <ScrollView style={styles.container} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" colors={['#0469ff']} />}>
+                {activeTrip && (
+                    <Animated.View entering={FadeInDown.delay(50).duration(600)} style={styles.section}>
+                        <HapticTouchable onPress={() => router.push({ pathname: '/(screens)/transport/attendance-marking', params: { tripId: activeTrip.id } })}>
+                            <LinearGradient colors={['#10B981', '#059669']} style={{ borderRadius: 16, padding: 16 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                                    <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.3)', alignItems: 'center', justifyContent: 'center' }}>
+                                        <Users size={24} color="#fff" />
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={{ fontSize: 16, fontWeight: '700', color: '#fff' }}>Trip Active</Text>
+                                        <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.9)', marginTop: 2 }}>Tap to mark attendance</Text>
+                                    </View>
+                                    <ChevronRight size={24} color="#fff" />
+                                </View>
+                            </LinearGradient>
+                        </HapticTouchable>
+                    </Animated.View>
+                )}
+
+                <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.section}>
+                    <View style={styles.statsGrid}>
+                        <HapticTouchable style={{ flex: 1 }}>
+                            <LinearGradient colors={['#667eea', '#764ba2']} style={styles.statCard}>
+                                <View style={styles.statIcon}><Calendar size={24} color="#fff" /></View>
+                                <Text style={styles.statValue}>{trips.length}</Text>
+                                <Text style={styles.statLabel}>Today's Trips</Text>
+                            </LinearGradient>
+                        </HapticTouchable>
+                        <HapticTouchable style={{ flex: 1 }}>
+                            <LinearGradient colors={['#4ECDC4', '#44A08D']} style={styles.statCard}>
+                                <View style={styles.statIcon}><CheckCircle2 size={24} color="#fff" /></View>
+                                <Text style={styles.statValue}>{completedTrips}</Text>
+                                <Text style={styles.statLabel}>Completed</Text>
+                            </LinearGradient>
+                        </HapticTouchable>
+                        <HapticTouchable style={{ flex: 1 }}>
+                            <LinearGradient colors={['#f093fb', '#f5576c']} style={styles.statCard}>
+                                <View style={styles.statIcon}><Users size={24} color="#fff" /></View>
+                                <Text style={styles.statValue}>{totalStudents}</Text>
+                                <Text style={styles.statLabel}>Students</Text>
+                            </LinearGradient>
+                        </HapticTouchable>
+                    </View>
+                </Animated.View>
+
+                <Animated.View entering={FadeInDown.delay(200).duration(600)} style={styles.section}>
+                    <Text style={styles.sectionTitle}>Quick Actions</Text>
+                    <View style={styles.actionsGrid}>
+                        {quickActions.map((action, index) => (
+                            <Animated.View key={action.label} entering={FadeInDown.delay(300 + index * 50).duration(400)}>
+                                <HapticTouchable onPress={() => action.href && router.push(action.href)} disabled={!action.href}>
+                                    <View style={[styles.actionButton, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5 }]}>
+                                        <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
+                                            <action.icon size={22} color={action.color} />
+                                        </View>
+                                        <Text style={styles.actionLabel} numberOfLines={1}>{action.label}</Text>
+                                    </View>
+                                </HapticTouchable>
+                            </Animated.View>
+                        ))}
+                    </View>
+                </Animated.View>
+            </ScrollView>
+        );
+    };
+
+
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
             {!loading && <Header />}
             <StatusBar style='dark' />
+
+            {/* Notification Permission Banner */}
+            {showPermissionBanner && (
+                <Animated.View entering={FadeInDown.duration(400)} style={styles.permissionBanner}>
+                    <View style={styles.permissionBannerContent}>
+                        <View style={styles.permissionIconContainer}>
+                            <BellOff size={24} color="#F59E0B" />
+                        </View>
+                        <View style={styles.permissionTextContainer}>
+                            <Text style={styles.permissionTitle}>Enable Notifications</Text>
+                            <Text style={styles.permissionDesc}>
+                                Get instant updates about your {user_acc?.role?.name === 'PARENT' ? "child's" : ''} attendance, fees, and important announcements.
+                            </Text>
+                        </View>
+                    </View>
+                    <View style={styles.permissionActions}>
+                        <HapticTouchable onPress={dismissPermissionBanner} style={styles.permissionDismiss}>
+                            <Text style={styles.permissionDismissText}>Not now</Text>
+                        </HapticTouchable>
+                        <HapticTouchable onPress={requestNotificationPermission} style={styles.permissionAllow}>
+                            <Text style={styles.permissionAllowText}>Enable</Text>
+                        </HapticTouchable>
+                    </View>
+                </Animated.View>
+            )}
+
             {/* Today's Events (if any) */}
 
             {renderContent()}
@@ -1696,6 +2004,70 @@ const styles = StyleSheet.create({
         borderBottomColor: '#f0f0f0',
         borderBottomWidth: 1,
         backgroundColor: '#fff',
+    },
+    // Notification Permission Banner Styles
+    permissionBanner: {
+        marginHorizontal: 16,
+        marginTop: 12,
+        backgroundColor: '#FFFBEB',
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#FDE68A',
+        padding: 14,
+    },
+    permissionBannerContent: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 12,
+    },
+    permissionIconContainer: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: '#FEF3C7',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    permissionTextContainer: {
+        flex: 1,
+    },
+    permissionTitle: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#92400E',
+        marginBottom: 4,
+    },
+    permissionDesc: {
+        fontSize: 13,
+        color: '#A16207',
+        lineHeight: 18,
+    },
+    permissionActions: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        alignItems: 'center',
+        marginTop: 12,
+        gap: 12,
+    },
+    permissionDismiss: {
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+    },
+    permissionDismissText: {
+        fontSize: 14,
+        color: '#92400E',
+        fontWeight: '500',
+    },
+    permissionAllow: {
+        paddingVertical: 8,
+        paddingHorizontal: 20,
+        backgroundColor: '#F59E0B',
+        borderRadius: 8,
+    },
+    permissionAllowText: {
+        fontSize: 14,
+        color: '#fff',
+        fontWeight: '600',
     },
     // Add these styles to your existing StyleSheet.create() in your styles file
     // Merge these with your existing styles object

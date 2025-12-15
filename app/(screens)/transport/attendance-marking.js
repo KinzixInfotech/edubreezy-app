@@ -1,75 +1,75 @@
 // Attendance Marking Screen for Conductor
 import React, { useState, useEffect } from 'react';
-import {
-    View,
-    Text,
-    StyleSheet,
-    TouchableOpacity,
-    ScrollView,
-    Alert,
-    ActivityIndicator,
-} from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Alert, Dimensions, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
-import { Ionicons } from '@expo/vector-icons';
+import { ChevronLeft, Check, X, Clock, MapPin, Users, Save } from 'lucide-react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import * as Location from 'expo-location';
-import { API_BASE_URL } from '../../../lib/api';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import api from '../../../lib/api';
+import HapticTouchable from '../../components/HapticTouch';
+import Animated, { FadeInDown } from 'react-native-reanimated';
+
+const { width } = Dimensions.get('window');
 
 export default function AttendanceMarkingScreen() {
     const { tripId } = useLocalSearchParams();
-    const [trip, setTrip] = useState(null);
-    const [students, setStudents] = useState([]);
+    const queryClient = useQueryClient();
     const [selectedStop, setSelectedStop] = useState(null);
     const [attendance, setAttendance] = useState({});
-    const [loading, setLoading] = useState(true);
-    const [submitting, setSubmitting] = useState(false);
 
+    // Fetch Trip Details & Attendance
+    const { data: tripData, isLoading } = useQuery({
+        queryKey: ['trip-attendance', tripId],
+        queryFn: async () => {
+            const res = await api.get(`/schools/transport/trips/${tripId}`);
+            return res.data;
+        },
+        enabled: !!tripId,
+    });
+
+    const trip = tripData?.trip;
+    const stops = trip?.route?.busStops || [];
+    const attendanceRecords = trip?.attendanceRecords || [];
+
+    // Initialize state when data loads
     useEffect(() => {
-        loadTripAndStudents();
-    }, []);
-
-    const loadTripAndStudents = async () => {
-        try {
-            const token = await SecureStore.getItemAsync('transportToken');
-
-            // Load trip details
-            const tripRes = await fetch(`${API_BASE_URL}/api/schools/transport/trips/${tripId}`, {
-                headers: { 'Authorization': `Bearer ${token}` },
-            });
-            if (tripRes.ok) {
-                const tripData = await tripRes.json();
-                setTrip(tripData.trip);
-
-                // Set first stop as default
-                if (tripData.trip?.route?.busStops?.length > 0) {
-                    setSelectedStop(tripData.trip.route.busStops[0]);
-                }
-
-                // Initialize attendance from existing records
-                const existingAttendance = {};
-                tripData.trip?.attendanceRecords?.forEach(record => {
-                    existingAttendance[record.studentId] = record.status;
-                });
-                setAttendance(existingAttendance);
+        if (trip) {
+            if (!selectedStop && stops.length > 0) {
+                setSelectedStop(stops[0]);
             }
 
-            // TODO: Load students assigned to route
-            // For now, we'll show attendance records from trip
-        } catch (err) {
-            console.error('Error loading data:', err);
-        } finally {
-            setLoading(false);
+            const initialAttendance = {};
+            attendanceRecords.forEach(record => {
+                initialAttendance[record.studentId] = record.status;
+            });
+            setAttendance(initialAttendance);
         }
-    };
+    }, [trip]);
 
     const handleMarkAttendance = (studentId, status) => {
         setAttendance(prev => ({ ...prev, [studentId]: status }));
     };
 
-    const submitAttendance = async () => {
+    // Submit Attendance Mutation
+    const submitMutation = useMutation({
+        mutationFn: async (data) => {
+            return await api.post('/schools/transport/attendance/bulk', data);
+        },
+        onSuccess: (data) => {
+            Alert.alert('Success', data.data.message);
+            queryClient.invalidateQueries(['trip-attendance', tripId]);
+            queryClient.invalidateQueries(['conductor-trips']);
+            router.back();
+        },
+        onError: (error) => {
+            Alert.alert('Error', error?.response?.data?.error || 'Failed to submit attendance');
+        }
+    });
+
+    const handleSubmit = async () => {
         if (!selectedStop) {
             Alert.alert('Select Stop', 'Please select a stop first');
             return;
@@ -81,14 +81,12 @@ export default function AttendanceMarkingScreen() {
         }));
 
         if (studentsToMark.length === 0) {
-            Alert.alert('No Attendance', 'Please mark attendance for at least one student');
+            Alert.alert('No Changes', 'Mark attendance for at least one student');
             return;
         }
 
-        setSubmitting(true);
         try {
-            const token = await SecureStore.getItemAsync('transportToken');
-            const staffData = await SecureStore.getItemAsync('transportStaff');
+            const staffData = await SecureStore.getItemAsync('user');
             const staff = staffData ? JSON.parse(staffData) : null;
 
             let location = null;
@@ -97,172 +95,323 @@ export default function AttendanceMarkingScreen() {
                 location = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
             } catch (e) { }
 
-            const response = await fetch(`${API_BASE_URL}/api/schools/transport/attendance/bulk`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`,
-                },
-                body: JSON.stringify({
-                    tripId,
-                    stopId: selectedStop.id,
-                    markedById: staff?.id,
-                    latitude: location?.latitude,
-                    longitude: location?.longitude,
-                    students: studentsToMark,
-                }),
+            submitMutation.mutate({
+                tripId,
+                stopId: selectedStop.id,
+                markedById: staff?.id,
+                latitude: location?.latitude,
+                longitude: location?.longitude,
+                students: studentsToMark,
             });
-
-            if (response.ok) {
-                const data = await response.json();
-                Alert.alert('Success', data.message);
-                router.back();
-            } else {
-                const error = await response.json();
-                Alert.alert('Error', error.error || 'Failed to submit attendance');
-            }
         } catch (err) {
-            Alert.alert('Error', 'Failed to submit attendance');
-        } finally {
-            setSubmitting(false);
+            console.error(err);
         }
     };
 
-    if (loading) {
+    if (isLoading) {
         return (
-            <SafeAreaView style={styles.safeArea}>
-                <View style={styles.loadingContainer}>
-                    <ActivityIndicator size="large" color="#6366f1" />
+            <SafeAreaView style={styles.container}>
+                <View style={styles.centerContent}>
+                    <ActivityIndicator size="large" color="#4F46E5" />
+                    <Text style={{ marginTop: 12, color: '#64748B' }}>Loading students...</Text>
                 </View>
             </SafeAreaView>
         );
     }
 
-    const stops = trip?.route?.busStops || [];
-    const attendanceRecords = trip?.attendanceRecords || [];
-
     return (
-        <SafeAreaView style={styles.safeArea}>
-            <StatusBar style="light" />
-            <LinearGradient colors={['#6366f1', '#4f46e5']} style={styles.header}>
-                <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-                    <Ionicons name="chevron-back" size={24} color="#fff" />
-                </TouchableOpacity>
-                <View style={styles.headerContent}>
+        <SafeAreaView style={styles.container} edges={['top']}>
+            <StatusBar style="dark" />
+
+            {/* Header */}
+            <View style={styles.header}>
+                <HapticTouchable onPress={() => router.back()} style={styles.backButton}>
+                    <ChevronLeft size={24} color="#111" />
+                </HapticTouchable>
+                <View>
                     <Text style={styles.headerTitle}>Mark Attendance</Text>
                     <Text style={styles.headerSubtitle}>{trip?.route?.name} • {trip?.tripType}</Text>
                 </View>
-            </LinearGradient>
+            </View>
 
-            <ScrollView style={styles.content}>
+            <View style={styles.content}>
                 {/* Stop Selector */}
-                <Text style={styles.sectionTitle}>Select Stop</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.stopsScroll}>
-                    {stops.map(stop => (
-                        <TouchableOpacity
-                            key={stop.id}
-                            style={[styles.stopChip, selectedStop?.id === stop.id && styles.stopChipActive]}
-                            onPress={() => setSelectedStop(stop)}
-                        >
-                            <Text style={[styles.stopChipText, selectedStop?.id === stop.id && styles.stopChipTextActive]}>
-                                {stop.orderIndex}. {stop.name}
-                            </Text>
-                        </TouchableOpacity>
-                    ))}
-                </ScrollView>
+                <View style={styles.stopsContainer}>
+                    <Text style={styles.sectionLabel}>Select Stop</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.stopsScroll}>
+                        {stops.map(stop => (
+                            <HapticTouchable
+                                key={stop.id}
+                                style={[styles.stopChip, selectedStop?.id === stop.id && styles.stopChipActive]}
+                                onPress={() => setSelectedStop(stop)}
+                            >
+                                <Text style={[styles.stopChipText, selectedStop?.id === stop.id && styles.stopChipTextActive]}>
+                                    {stop.orderIndex}. {stop.name}
+                                </Text>
+                            </HapticTouchable>
+                        ))}
+                    </ScrollView>
+                </View>
 
                 {/* Students List */}
-                <Text style={styles.sectionTitle}>Students ({attendanceRecords.length})</Text>
-                {attendanceRecords.length > 0 ? (
-                    attendanceRecords.map(record => (
-                        <View key={record.id} style={styles.studentCard}>
-                            <View style={styles.studentInfo}>
-                                <Text style={styles.studentName}>{record.student?.name}</Text>
-                                <Text style={styles.studentId}>{record.student?.admissionNo}</Text>
-                            </View>
-                            <View style={styles.attendanceButtons}>
-                                {['PRESENT', 'ABSENT', 'LATE'].map(status => (
-                                    <TouchableOpacity
-                                        key={status}
-                                        style={[
-                                            styles.statusBtn,
-                                            attendance[record.studentId] === status && styles[`statusBtn${status}`],
-                                        ]}
-                                        onPress={() => handleMarkAttendance(record.studentId, status)}
-                                    >
-                                        <Text style={[
-                                            styles.statusBtnText,
-                                            attendance[record.studentId] === status && styles.statusBtnTextActive,
-                                        ]}>
-                                            {status === 'PRESENT' ? '✓' : status === 'ABSENT' ? '✕' : '⏰'}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ))}
-                            </View>
-                        </View>
-                    ))
-                ) : (
-                    <View style={styles.emptyState}>
-                        <Ionicons name="people-outline" size={48} color="#CBD5E1" />
-                        <Text style={styles.emptyText}>No students to mark attendance</Text>
-                        <Text style={styles.emptySubtext}>Students will appear here when trip progresses</Text>
-                    </View>
-                )}
+                <ScrollView style={styles.listContainer} contentContainerStyle={{ paddingBottom: 100 }}>
+                    {attendanceRecords.length > 0 ? (
+                        attendanceRecords.map((record, index) => (
+                            <Animated.View
+                                key={record.id}
+                                entering={FadeInDown.delay(index * 50).duration(400)}
+                                style={styles.studentCard}
+                            >
+                                <View style={styles.studentInfo}>
+                                    <View style={styles.avatar}>
+                                        <Text style={styles.avatarText}>{record.student?.name?.[0] || 'S'}</Text>
+                                    </View>
+                                    <View>
+                                        <Text style={styles.studentName}>{record.student?.name}</Text>
+                                        <Text style={styles.studentId}>{record.student?.admissionNo}</Text>
+                                    </View>
+                                </View>
 
-                {/* Submit Button */}
+                                <View style={styles.actionRow}>
+                                    <HapticTouchable
+                                        style={[styles.statusBtn, styles.btnPresent, attendance[record.studentId] === 'PRESENT' && styles.btnPresentActive]}
+                                        onPress={() => handleMarkAttendance(record.studentId, 'PRESENT')}
+                                    >
+                                        <Check size={18} color={attendance[record.studentId] === 'PRESENT' ? '#fff' : '#16A34A'} />
+                                    </HapticTouchable>
+
+                                    <HapticTouchable
+                                        style={[styles.statusBtn, styles.btnAbsent, attendance[record.studentId] === 'ABSENT' && styles.btnAbsentActive]}
+                                        onPress={() => handleMarkAttendance(record.studentId, 'ABSENT')}
+                                    >
+                                        <X size={18} color={attendance[record.studentId] === 'ABSENT' ? '#fff' : '#EF4444'} />
+                                    </HapticTouchable>
+
+                                    <HapticTouchable
+                                        style={[styles.statusBtn, styles.btnLate, attendance[record.studentId] === 'LATE' && styles.btnLateActive]}
+                                        onPress={() => handleMarkAttendance(record.studentId, 'LATE')}
+                                    >
+                                        <Clock size={18} color={attendance[record.studentId] === 'LATE' ? '#fff' : '#D97706'} />
+                                    </HapticTouchable>
+                                </View>
+                            </Animated.View>
+                        ))
+                    ) : (
+                        <View style={styles.emptyState}>
+                            <Users size={48} color="#CBD5E1" />
+                            <Text style={styles.emptyText}>No students to list</Text>
+                            <Text style={styles.emptySubtext}>Students will appear once trip starts</Text>
+                        </View>
+                    )}
+                </ScrollView>
+
+                {/* Submit Fab */}
                 {attendanceRecords.length > 0 && (
-                    <TouchableOpacity
-                        style={styles.submitBtn}
-                        onPress={submitAttendance}
-                        disabled={submitting}
-                    >
-                        <LinearGradient colors={['#10b981', '#059669']} style={styles.submitBtnGradient}>
-                            {submitting ? (
-                                <ActivityIndicator size="small" color="#fff" />
+                    <View style={styles.footer}>
+                        <HapticTouchable
+                            style={styles.submitButton}
+                            onPress={handleSubmit}
+                            disabled={submitMutation.isPending}
+                        >
+                            {submitMutation.isPending ? (
+                                <ActivityIndicator color="#fff" />
                             ) : (
                                 <>
-                                    <Ionicons name="checkmark-done" size={22} color="#fff" />
-                                    <Text style={styles.submitBtnText}>Submit Attendance</Text>
+                                    <Save size={20} color="#fff" />
+                                    <Text style={styles.submitText}>Submit Attendance</Text>
                                 </>
                             )}
-                        </LinearGradient>
-                    </TouchableOpacity>
+                        </HapticTouchable>
+                    </View>
                 )}
-            </ScrollView>
+            </View>
         </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
-    safeArea: { flex: 1, backgroundColor: '#F8FAFC' },
-    loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    header: { paddingHorizontal: 16, paddingVertical: 20, flexDirection: 'row', alignItems: 'center' },
-    backBtn: { padding: 8, marginRight: 12 },
-    headerContent: { flex: 1 },
-    headerTitle: { fontSize: 20, fontWeight: '700', color: '#fff' },
-    headerSubtitle: { fontSize: 14, color: 'rgba(255,255,255,0.8)', marginTop: 2 },
-    content: { flex: 1, padding: 16 },
-    sectionTitle: { fontSize: 16, fontWeight: '700', color: '#1E293B', marginBottom: 12, marginTop: 8 },
-    stopsScroll: { marginBottom: 16 },
-    stopChip: { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#fff', borderRadius: 20, marginRight: 10, borderWidth: 1, borderColor: '#E2E8F0' },
-    stopChipActive: { backgroundColor: '#6366f1', borderColor: '#6366f1' },
-    stopChipText: { fontSize: 14, fontWeight: '600', color: '#64748B' },
-    stopChipTextActive: { color: '#fff' },
-    studentCard: { backgroundColor: '#fff', borderRadius: 12, padding: 14, marginBottom: 10, flexDirection: 'row', alignItems: 'center', shadowColor: '#000', shadowOpacity: 0.03, shadowRadius: 6, elevation: 1 },
-    studentInfo: { flex: 1 },
-    studentName: { fontSize: 15, fontWeight: '600', color: '#1E293B' },
-    studentId: { fontSize: 13, color: '#64748B', marginTop: 2 },
-    attendanceButtons: { flexDirection: 'row', gap: 8 },
-    statusBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center' },
-    statusBtnPRESENT: { backgroundColor: '#10b981' },
-    statusBtnABSENT: { backgroundColor: '#ef4444' },
-    statusBtnLATE: { backgroundColor: '#f59e0b' },
-    statusBtnText: { fontSize: 16, color: '#64748B' },
-    statusBtnTextActive: { color: '#fff' },
-    emptyState: { alignItems: 'center', paddingVertical: 48 },
-    emptyText: { fontSize: 16, fontWeight: '600', color: '#64748B', marginTop: 12 },
-    emptySubtext: { fontSize: 14, color: '#94A3B8', marginTop: 4 },
-    submitBtn: { marginTop: 24, marginBottom: 32, borderRadius: 14, overflow: 'hidden' },
-    submitBtnGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 16 },
-    submitBtnText: { fontSize: 17, fontWeight: '700', color: '#fff' },
+    container: {
+        flex: 1,
+        backgroundColor: '#fff',
+    },
+    centerContent: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F1F5F9',
+        backgroundColor: '#fff',
+    },
+    backButton: {
+        padding: 8,
+        marginRight: 8,
+        borderRadius: 20,
+        backgroundColor: '#F8FAFC',
+    },
+    headerTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#0F172A',
+    },
+    headerSubtitle: {
+        fontSize: 13,
+        color: '#64748B',
+    },
+    content: {
+        flex: 1,
+    },
+    stopsContainer: {
+        paddingVertical: 12,
+        backgroundColor: '#fff',
+        borderBottomWidth: 1,
+        borderBottomColor: '#F1F5F9',
+    },
+    sectionLabel: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#64748B',
+        marginLeft: 16,
+        marginBottom: 8,
+        textTransform: 'uppercase',
+    },
+    stopsScroll: {
+        paddingHorizontal: 16,
+        paddingBottom: 4,
+    },
+    stopChip: {
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 20,
+        backgroundColor: '#F1F5F9',
+        marginRight: 8,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+    },
+    stopChipActive: {
+        backgroundColor: '#4F46E5',
+        borderColor: '#4F46E5',
+    },
+    stopChipText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#64748B',
+    },
+    stopChipTextActive: {
+        color: '#fff',
+    },
+    listContainer: {
+        flex: 1,
+        padding: 16,
+    },
+    studentCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: '#fff',
+        padding: 12,
+        borderRadius: 12,
+        marginBottom: 12,
+        borderWidth: 1,
+        borderColor: '#F1F5F9',
+        shadowColor: '#64748B',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+        elevation: 2,
+    },
+    studentInfo: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        flex: 1,
+    },
+    avatar: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: '#F1F5F9',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    avatarText: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#475569',
+    },
+    studentName: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#0F172A',
+    },
+    studentId: {
+        fontSize: 12,
+        color: '#64748B',
+    },
+    actionRow: {
+        flexDirection: 'row',
+        gap: 8,
+    },
+    statusBtn: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+    },
+    btnPresent: { backgroundColor: '#DCFCE7', borderColor: '#DCFCE7' },
+    btnPresentActive: { backgroundColor: '#16A34A', borderColor: '#16A34A' },
+
+    btnAbsent: { backgroundColor: '#FEE2E2', borderColor: '#FEE2E2' },
+    btnAbsentActive: { backgroundColor: '#EF4444', borderColor: '#EF4444' },
+
+    btnLate: { backgroundColor: '#FEF3C7', borderColor: '#FEF3C7' },
+    btnLateActive: { backgroundColor: '#D97706', borderColor: '#D97706' },
+
+    emptyState: {
+        alignItems: 'center',
+        paddingVertical: 60,
+    },
+    emptyText: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#64748B',
+        marginTop: 16,
+    },
+    emptySubtext: {
+        fontSize: 14,
+        color: '#94A3B8',
+        marginTop: 4,
+    },
+    footer: {
+        padding: 16,
+        backgroundColor: '#fff',
+        borderTopWidth: 1,
+        borderTopColor: '#F1F5F9',
+    },
+    submitButton: {
+        backgroundColor: '#4F46E5',
+        borderRadius: 14,
+        paddingVertical: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        shadowColor: '#4F46E5',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+        elevation: 4,
+    },
+    submitText: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#fff',
+    },
 });

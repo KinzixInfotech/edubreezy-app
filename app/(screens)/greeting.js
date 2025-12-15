@@ -22,7 +22,7 @@ export default function GreetingScreen() {
             if (stored) {
                 const parsed = JSON.parse(stored);
                 setUser(parsed);
-                console.log(parsed);
+                // console.log(parsed);
 
             }
         } catch (error) {

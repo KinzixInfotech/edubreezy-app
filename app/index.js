@@ -11,8 +11,7 @@ export default function Index() {
   useEffect(() => {
     const getSession = async () => {
       const { data } = await supabase.auth.getSession();
-      console.log(data);
-
+      // console.log(data);
       setSession(data.session);
       setIsLoading(false);
     };

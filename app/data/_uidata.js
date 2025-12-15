@@ -35,6 +35,24 @@ export const dataUi = {
         { "text": "{emailparent}", "type": "static" }
       ],
       "icons": ["bell"]
+    },
+    "driver": {
+      "title": "{name}",
+      "subtitle": [
+        { "text": "Driver", "type": "static" },
+        { "text": "|", "type": "separator" },
+        { "text": "{school.name}", "type": "school" }
+      ],
+      "icons": ["refresh", "bell"]
+    },
+    "conductor": {
+      "title": "{name}",
+      "subtitle": [
+        { "text": "Conductor", "type": "static" },
+        { "text": "|", "type": "separator" },
+        { "text": "{school.name}", "type": "school" }
+      ],
+      "icons": ["refresh", "bell"]
     }
   },
   "upcomingExam": {

@@ -5,7 +5,7 @@ import { queryClient } from '../lib/queryClient';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts, Roboto_400Regular, Roboto_500Medium, Roboto_700Bold } from '@expo-google-fonts/roboto';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { applyGlobalFont } from '../app/styles/global';
+import { applyGlobalFont } from '../app/styles/_global';
 import { StatusBar } from 'expo-status-bar';
 import * as SecureStore from 'expo-secure-store';
 import { AppState, View, Alert, Platform } from 'react-native';
@@ -19,10 +19,13 @@ const BADGE_KEY = 'noticeBadgeCount';
 // Keep splash visible while fonts load
 SplashScreen.preventAutoHideAsync();
 
-// Register Background Handler EARLY - SIMPLIFIED for diagnosis
+// ========================================================================
+// FIREBASE BACKGROUND HANDLER - COMMENTED OUT
+// Firebase needs to be initialized before using messaging()
+// Uncomment and fix after Firebase is properly configured
+// ========================================================================
 messaging().setBackgroundMessageHandler(async remoteMessage => {
     console.log('🔴 FCM BACKGROUND message received:', JSON.stringify(remoteMessage));
-    // Just log - no SecureStore or Notifications at top level to avoid potential issues
 });
 
 // ========================================================================
@@ -175,7 +178,7 @@ function RootLayoutContent() {
     // -------------------------------
     useEffect(() => {
         const subscription = AppState.addEventListener('change', (nextAppState) => {
-            console.log('App state changed:', nextAppState);
+            // console.log('App state changed:', nextAppState);
             if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
                 setIsAppActive(true);
                 console.log('App became active');

@@ -39,8 +39,8 @@ export const dataUi = {
     "driver": {
       "title": "{name}",
       "subtitle": [
-        { "text": "Driver", "type": "static" },
-        { "text": "|", "type": "separator" },
+        // { "text": "Driver", "type": "static" },
+        // { "text": "|", "type": "separator" },
         { "text": "{school.name}", "type": "school" }
       ],
       "icons": ["refresh", "bell"]

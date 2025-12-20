@@ -204,7 +204,6 @@ const PROFILE_CONFIG = {
       { id: 7, label: 'Edit Profile', icon: Edit, route: '/edit-profile', color: '#ef4444' },
     ],
   },
-
   DRIVER: {
     fieldMappings: {
       name: 'transportStaffData.name',

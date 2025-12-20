@@ -140,13 +140,16 @@ export default function SchoolCodePage() {
   const { data, refetch, isFetching } = useQuery({
     queryKey: ['schoolCode', code],
     queryFn: async () => {
+      console.log('🔍 Fetching school code:', `${prefix}-${code}`);
       const res = await api.get(`/schools/by-code?schoolcode=${prefix}-${code}`);
+      console.log('✅ School API response:', res.data);
       return res.data;
     },
     enabled: false,
     staleTime: 1000 * 60 * 5, // Cache for 5 minutes
     gcTime: 1000 * 60 * 10, // Keep in cache for 10 minutes
   });
+
 
   const handleNext = async () => {
     try {
@@ -161,6 +164,7 @@ export default function SchoolCodePage() {
       );
 
       const { data } = await refetch();
+      console.log(data);
 
       if (data?.school) {
         const fullCode = `${prefix}-${code}`;
@@ -232,7 +236,6 @@ export default function SchoolCodePage() {
       <StatusBar style="dark" />
       <View style={styles.container}>
         <FloatingOrbs />
-
         <KeyboardAvoidingView
           style={styles.keyboardView}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}

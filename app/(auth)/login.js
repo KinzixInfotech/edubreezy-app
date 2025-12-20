@@ -210,15 +210,15 @@ export default function LoginScreen() {
             await SecureStore.setItemAsync('user', JSON.stringify(user));
             await SecureStore.setItemAsync('userRole', JSON.stringify(user?.role?.name));
 
-            // Save profile for this school code
+            // Save profile for this school code WITH session tokens
             const schoolCode = schoolConfig?.schoolcode || schoolConfig?.schoolCode;
             console.log('Saving profile for school code:', schoolCode);
-            // console.log('School config:', schoolConfig);
 
             if (schoolCode) {
                 try {
-                    await saveProfile(schoolCode, user);
-                    console.log('✅ Profile saved successfully for', schoolCode);
+                    // Pass session data so we can restore the session later
+                    await saveProfile(schoolCode, user, data.session);
+                    console.log('✅ Profile saved successfully with session for', schoolCode);
                 } catch (saveError) {
                     console.error('❌ Failed to save profile:', saveError);
                     // Continue to home even if profile save fails
@@ -411,12 +411,12 @@ export default function LoginScreen() {
                             </Animated.View>
 
                             {/* Footer */}
-                            <View style={styles.footer}>
+                            {/* <View style={styles.footer}>
                                 <Text style={styles.footerText}>
                                     Don't have an account?{' '}
                                     <Text style={styles.footerLink}>Contact Admin</Text>
                                 </Text>
-                            </View>
+                            </View> */}
                         </Animated.View>
                     </ScrollView>
                 </KeyboardAvoidingView>

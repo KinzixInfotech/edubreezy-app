@@ -1,20 +1,22 @@
-import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Dimensions, RefreshControl, Alert } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Dimensions, RefreshControl, Alert, AppState } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, router } from 'expo-router';
-import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings, Plus, CheckCircle2, TimerIcon, Book, CalendarDays, Umbrella, ChartPie, User, UserCheck, X, ArrowRight, Paperclip, PartyPopperIcon, ScrollText, ClipboardList, Wallet, BellOff } from 'lucide-react-native';
+import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings, Plus, CheckCircle2, TimerIcon, Book, CalendarDays, Umbrella, ChartPie, User, UserCheck, X, ArrowRight, Paperclip, PartyPopperIcon, ScrollText, ClipboardList, Wallet, BellOff, Bus, MapPin } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import * as Notifications from 'expo-notifications';
 import * as Location from 'expo-location';
 import HapticTouchable from '../components/HapticTouch';
-import { useEffect, useMemo, useState, useCallback, act, memo } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
 import Animated, { FadeInDown, FadeInRight, FadeInUp } from 'react-native-reanimated';
 import { dataUi } from '../data/_uidata';
 
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../../lib/api';
+import { supabase } from '../../lib/supabase';
+import { updateProfileSession } from '../../lib/profileManager';
 import GlowingStatusBar from '../components/GlowingStatusBar';
 import AddChildModal from '../components/AddChildModal';
 import DelegationCheckModal from '../components/DelegationCheckModal';
@@ -52,7 +54,9 @@ export default function HomeScreen() {
     const uiData = dataUi;
     const user_acc = useMemo(() => user, [user]);
     const userId = user_acc?.id;
-    const schoolId = user_acc?.schoolId;
+    const schoolId = user_acc?.schoolId || user_acc?.school?.id;
+
+    console.log('🏫 Home Screen - User:', userId, 'SchoolId:', schoolId, 'Role:', user_acc?.role?.name, user_acc);
 
     // Check notification permission status
     const checkNotificationPermission = useCallback(async () => {
@@ -113,6 +117,30 @@ export default function HomeScreen() {
         checkNotificationPermission();
         // router.replace('/(screens)/wish')
     }, [checkNotificationPermission]);
+
+    // Listen for auth changes to keep stored profile session fresh
+    useEffect(() => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+            if ((event === 'TOKEN_REFRESHED' || event === 'SIGNED_IN') && session) {
+                try {
+                    const storedUser = await SecureStore.getItemAsync('user');
+                    if (storedUser) {
+                        const userData = JSON.parse(storedUser);
+                        const schoolCode = userData.school?.schoolCode || userData.school?.schoolcode;
+                        const userId = userData.id || userData.userId;
+
+                        if (schoolCode && userId) {
+                            await updateProfileSession(schoolCode, userId, session);
+                        }
+                    }
+                } catch (err) {
+                    // console.error('Auth listener error:', err);
+                }
+            }
+        });
+
+        return () => subscription.unsubscribe();
+    }, []);
 
     const loadUser = async () => {
         try {
@@ -413,9 +441,9 @@ export default function HomeScreen() {
                     onRefresh={onRefresh}
                 />;
             case 'driver':
-            // return <DriverView refreshing={refreshing} onRefresh={onRefresh} schoolId={schoolId} userId={userId} />;
+                return <DriverView refreshing={refreshing} onRefresh={onRefresh} schoolId={schoolId} userId={userId} />;
             case 'conductor':
-            // return <ConductorView refreshing={refreshing} onRefresh={onRefresh} schoolId={schoolId} userId={userId} />;
+                return <ConductorView refreshing={refreshing} onRefresh={onRefresh} schoolId={schoolId} userId={userId} />;
             default:
                 return <StudentView refreshing={refreshing} onRefresh={onRefresh} />;
         }
@@ -1733,52 +1761,269 @@ export default function HomeScreen() {
 
     // === DRIVER VIEW ===
     const DriverView = ({ refreshing, onRefresh, schoolId, userId }) => {
-        const { data: tripsData, refetch } = useQuery({
-            queryKey: ['driver-trips-today', schoolId, userId],
+        console.log('🚀 DriverView - schoolId:', schoolId, 'userId:', userId);
+
+        // Location tracking state
+        const [isPollingLocation, setIsPollingLocation] = useState(false);
+        const locationWatchRef = useRef(null);
+        const appStateRef = useRef(AppState.currentState);
+
+        // First, get the transport staff record for this user
+        const { data: staffListData } = useQuery({
+            queryKey: ['transport-staff-list', schoolId, userId],
             queryFn: async () => {
-                const today = new Date().toISOString().split('T')[0];
-                const res = await api.get(`/schools/transport/trips?schoolId=${schoolId}&driverId=${userId}&startDate=${today}&endDate=${today}`);
+                const res = await api.get(`/schools/transport/staff?schoolId=${schoolId}&userId=${userId}`);
                 return res.data;
             },
             enabled: !!schoolId && !!userId,
+            staleTime: 1000 * 60 * 5,
+        });
+
+        // Use the first result since we filtered by userId
+        const staffData = staffListData?.staff?.[0];
+        const transportStaffId = staffData?.id;
+        const vehicle = staffData?.vehicleAssignments?.[0]?.vehicle;
+        const route = staffData?.vehicleAssignments?.[0]?.vehicle?.routes?.[0];
+        const routeStopsCount = route?.stops?.length || route?.busStops?.length || 0;
+
+        console.log('👤 Staff Data:', staffData, 'Transport Staff ID:', transportStaffId);
+
+        // Then fetch trips using the transportStaff ID
+        // Fetch today's trips + any ongoing IN_PROGRESS trips from previous days
+        const { data: tripsData, refetch, isLoading, isError, error } = useQuery({
+            queryKey: ['driver-trips-today', schoolId, transportStaffId],
+            queryFn: async () => {
+                console.log('📡 Fetching trips for transportStaffId:', transportStaffId);
+                const today = new Date().toISOString().split('T')[0];
+
+                // Fetch trips from the last 7 days to catch any lingering IN_PROGRESS trips
+                const weekAgo = new Date();
+                weekAgo.setDate(weekAgo.getDate() - 7);
+                const startDate = weekAgo.toISOString().split('T')[0];
+
+                const res = await api.get(`/schools/transport/trips?schoolId=${schoolId}&driverId=${transportStaffId}&startDate=${startDate}&endDate=${today}`);
+                console.log('✅ Trips fetched:', res.data);
+                return res.data;
+            },
+            enabled: !!schoolId && !!transportStaffId,
             staleTime: 1000 * 60,
+            retry: 2,
         });
 
         const trips = tripsData?.trips || [];
-        const activeTrip = trips.find(t => t.status === 'IN_PROGRESS');
-        const completedTrips = trips.filter(t => t.status === 'COMPLETED').length;
-        const totalTrips = trips.length;
+        // Filter: Show today's trips + any IN_PROGRESS trips from previous days
+        const today = new Date().toISOString().split('T')[0];
+        const relevantTrips = trips.filter(t => {
+            const tripDate = new Date(t.scheduledDate || t.createdAt).toISOString().split('T')[0];
+            // Include if: today's trip OR it's still IN_PROGRESS
+            return tripDate === today || t.status === 'IN_PROGRESS';
+        });
+
+        // Detect stale trips (IN_PROGRESS from previous days)
+        const staleTrips = trips.filter(t => {
+            const tripDate = new Date(t.scheduledDate || t.createdAt).toISOString().split('T')[0];
+            return t.status === 'IN_PROGRESS' && tripDate < today;
+        });
+
+        const activeTrip = relevantTrips.find(t => t.status === 'IN_PROGRESS');
+        const completedTrips = relevantTrips.filter(t => t.status === 'COMPLETED').length;
+        const totalTrips = relevantTrips.length;
+
+
+        // Force-complete mutation for stale trips
+        const forceCompleteMutation = useMutation({
+            mutationFn: async (tripId) => {
+                const res = await api.post(`/schools/transport/trips/${tripId}/complete`);
+                return res.data;
+            },
+            onSuccess: () => {
+                refetch();
+                Alert.alert('Success', 'Trip marked as completed!');
+            },
+            onError: (error) => {
+                Alert.alert('Error', error.response?.data?.error || 'Failed to complete trip');
+            }
+        });
+
+        // Function to force-complete a stale trip
+        const handleForceComplete = (trip) => {
+            const tripDate = new Date(trip.scheduledDate || trip.createdAt).toLocaleDateString();
+            Alert.alert(
+                'Complete Old Trip?',
+                `This trip from ${tripDate} is still marked as in-progress. Mark it as completed?`,
+                [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Complete Now', style: 'default', onPress: () => forceCompleteMutation.mutate(trip.id) }
+                ]
+            );
+        };
+
+        // Auto-complete stale trips on load (optional - uncomment to enable)
+        // useEffect(() => {
+        //     if (staleTrips.length > 0) {
+        //         staleTrips.forEach(trip => forceCompleteMutation.mutate(trip.id));
+        //     }
+        // }, [staleTrips.length]);
+
+        // Location Tracking Functions
+        const startLocationTracking = useCallback(async (tripId, vehicleId) => {
+            try {
+                const { status } = await Location.requestForegroundPermissionsAsync();
+                if (status !== 'granted') {
+                    Alert.alert('Permission Required', 'Location permission is needed for live tracking.');
+                    return;
+                }
+
+                locationWatchRef.current = await Location.watchPositionAsync(
+                    { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 20 },
+                    async (location) => {
+                        try {
+                            await api.post('/schools/transport/location/update', {
+                                vehicleId,
+                                tripId,
+                                transportStaffId,
+                                latitude: location.coords.latitude,
+                                longitude: location.coords.longitude,
+                                speed: location.coords.speed,
+                                heading: location.coords.heading,
+                            });
+                        } catch (err) {
+                            console.error('Error updating location:', err);
+                        }
+                    }
+                );
+                setIsPollingLocation(true);
+            } catch (err) {
+                console.error('Error starting location tracking:', err);
+            }
+        }, [transportStaffId]);
+
+        const stopLocationTracking = useCallback(() => {
+            if (locationWatchRef.current) {
+                locationWatchRef.current.remove();
+                locationWatchRef.current = null;
+            }
+            setIsPollingLocation(false);
+        }, []);
+
+        // Auto-start/stop location tracking based on active trip
+        useEffect(() => {
+            if (activeTrip && !isPollingLocation && vehicle) {
+                startLocationTracking(activeTrip.id, vehicle.id);
+            } else if (!activeTrip && isPollingLocation) {
+                stopLocationTracking();
+            }
+
+            return () => stopLocationTracking();
+        }, [activeTrip?.id, vehicle?.id]);
+
+        // Handle app state changes
+        useEffect(() => {
+            const subscription = AppState.addEventListener('change', (nextAppState) => {
+                if (appStateRef.current.match(/inactive|background/) && nextAppState === 'active') {
+                    refetch();
+                }
+                appStateRef.current = nextAppState;
+            });
+            return () => subscription.remove();
+        }, [refetch]);
 
         const quickActions = [
-            { icon: Clock, label: 'Active Trip', color: '#10B981', bgColor: '#D1FAE5', href: activeTrip ? { pathname: '/(screens)/transport/active-trip', params: { tripId: activeTrip.id } } : null },
-            { icon: MapPin, label: 'Track Bus', color: '#0469ff', bgColor: '#DBEAFE', href: '/(screens)/transport/bus-tracking' },
-            { icon: Users, label: 'Attendance', color: '#8B5CF6', bgColor: '#EDE9FE', href: activeTrip ? { pathname: '/(screens)/transport/attendance-marking', params: { tripId: activeTrip.id } } : '/(screens)/transport/attendance-history' },
-            { icon: Calendar, label: 'History', color: '#F59E0B', bgColor: '#FEF3C7', href: '/(screens)/transport/attendance-history' },
-            { icon: FileText, label: 'Reports', color: '#EF4444', bgColor: '#FEE2E2', href: '/(screens)/transport/attendance-history' },
+            { icon: Bus, label: 'My Vehicle', color: '#0469ff', bgColor: '#DBEAFE', href: '/(screens)/transport/my-vehicle' },
+            { icon: Users, label: 'Attendance', color: '#10B981', bgColor: '#D1FAE5', href: activeTrip ? { pathname: '/(screens)/transport/attendance-marking', params: { tripId: activeTrip.id } } : '/(screens)/transport/driver-attendance-history' },
+            { icon: MapPin, label: 'My Route', color: '#8B5CF6', bgColor: '#EDE9FE', href: '/(screens)/transport/my-route' },
+            { icon: Calendar, label: 'Trip History', color: '#F59E0B', bgColor: '#FEF3C7', href: '/(screens)/transport/driver-attendance-history' },
+            { icon: FileText, label: 'Reports', color: '#EF4444', bgColor: '#FEE2E2', href: '/(screens)/transport/driver-attendance-history' },
             { icon: Settings, label: 'Profile', color: '#64748B', bgColor: '#F1F5F9', href: '/profile' },
         ];
 
+        if (isLoading) {
+            return (
+                <View style={styles.loaderContainer}>
+                    <ActivityIndicator size="large" color="#0469ff" />
+                    <Text style={{ marginTop: 12, color: '#666' }}>Loading trips...</Text>
+                </View>
+            );
+        }
+
+
+        if (isError) {
+            return (
+                <View style={styles.loaderContainer}>
+                    <Text style={{ fontSize: 16, color: '#EF4444', marginBottom: 8 }}>Error loading trips</Text>
+                    <Text style={{ fontSize: 14, color: '#666' }}>{error?.message || 'Please try again'}</Text>
+                    <HapticTouchable onPress={() => refetch()} style={{ marginTop: 16, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: '#0469ff', borderRadius: 8 }}>
+                        <Text style={{ color: '#fff', fontWeight: '600' }}>Retry</Text>
+                    </HapticTouchable>
+                </View>
+            );
+        }
+
+        // Get today's scheduled trips for this driver
+        const todaysScheduledTrips = trips.filter(t => t.status === 'SCHEDULED');
+
         return (
             <ScrollView style={styles.container} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" colors={['#0469ff']} />}>
-                {activeTrip && (
+                {/* Bus Assignment Card - Moved to Top */}
+                {vehicle && (
                     <Animated.View entering={FadeInDown.delay(50).duration(600)} style={styles.section}>
-                        <HapticTouchable onPress={() => router.push({ pathname: '/(screens)/transport/active-trip', params: { tripId: activeTrip.id } })}>
-                            <LinearGradient colors={['#10B981', '#059669']} style={{ borderRadius: 16, padding: 16 }}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                                    <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.3)', alignItems: 'center', justifyContent: 'center' }}>
-                                        <Clock size={24} color="#fff" />
+                        <LinearGradient colors={['#0469ff', '#0052cc']} style={{ borderRadius: 20, padding: 20, shadowColor: "#0469ff", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.25, shadowRadius: 16, elevation: 12 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20 }}>
+                                <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}>
+                                    <Bus size={30} color="#fff" />
+                                </View>
+                                <View style={{ flex: 1, marginLeft: 16 }}>
+                                    <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.8)', fontWeight: '600', letterSpacing: 0.5, marginBottom: 2 }}>MY ASSIGNED BUS</Text>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                                        <Text style={{ fontSize: 24, fontWeight: '800', color: '#fff' }}>{vehicle.licensePlate}</Text>
+                                        <HapticTouchable onPress={() => router.push('/(screens)/transport/my-vehicle')} style={{ backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 }}>
+                                            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>Details</Text>
+                                        </HapticTouchable>
+                                    </View>
+                                </View>
+                            </View>
+                            <View style={{ backgroundColor: 'rgba(0,0,0,0.1)', borderRadius: 16, padding: 16 }}>
+                                <View style={{ flexDirection: 'row', marginBottom: 12 }}>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', marginBottom: 4 }}>Model</Text>
+                                        <Text style={{ fontSize: 16, fontWeight: '700', color: '#fff' }}>{vehicle.model || 'N/A'}</Text>
                                     </View>
                                     <View style={{ flex: 1 }}>
-                                        <Text style={{ fontSize: 16, fontWeight: '700', color: '#fff' }}>Trip in Progress</Text>
-                                        <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.9)', marginTop: 2 }}>{activeTrip.route?.name} • {activeTrip.tripType}</Text>
+                                        <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', marginBottom: 4 }}>Capacity</Text>
+                                        <Text style={{ fontSize: 16, fontWeight: '700', color: '#fff' }}>{vehicle.capacity || 'N/A'} Seats</Text>
                                     </View>
-                                    <ChevronRight size={24} color="#fff" />
                                 </View>
-                            </LinearGradient>
-                        </HapticTouchable>
+                                {route && (
+                                    <View>
+                                        <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', marginBottom: 4 }}>Assigned Route</Text>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                            <MapPin size={14} color="rgba(255,255,255,0.9)" style={{ marginRight: 6 }} />
+                                            <Text style={{ fontSize: 16, fontWeight: '700', color: '#fff' }}>{route.name}</Text>
+                                        </View>
+                                    </View>
+                                )}
+                                {todaysScheduledTrips.length > 0 && (
+                                    <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.15)' }}>
+                                        <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', marginBottom: 10 }}>Today's Tripr</Text>
+                                        {todaysScheduledTrips.map((trip, idx) => (
+                                            <View key={trip.id} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: idx < todaysScheduledTrips.length - 1 ? 8 : 0 }}>
+                                                <View style={{ width: 24, alignItems: 'flex-start' }}>
+                                                    <Text style={{ fontSize: 14 }}>{trip.tripType === 'PICKUP' ? '🌅' : '🌆'}</Text>
+                                                </View>
+                                                <Text style={{ fontSize: 14, color: '#fff', marginLeft: 8, flex: 1 }}>{trip.tripType} • {trip.route?.name}</Text>
+                                                <View style={{ backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                                                    <Text style={{ fontSize: 11, color: '#fff', fontWeight: '600' }}>{trip.status}</Text>
+                                                </View>
+                                            </View>
+                                        ))}
+                                    </View>
+                                )}
+                            </View>
+                        </LinearGradient>
                     </Animated.View>
                 )}
 
+                {/* Stats Cards - Moved below Bus Card */}
                 <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.section}>
                     <View style={styles.statsGrid}>
                         <HapticTouchable style={{ flex: 1 }}>
@@ -1805,6 +2050,105 @@ export default function HomeScreen() {
                     </View>
                 </Animated.View>
 
+                {/* Start Trip Widget - Show when there are scheduled trips but no active trip */}
+                {!activeTrip && todaysScheduledTrips.length > 0 && (
+                    <Animated.View entering={FadeInDown.delay(150).duration(600)} style={styles.section}>
+                        <View style={{ backgroundColor: '#FFF7ED', borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#FDBA74' }}>
+                            {/* Header with Vehicle Info */}
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                                <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: '#FFEDD5', alignItems: 'center', justifyContent: 'center' }}>
+                                    <Clock size={24} color="#EA580C" />
+                                </View>
+                                <View style={{ marginLeft: 14, flex: 1 }}>
+                                    <Text style={{ fontSize: 18, fontWeight: '700', color: '#9A3412' }}>Ready to Start</Text>
+                                    <Text style={{ fontSize: 13, color: '#C2410C' }}>{todaysScheduledTrips.length} trip{todaysScheduledTrips.length > 1 ? 's' : ''} scheduled</Text>
+                                </View>
+                            </View>
+
+                            {/* Vehicle Info Banner */}
+                            {vehicle && (
+                                <View style={{ backgroundColor: '#FFEDD5', borderRadius: 12, padding: 12, marginBottom: 16, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#FDBA74' }}>
+                                    <Bus size={20} color="#EA580C" />
+                                    <View style={{ marginLeft: 10, flex: 1 }}>
+                                        <Text style={{ fontSize: 14, fontWeight: '700', color: '#9A3412' }}>{vehicle.licensePlate}</Text>
+                                        <Text style={{ fontSize: 12, color: '#C2410C' }}>{vehicle.model} • {vehicle.capacity} seats</Text>
+                                    </View>
+                                </View>
+                            )}
+
+                            {/* Trip Cards */}
+                            {todaysScheduledTrips.map((trip, idx) => (
+                                <HapticTouchable
+                                    key={trip.id}
+                                    onPress={async () => {
+                                        try {
+                                            const res = await api.post(`/schools/transport/trips/${trip.id}/start`, { driverId: transportStaffId });
+                                            if (res.data.success) {
+                                                refetch();
+                                                router.push({ pathname: '/(screens)/transport/active-trip', params: { tripId: trip.id } });
+                                            }
+                                        } catch (err) {
+                                            console.error('Failed to start trip:', err);
+                                        }
+                                    }}
+                                    style={{
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        backgroundColor: '#fff',
+                                        padding: 14,
+                                        borderRadius: 14,
+                                        marginTop: idx > 0 ? 10 : 0,
+                                    }}
+                                >
+                                    <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: trip.tripType === 'PICKUP' ? '#DBEAFE' : '#FCE7F3', alignItems: 'center', justifyContent: 'center' }}>
+                                        <Text style={{ fontSize: 20 }}>{trip.tripType === 'PICKUP' ? '🌅' : '🌆'}</Text>
+                                    </View>
+                                    <View style={{ flex: 1, marginLeft: 12 }}>
+                                        <Text style={{ fontSize: 16, fontWeight: '700', color: '#1E293B' }}>{trip.route?.name || 'Route'}</Text>
+                                        <Text style={{ fontSize: 13, color: '#64748B', marginTop: 2 }}>{trip.tripType} Trip</Text>
+                                    </View>
+                                    <LinearGradient colors={['#10B981', '#059669']} style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10 }}>
+                                        <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>Start</Text>
+                                    </LinearGradient>
+                                </HapticTouchable>
+                            ))}
+                        </View>
+                    </Animated.View>
+                )}
+
+                {activeTrip && (
+                    <Animated.View entering={FadeInDown.delay(75).duration(600)} style={styles.section}>
+                        {/* Location Tracking Banner */}
+                        {isPollingLocation && (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#DCFCE7', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, marginBottom: 12, gap: 8, borderWidth: 1, borderColor: '#86EFAC' }}>
+                                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#16A34A' }} />
+                                <MapPin size={14} color="#16A34A" />
+                                <Text style={{ fontSize: 12, color: '#166534', fontWeight: '600', flex: 1 }}>Location tracking active</Text>
+                                <Text style={{ fontSize: 11, color: '#16A34A' }}>Parents can track</Text>
+                            </View>
+                        )}
+                        <HapticTouchable onPress={() => router.push({ pathname: '/(screens)/transport/active-trip', params: { tripId: activeTrip.id } })}>
+                            <LinearGradient colors={['#10B981', '#059669']} style={{ borderRadius: 16, padding: 16 }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                                    <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.3)', alignItems: 'center', justifyContent: 'center' }}>
+                                        <Clock size={24} color="#fff" />
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                            <Text style={{ fontSize: 16, fontWeight: '700', color: '#fff' }}>Trip in Progress</Text>
+                                            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#fff' }} />
+                                        </View>
+                                        <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.9)', marginTop: 2 }}>{activeTrip.route?.name} • {activeTrip.tripType}</Text>
+                                    </View>
+                                    <ChevronRight size={24} color="#fff" />
+                                </View>
+                            </LinearGradient>
+                        </HapticTouchable>
+                    </Animated.View>
+                )}
+
+
+
                 <Animated.View entering={FadeInDown.delay(200).duration(600)} style={styles.section}>
                     <Text style={styles.sectionTitle}>Quick Actions</Text>
                     <View style={styles.actionsGrid}>
@@ -1823,50 +2167,131 @@ export default function HomeScreen() {
                     </View>
                 </Animated.View>
 
-                {trips.length > 0 && (
-                    <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.section}>
+                {/* Today's Schedule - Redesigned */}
+                <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.section}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
                         <Text style={styles.sectionTitle}>Today's Schedule</Text>
-                        {trips.map((trip, index) => (
-                            <Animated.View key={trip.id} entering={FadeInDown.delay(350 + index * 50).duration(400)}>
-                                <HapticTouchable onPress={() => trip.status === 'IN_PROGRESS' && router.push({ pathname: '/(screens)/transport/active-trip', params: { tripId: trip.id } })}>
-                                    <View style={[styles.tripCard, { borderLeftWidth: 4, borderLeftColor: trip.status === 'COMPLETED' ? '#10B981' : trip.status === 'IN_PROGRESS' ? '#F59E0B' : '#0469ff' }]}>
-                                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                                            <Text style={{ fontSize: 15, fontWeight: '700', color: '#0F172A' }}>{trip.route?.name || 'Unknown Route'}</Text>
-                                            <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: trip.status === 'COMPLETED' ? '#D1FAE5' : trip.status === 'IN_PROGRESS' ? '#FEF3C7' : '#DBEAFE' }}>
-                                                <Text style={{ fontSize: 11, fontWeight: '600', color: trip.status === 'COMPLETED' ? '#10B981' : trip.status === 'IN_PROGRESS' ? '#F59E0B' : '#0469ff' }}>{trip.status === 'IN_PROGRESS' ? 'Active' : trip.status}</Text>
+                        {relevantTrips.length > 0 && (
+                            <View style={{ backgroundColor: '#DBEAFE', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
+                                <Text style={{ fontSize: 12, fontWeight: '600', color: '#0469ff' }}>{relevantTrips.length} trip{relevantTrips.length > 1 ? 's' : ''}</Text>
+                            </View>
+                        )}
+                    </View>
+
+                    {relevantTrips.length === 0 ? (
+                        /* Empty State */
+                        <View style={{ backgroundColor: '#F8FAFC', borderRadius: 16, padding: 32, alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0' }}>
+                            <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+                                <Calendar size={28} color="#94A3B8" />
+                            </View>
+                            <Text style={{ fontSize: 16, fontWeight: '700', color: '#64748B', marginBottom: 6 }}>No trips for today</Text>
+                            <Text style={{ fontSize: 13, color: '#94A3B8', textAlign: 'center' }}>Your scheduled trips will appear here</Text>
+                        </View>
+                    ) : (
+                        /* Trip Cards */
+                        <View style={{ gap: 12 }}>
+                            {relevantTrips.map((trip, index) => (
+                                <HapticTouchable
+                                    key={trip.id}
+                                    onPress={() => trip.status === 'IN_PROGRESS' && router.push({ pathname: '/(screens)/transport/active-trip', params: { tripId: trip.id } })}
+                                >
+                                    <View style={{
+                                        backgroundColor: trip.status === 'IN_PROGRESS' ? '#F0FDF4' : trip.status === 'COMPLETED' ? '#F0FDF4' : '#F8FAFC',
+                                        borderRadius: 16,
+                                        padding: 16,
+                                        borderWidth: 1,
+                                        borderColor: trip.status === 'IN_PROGRESS' ? '#86EFAC' : trip.status === 'COMPLETED' ? '#BBF7D0' : '#E2E8F0'
+                                    }}>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                            {/* Trip Type Icon */}
+                                            <View style={{
+                                                width: 48,
+                                                height: 48,
+                                                borderRadius: 12,
+                                                backgroundColor: trip.tripType === 'PICKUP' ? '#FEF3C7' : '#E0E7FF',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                marginRight: 12
+                                            }}>
+                                                <Text style={{ fontSize: 24 }}>{trip.tripType === 'PICKUP' ? '🌅' : '🌆'}</Text>
                                             </View>
-                                        </View>
-                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                                <Clock size={14} color="#64748B" />
-                                                <Text style={{ fontSize: 13, color: '#64748B' }}>{trip.scheduledStartTime ? new Date(trip.scheduledStartTime).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : 'N/A'}</Text>
+
+                                            {/* Trip Details */}
+                                            <View style={{ flex: 1 }}>
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                                                    <Text style={{ fontSize: 16, fontWeight: '700', color: '#1E293B' }}>{trip.route?.name || 'Route'}</Text>
+                                                    <View style={{
+                                                        paddingHorizontal: 10,
+                                                        paddingVertical: 4,
+                                                        borderRadius: 8,
+                                                        backgroundColor: trip.status === 'COMPLETED' ? '#D1FAE5' : trip.status === 'IN_PROGRESS' ? '#FEF3C7' : '#DBEAFE'
+                                                    }}>
+                                                        <Text style={{
+                                                            fontSize: 11,
+                                                            fontWeight: '700',
+                                                            color: trip.status === 'COMPLETED' ? '#059669' : trip.status === 'IN_PROGRESS' ? '#D97706' : '#0469ff'
+                                                        }}>
+                                                            {trip.status === 'IN_PROGRESS' ? '● ACTIVE' : trip.status}
+                                                        </Text>
+                                                    </View>
+                                                </View>
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                                        <Clock size={14} color="#64748B" />
+                                                        <Text style={{ fontSize: 13, color: '#64748B', fontWeight: '500' }}>{trip.tripType}</Text>
+                                                    </View>
+                                                    {trip.vehicle && (
+                                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                                            <Bus size={14} color="#64748B" />
+                                                            <Text style={{ fontSize: 13, color: '#64748B', fontWeight: '500' }}>{trip.vehicle.licensePlate}</Text>
+                                                        </View>
+                                                    )}
+                                                </View>
                                             </View>
-                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                                <MapPin size={14} color="#64748B" />
-                                                <Text style={{ fontSize: 13, color: '#64748B' }}>{trip.tripType || 'N/A'}</Text>
-                                            </View>
+
+                                            {/* Arrow for active trips */}
+                                            {trip.status === 'IN_PROGRESS' && (
+                                                <ChevronRight size={20} color="#10B981" style={{ marginLeft: 8 }} />
+                                            )}
                                         </View>
                                     </View>
                                 </HapticTouchable>
-                            </Animated.View>
-                        ))}
-                    </Animated.View>
-                )}
+                            ))}
+                        </View>
+                    )}
+                </Animated.View>
             </ScrollView>
         );
     };
 
     // === CONDUCTOR VIEW ===
     const ConductorView = ({ refreshing, onRefresh, schoolId, userId }) => {
-        const { data: tripsData } = useQuery({
-            queryKey: ['conductor-trips-today', schoolId, userId],
+        // First, get the transport staff record for this user
+        const { data: staffListData } = useQuery({
+            queryKey: ['transport-staff-list', schoolId],
             queryFn: async () => {
-                const today = new Date().toISOString().split('T')[0];
-                const res = await api.get(`/schools/transport/trips?schoolId=${schoolId}&conductorId=${userId}&startDate=${today}&endDate=${today}`);
+                const res = await api.get(`/schools/transport/staff?schoolId=${schoolId}&limit=100`);
                 return res.data;
             },
-            enabled: !!schoolId && !!userId,
+            enabled: !!schoolId,
+            staleTime: 1000 * 60 * 5,
+        });
+
+        // Find the staff record for this user
+        const staffData = staffListData?.staff?.find(s => s.userId === userId);
+        const transportStaffId = staffData?.id;
+        const vehicle = staffData?.vehicleAssignments?.[0]?.vehicle;
+
+        const { data: tripsData, isLoading, isError, error, refetch } = useQuery({
+            queryKey: ['conductor-trips-today', schoolId, transportStaffId],
+            queryFn: async () => {
+                const today = new Date().toISOString().split('T')[0];
+                const res = await api.get(`/schools/transport/trips?schoolId=${schoolId}&conductorId=${transportStaffId}&startDate=${today}&endDate=${today}`);
+                return res.data;
+            },
+            enabled: !!schoolId && !!transportStaffId,
             staleTime: 1000 * 60,
+            retry: 2,
         });
 
         const trips = tripsData?.trips || [];
@@ -1875,18 +2300,69 @@ export default function HomeScreen() {
         const completedTrips = trips.filter(t => t.status === 'COMPLETED').length;
 
         const quickActions = [
-            { icon: Users, label: 'Attendance', color: '#10B981', bgColor: '#D1FAE5', href: activeTrip ? { pathname: '/(screens)/transport/attendance-marking', params: { tripId: activeTrip.id } } : '/(screens)/transport/attendance-history' },
-            { icon: MapPin, label: 'Track Bus', color: '#0469ff', bgColor: '#DBEAFE', href: '/(screens)/transport/bus-tracking' },
-            { icon: Calendar, label: 'History', color: '#F59E0B', bgColor: '#FEF3C7', href: '/(screens)/transport/attendance-history' },
-            { icon: FileText, label: 'Reports', color: '#EF4444', bgColor: '#FEE2E2', href: '/(screens)/transport/attendance-history' },
-            { icon: Clock, label: 'Schedule', color: '#8B5CF6', bgColor: '#EDE9FE', href: '/(screens)/transport/attendance-history' },
+            { icon: Bus, label: 'My Vehicle', color: '#0469ff', bgColor: '#DBEAFE', href: '/(screens)/transport/my-vehicle' },
+            { icon: Users, label: 'Attendance', color: '#10B981', bgColor: '#D1FAE5', href: activeTrip ? { pathname: '/(screens)/transport/attendance-marking', params: { tripId: activeTrip.id } } : '/(screens)/transport/driver-attendance-history' },
+            { icon: MapPin, label: 'My Route', color: '#8B5CF6', bgColor: '#EDE9FE', href: '/(screens)/transport/my-route' },
+            { icon: Calendar, label: 'History', color: '#F59E0B', bgColor: '#FEF3C7', href: '/(screens)/transport/driver-attendance-history' },
+            { icon: FileText, label: 'Reports', color: '#EF4444', bgColor: '#FEE2E2', href: '/(screens)/transport/driver-attendance-history' },
             { icon: Settings, label: 'Profile', color: '#64748B', bgColor: '#F1F5F9', href: '/profile' },
         ];
 
+        if (isLoading) {
+            return (
+                <View style={styles.loaderContainer}>
+                    <ActivityIndicator size="large" color="#0469ff" />
+                    <Text style={{ marginTop: 12, color: '#666' }}>Loading trips...</Text>
+                </View>
+            );
+        }
+
+        if (isError) {
+            return (
+                <View style={styles.loaderContainer}>
+                    <Text style={{ fontSize: 16, color: '#EF4444', marginBottom: 8 }}>Error loading trips</Text>
+                    <Text style={{ fontSize: 14, color: '#666' }}>{error?.message || 'Please try again'}</Text>
+                    <HapticTouchable onPress={() => refetch()} style={{ marginTop: 16, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: '#0469ff', borderRadius: 8 }}>
+                        <Text style={{ color: '#fff', fontWeight: '600' }}>Retry</Text>
+                    </HapticTouchable>
+                </View>
+            );
+        }
+
         return (
             <ScrollView style={styles.container} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" colors={['#0469ff']} />}>
-                {activeTrip && (
+                {/* Bus Assignment Card for Conductor */}
+                {vehicle && (
                     <Animated.View entering={FadeInDown.delay(50).duration(600)} style={styles.section}>
+                        <LinearGradient colors={['#8B5CF6', '#7C3AED']} style={{ borderRadius: 20, padding: 20, shadowColor: "#8B5CF6", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.25, shadowRadius: 16, elevation: 12 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                                <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}>
+                                    <Bus size={26} color="#fff" />
+                                </View>
+                                <View style={{ flex: 1, marginLeft: 16 }}>
+                                    <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.8)', fontWeight: '600', letterSpacing: 0.5, marginBottom: 2 }}>ASSIGNED BUS</Text>
+                                    <Text style={{ fontSize: 22, fontWeight: '800', color: '#fff' }}>{vehicle.licensePlate}</Text>
+                                </View>
+                                <HapticTouchable onPress={() => router.push('/(screens)/transport/my-vehicle')} style={{ backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 }}>
+                                    <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>Details</Text>
+                                </HapticTouchable>
+                            </View>
+                            <View style={{ backgroundColor: 'rgba(0,0,0,0.1)', borderRadius: 12, padding: 12, flexDirection: 'row' }}>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', marginBottom: 2 }}>Model</Text>
+                                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#fff' }}>{vehicle.model || 'N/A'}</Text>
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', marginBottom: 2 }}>Capacity</Text>
+                                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#fff' }}>{vehicle.capacity || 'N/A'} Seats</Text>
+                                </View>
+                            </View>
+                        </LinearGradient>
+                    </Animated.View>
+                )}
+
+                {activeTrip && (
+                    <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.section}>
                         <HapticTouchable onPress={() => router.push({ pathname: '/(screens)/transport/attendance-marking', params: { tripId: activeTrip.id } })}>
                             <LinearGradient colors={['#10B981', '#059669']} style={{ borderRadius: 16, padding: 16 }}>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
@@ -1950,8 +2426,6 @@ export default function HomeScreen() {
             </ScrollView>
         );
     };
-
-
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
             {!loading && <Header />}
@@ -2577,17 +3051,15 @@ const styles = StyleSheet.create({
     actionsGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: 12,
-        // backgroundColor:'red',
+        gap: 10,
         marginTop: 12,
     },
     actionButton: {
-        width: (SCREEN_WIDTH - (isSmallDevice ? 48 : 56) - 24) / 3, // subtract 2 gaps (2 × 12)
-        // → now it's (totalWidth - padding - 24) / 3
-        padding: 14,
+        width: (SCREEN_WIDTH - 40 - 20) / 3,
+        padding: 16,
         borderRadius: 16,
         alignItems: 'center',
-        gap: 8,
+        justifyContent: 'center',
     },
     actionIcon: {
         width: 48,

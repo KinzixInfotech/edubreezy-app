@@ -7,6 +7,7 @@ import {
     TouchableOpacity,
     Dimensions,
     Alert,
+    ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -15,8 +16,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
 import { Plus, LogOut, ChevronRight } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
-import { getProfilesForSchool, removeProfile, updateLastUsed, clearSchoolProfiles } from '../../lib/profileManager';
+import { getProfilesForSchool, removeProfile, updateLastUsed, clearSchoolProfiles, updateProfileSession } from '../../lib/profileManager';
 import HapticTouchable from '../components/HapticTouch';
+import { supabase } from '../../lib/supabase';
 
 const { width } = Dimensions.get('window');
 const PROFILE_SIZE = 100;
@@ -39,6 +41,7 @@ export default function ProfileSelectorScreen() {
 
     const [profiles, setProfiles] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [selectingProfile, setSelectingProfile] = useState(null);
 
     useEffect(() => {
         loadProfiles();
@@ -59,18 +62,79 @@ export default function ProfileSelectorScreen() {
 
     const handleProfileSelect = async (profile) => {
         try {
+            setSelectingProfile(profile.id);
+
             // Update last used timestamp
             await updateLastUsed(schoolCode, profile.id);
 
-            // Save minimized user data as current user
+            let sessionRestored = false;
+
+            // Check if we have session tokens to restore
+            if (profile.sessionTokens?.refresh_token) {
+                console.log('🔄 Restoring Supabase session for', profile.email);
+
+                // Try to refresh the session using the refresh token
+                const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession({
+                    refresh_token: profile.sessionTokens.refresh_token,
+                });
+
+                if (refreshError) {
+                    console.warn('⚠️ Refresh failed, trying setSession:', refreshError.message);
+
+                    // Try setSession as fallback
+                    const { error: setError } = await supabase.auth.setSession({
+                        access_token: profile.sessionTokens.access_token,
+                        refresh_token: profile.sessionTokens.refresh_token,
+                    });
+
+                    if (setError) {
+                        console.error('❌ Session restore failed:', setError.message);
+                        // Continue anyway but warn user
+                        Alert.alert(
+                            'Session Issue',
+                            'Please re-login to enable full features. For now, you can browse the app.',
+                            [{ text: 'Continue Anyway' }, {
+                                text: 'Re-Login', onPress: () => {
+                                    router.push({
+                                        pathname: '/(auth)/login',
+                                        params: { schoolConfig: params.schoolData },
+                                    });
+                                }
+                            }]
+                        );
+                    } else {
+                        sessionRestored = true;
+                        console.log('✅ Session restored via setSession');
+                    }
+                } else {
+                    sessionRestored = true;
+                    console.log('✅ Session refreshed successfully');
+
+                    // Update stored tokens with new ones
+                    if (refreshData?.session) {
+                        await updateProfileSession(schoolCode, profile.userId, {
+                            access_token: refreshData.session.access_token,
+                            refresh_token: refreshData.session.refresh_token,
+                        });
+                        console.log('✅ Updated stored tokens for future use');
+                    }
+                }
+            } else {
+                console.warn('⚠️ No session tokens found - profile was saved before token storage was added');
+                console.log('ℹ️ User should re-login to save session tokens');
+            }
+
+            // Save user data as current user
             await SecureStore.setItemAsync('user', JSON.stringify(profile.userData));
             await SecureStore.setItemAsync('userRole', JSON.stringify(profile.role));
 
-            // Navigate to home instantly
+            // Navigate to home
             router.replace('/(tabs)/home');
         } catch (error) {
             console.error('Error selecting profile:', error);
             Alert.alert('Error', 'Failed to load profile. Please try again.');
+        } finally {
+            setSelectingProfile(null);
         }
     };
 
@@ -144,6 +208,7 @@ export default function ProfileSelectorScreen() {
     if (loading) {
         return (
             <View style={styles.loaderContainer}>
+                <ActivityIndicator />
                 <Text style={styles.loadingText}>Loading profiles...</Text>
             </View>
         );

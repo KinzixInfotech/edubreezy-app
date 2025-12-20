@@ -11,7 +11,6 @@ import HapticTouchable from '../components/HapticTouch';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import * as SecureStore from 'expo-secure-store';
 import { supabase } from '../../lib/supabase';
-
 export default function SettingsScreen() {
     const [notificationsEnabled, setNotificationsEnabled] = useState(true);
     const [darkMode, setDarkMode] = useState(false);
@@ -29,8 +28,9 @@ export default function SettingsScreen() {
                         // Simulate delay for better UX
                         setTimeout(async () => {
                             try {
-                                const { error } = await supabase.auth.signOut();
-                                if (error) throw error;
+                                // Don't sign out from Supabase, just clear local state to allow profile switching
+                                // const { error } = await supabase.auth.signOut();
+                                // if (error) throw error;
 
                                 await SecureStore.deleteItemAsync('user');
                                 await SecureStore.deleteItemAsync('userRole');

@@ -1,26 +1,52 @@
 import { useEffect, useState } from 'react';
 import { Redirect } from 'expo-router';
 import { View, ActivityIndicator } from 'react-native';
-import { supabase } from '../lib/supabase'; // adjust path
+import { supabase } from '../lib/supabase';
+import * as SecureStore from 'expo-secure-store';
 
 export default function Index() {
   const [isLoading, setIsLoading] = useState(true);
-  const [session, setSession] = useState(null);
-  console.log('Index screen mounted');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
-    const getSession = async () => {
-      const { data } = await supabase.auth.getSession();
-      // console.log(data);
-      setSession(data.session);
-      setIsLoading(false);
+    console.log('Index screen mounted');
+
+    const checkAuth = async () => {
+      try {
+        // Check SecureStore FIRST (much faster than Supabase call)
+        const userData = await SecureStore.getItemAsync('user');
+        if (userData) {
+          console.log('✅ User found in SecureStore - fast path');
+          setIsAuthenticated(true);
+          setIsLoading(false);
+          return; // Skip Supabase check - we have local data
+        }
+
+        // Only check Supabase if no local data exists
+        const { data } = await supabase.auth.getSession();
+        if (data.session) {
+          console.log('✅ Supabase session found');
+          setIsAuthenticated(true);
+        } else {
+          console.log('❌ No session or user data found');
+          setIsAuthenticated(false);
+        }
+      } catch (error) {
+        console.error('Error checking auth:', error);
+        setIsAuthenticated(false);
+      } finally {
+        setIsLoading(false);
+      }
     };
 
-    getSession();
+    checkAuth();
 
-    // Optional: listen for session changes
+    // Listen for session changes
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
+      if (session) {
+        setIsAuthenticated(true);
+      }
+      // Don't set to false on session loss - we might still have SecureStore data
     });
 
     return () => listener.subscription.unsubscribe();
@@ -34,7 +60,7 @@ export default function Index() {
     );
   }
 
-  if (session) {
+  if (isAuthenticated) {
     return <Redirect href="/(screens)/greeting" />;
   }
 

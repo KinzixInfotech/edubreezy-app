@@ -183,6 +183,9 @@ export default function LoginScreen() {
             const validated = LoginSchema.parse({ email: email.trim(), password });
             setLoading(true);
 
+            // Clear any old tokens to prevent mismatch
+            await SecureStore.deleteItemAsync('token');
+
             // Button press animation
             buttonScale.value = withSequence(
                 withTiming(0.95, { duration: 100 }),
@@ -209,6 +212,7 @@ export default function LoginScreen() {
 
             await SecureStore.setItemAsync('user', JSON.stringify(user));
             await SecureStore.setItemAsync('userRole', JSON.stringify(user?.role?.name));
+            await SecureStore.setItemAsync('token', data.session.access_token);
 
             // Save profile for this school code WITH session tokens
             const schoolCode = schoolConfig?.schoolcode || schoolConfig?.schoolCode;

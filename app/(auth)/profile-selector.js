@@ -128,6 +128,15 @@ export default function ProfileSelectorScreen() {
             await SecureStore.setItemAsync('user', JSON.stringify(profile.userData));
             await SecureStore.setItemAsync('userRole', JSON.stringify(profile.role));
 
+            // Store access token for API calls
+            if (sessionRestored) {
+                const { data: { session: currentSession } } = await supabase.auth.getSession();
+                if (currentSession?.access_token) {
+                    await SecureStore.setItemAsync('token', currentSession.access_token);
+                    console.log('✅ Token stored in SecureStore for API calls');
+                }
+            }
+
             // Navigate to home
             router.replace('/(tabs)/home');
         } catch (error) {

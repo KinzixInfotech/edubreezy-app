@@ -32,7 +32,7 @@ export default function MyVehicleScreen() {
     const [refreshing, setRefreshing] = useState(false);
 
     // First get the transport staff ID for this user
-    const { data: staffListData } = useQuery({
+    const { data: staffListData, refetch: refetchStaff, isLoading: isLoadingStaff } = useQuery({
         queryKey: ['transport-staff-list', schoolId, userId],
         queryFn: async () => {
             const res = await api.get(`/schools/transport/staff?schoolId=${schoolId}&userId=${userId}`);
@@ -45,7 +45,7 @@ export default function MyVehicleScreen() {
     const transportStaffId = staffData?.id;
 
     // Get vehicle from trips (more reliable since driver is assigned to trips)
-    const { data: tripsData, isLoading, refetch } = useQuery({
+    const { data: tripsData, isLoading: isLoadingTrips, refetch: refetchTrips } = useQuery({
         queryKey: ['driver-trips', schoolId, transportStaffId],
         queryFn: async () => {
             const today = new Date().toISOString().split('T')[0];
@@ -55,25 +55,51 @@ export default function MyVehicleScreen() {
         enabled: !!schoolId && !!transportStaffId,
     });
 
+    // Combined loading state
+    const isLoading = isLoadingStaff || (!!transportStaffId && isLoadingTrips);
+
+    // Refresh both staff data and trips data
     const onRefresh = React.useCallback(async () => {
         setRefreshing(true);
-        await refetch();
+        await Promise.all([
+            refetchStaff(),
+            transportStaffId ? refetchTrips() : Promise.resolve()
+        ]);
         setRefreshing(false);
-    }, [refetch]);
+    }, [refetchStaff, refetchTrips, transportStaffId]);
 
-    // Get vehicle from the first trip (or vehicleAssignments as fallback)
+    // Get vehicle from multiple sources (priority order):
+    // 1. Today's trips (most reliable for active trips)
+    // 2. Driver route assignments (permanent assignments)
+    // 3. Conductor route assignments (if staff is conductor)
+    // 4. Vehicle assignments (direct vehicle-to-staff assignment - fallback)
     const tripVehicle = tripsData?.trips?.[0]?.vehicle;
+    const driverRouteVehicle = staffData?.driverRouteAssignments?.[0]?.vehicle;
+    const conductorRouteVehicle = staffData?.conductorRouteAssignments?.[0]?.vehicle;
     const assignedVehicle = staffData?.vehicleAssignments?.[0]?.vehicle;
-    const vehicle = tripVehicle || assignedVehicle;
+
+    const vehicle = tripVehicle || driverRouteVehicle || conductorRouteVehicle || assignedVehicle;
+
+    // Also get the route info if available
+    const assignedRoute = staffData?.driverRouteAssignments?.[0]?.route ||
+        staffData?.conductorRouteAssignments?.[0]?.route;
 
     console.log('👤 Staff Data:', staffData);
     console.log('🚌 Vehicle from trips:', tripVehicle);
-    console.log('🚌 Vehicle from assignments:', assignedVehicle);
+    console.log('🚌 Vehicle from driver route assignments:', driverRouteVehicle);
+    console.log('🚌 Vehicle from conductor route assignments:', conductorRouteVehicle);
+    console.log('🚌 Vehicle from vehicle assignments:', assignedVehicle);
+    console.log('📍 Assigned Route:', assignedRoute);
 
     if (isLoading) {
         return (
             <View style={styles.loadingContainer}>
-                <Text>Loading vehicle details...</Text>
+                <ScrollView
+                    contentContainerStyle={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}
+                    refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" />}
+                >
+                    <Text>Loading vehicle details...</Text>
+                </ScrollView>
             </View>
         );
     }
@@ -81,11 +107,15 @@ export default function MyVehicleScreen() {
     if (!vehicle) {
         return (
             <View style={styles.container}>
-                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 }}>
+                <ScrollView
+                    contentContainerStyle={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 }}
+                    refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" />}
+                >
                     <Bus size={64} color="#cbd5e1" />
                     <Text style={{ fontSize: 18, fontWeight: '700', color: '#64748b', marginTop: 16 }}>No Vehicle Assigned</Text>
                     <Text style={{ textAlign: 'center', color: '#94a3b8', marginTop: 8 }}>You currently don't have a vehicle assigned to you. Please contact the transport manager.</Text>
-                </View>
+                    <Text style={{ textAlign: 'center', color: '#0469ff', marginTop: 16, fontSize: 13 }}>Pull down to refresh</Text>
+                </ScrollView>
             </View>
         );
     }

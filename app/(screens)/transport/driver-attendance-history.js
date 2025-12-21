@@ -21,6 +21,7 @@ import {
     MapPin,
     RotateCcw,
     Users,
+    Bus,
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../../components/HapticTouch';
@@ -102,6 +103,16 @@ export default function DriverAttendanceHistoryScreen() {
         }
     };
 
+    // Format time from timestamp
+    const formatTime = (timestamp) => {
+        if (!timestamp) return '--:--';
+        try {
+            return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        } catch {
+            return '--:--';
+        }
+    };
+
     if (isLoading && !refreshing) {
         return (
             <View style={styles.loaderContainer}>
@@ -134,6 +145,28 @@ export default function DriverAttendanceHistoryScreen() {
                 {trips.length > 0 ? (
                     trips.map((trip, index) => {
                         const StatusIcon = getStatusIcon(trip.status);
+                        // Use startedAt for started/completed trips
+                        const startTime = trip.startedAt;
+                        const endTime = trip.completedAt;
+
+                        // Determine time display text
+                        const tripTypeLabel = trip.tripType === 'PICKUP' ? 'Pickup' : 'Drop';
+                        let timeDisplay = '';
+
+                        if (trip.status === 'SCHEDULED') {
+                            timeDisplay = `${tripTypeLabel} • Scheduled`;
+                        } else if (trip.status === 'IN_PROGRESS') {
+                            timeDisplay = `${tripTypeLabel} • Started ${formatTime(startTime)}`;
+                        } else if (trip.status === 'COMPLETED') {
+                            timeDisplay = startTime
+                                ? `${tripTypeLabel} • ${formatTime(startTime)}${endTime ? ` - ${formatTime(endTime)}` : ''}`
+                                : `${tripTypeLabel} • Completed`;
+                        } else if (trip.status === 'CANCELLED') {
+                            timeDisplay = `${tripTypeLabel} • Cancelled`;
+                        } else {
+                            timeDisplay = `${tripTypeLabel} • ${formatTime(startTime)}`;
+                        }
+
                         return (
                             <Animated.View
                                 key={trip.id}
@@ -158,13 +191,11 @@ export default function DriverAttendanceHistoryScreen() {
                                 <View style={styles.tripFooter}>
                                     <View style={styles.metaItem}>
                                         <Clock size={14} color="#94A3B8" />
-                                        <Text style={styles.metaText}>
-                                            {trip.startTime ? new Date(trip.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Start --:--'}
-                                        </Text>
+                                        <Text style={styles.metaText}>{timeDisplay}</Text>
                                     </View>
                                     {trip.vehicle && (
                                         <View style={styles.metaItem}>
-                                            <Users size={14} color="#94A3B8" />
+                                            <Bus size={14} color="#94A3B8" />
                                             <Text style={styles.metaText}>{trip.vehicle.licensePlate}</Text>
                                         </View>
                                     )}
@@ -176,6 +207,7 @@ export default function DriverAttendanceHistoryScreen() {
                     <View style={styles.emptyState}>
                         <Clock size={48} color="#cbd5e1" />
                         <Text style={styles.emptyText}>No trip history found</Text>
+                        <Text style={styles.emptySubtext}>Pull down to refresh</Text>
                     </View>
                 )}
                 <View style={{ height: 40 }} />
@@ -193,6 +225,7 @@ const styles = StyleSheet.create({
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
+        backgroundColor: '#f8fafc',
     },
     header: {
         flexDirection: 'row',
@@ -203,7 +236,7 @@ const styles = StyleSheet.create({
         paddingBottom: 16,
         backgroundColor: '#fff',
         borderBottomWidth: 1,
-        borderBottomColor: '#f1f5f9',
+        borderBottomColor: '#e2e8f0',
     },
     backButton: {
         width: 40,
@@ -235,11 +268,8 @@ const styles = StyleSheet.create({
         borderRadius: 16,
         padding: 16,
         marginBottom: 12,
-        shadowColor: '#64748b',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 4,
-        elevation: 2,
+        borderWidth: 1,
+        borderColor: '#e2e8f0',
     },
     tripHeader: {
         flexDirection: 'row',
@@ -296,11 +326,16 @@ const styles = StyleSheet.create({
     emptyState: {
         alignItems: 'center',
         paddingVertical: 60,
-        gap: 12,
+        gap: 8,
     },
     emptyText: {
         fontSize: 16,
         fontWeight: '600',
         color: '#64748b',
     },
+    emptySubtext: {
+        fontSize: 13,
+        color: '#94a3b8',
+    },
 });
+

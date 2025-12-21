@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Modal, Dimensions, TouchableWithoutFeedback, Animated as RNAnimated, RefreshControl, Linking, Alert } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Settings, Edit, LogOut, Mail, Phone, Calendar, MapPin, Award, BookOpen, School, X, Users, ClipboardList, FileText, Bell, Shield, Clock } from 'lucide-react-native';
+import { Settings, Edit, LogOut, Mail, Phone, Calendar, MapPin, Award, BookOpen, School, X, Users, ClipboardList, FileText, Bell, Shield, Clock, Bus, Fuel, Gauge } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../components/HapticTouch';
@@ -216,6 +216,7 @@ const PROFILE_CONFIG = {
       licenseNumber: 'transportStaffData.licenseNumber',
       licenseExpiry: 'transportStaffData.licenseExpiry',
     },
+    showVehicleCard: true,
     stats: [],
     contactInfo: [
       { key: 'email', label: 'Email', icon: Mail, color: '#0469ff', dataPath: 'transportStaffData.email' },
@@ -234,9 +235,9 @@ const PROFILE_CONFIG = {
       { key: 'joiningDate', label: 'Joining Date', dataPath: 'transportStaffData.joiningDate' },
     ],
     menuItems: [
-      { id: 1, label: 'My Trips', icon: Clock, route: '/driver/trips', color: '#0469ff' },
-      { id: 2, label: 'Vehicle Details', icon: FileText, route: '/driver/vehicle', color: '#10b981' },
-      { id: 3, label: 'Route Map', icon: MapPin, route: '/driver/route', color: '#f59e0b' },
+      { id: 1, label: 'Trip History', icon: Clock, route: '/(screens)/transport/driver-attendance-history', color: '#0469ff' },
+      { id: 2, label: 'My Vehicle', icon: Bus, route: '/(screens)/transport/my-vehicle', color: '#10b981' },
+      { id: 3, label: 'My Route', icon: MapPin, route: '/(screens)/transport/my-route', color: '#f59e0b' },
       { id: 4, label: 'Notifications', icon: Bell, route: '/(tabs)/notifications', color: '#8b5cf6' },
       { id: 5, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#06b6d4' },
     ],
@@ -252,6 +253,7 @@ const PROFILE_CONFIG = {
       profilePicture: 'profilePicture',
       employeeId: 'transportStaffData.employeeId',
     },
+    showVehicleCard: true,
     stats: [],
     contactInfo: [
       { key: 'email', label: 'Email', icon: Mail, color: '#0469ff', dataPath: 'transportStaffData.email' },
@@ -268,12 +270,11 @@ const PROFILE_CONFIG = {
       { key: 'joiningDate', label: 'Joining Date', dataPath: 'transportStaffData.joiningDate' },
     ],
     menuItems: [
-      { id: 1, label: 'My Trips', icon: Clock, route: '/conductor/trips', color: '#0469ff' },
-      { id: 2, label: 'Mark Attendance', icon: ClipboardList, route: '/conductor/attendance', color: '#10b981' },
-      { id: 3, label: 'Student List', icon: Users, route: '/conductor/students', color: '#f59e0b' },
-      { id: 4, label: 'Route Info', icon: MapPin, route: '/conductor/route', color: '#8b5cf6' },
-      { id: 5, label: 'Notifications', icon: Bell, route: '/(tabs)/notifications', color: '#ec4899' },
-      { id: 6, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#06b6d4' },
+      { id: 1, label: 'Trip History', icon: Clock, route: '/(screens)/transport/driver-attendance-history', color: '#0469ff' },
+      { id: 2, label: 'My Vehicle', icon: Bus, route: '/(screens)/transport/my-vehicle', color: '#10b981' },
+      { id: 3, label: 'My Route', icon: MapPin, route: '/(screens)/transport/my-route', color: '#f59e0b' },
+      { id: 4, label: 'Notifications', icon: Bell, route: '/(tabs)/notifications', color: '#8b5cf6' },
+      { id: 5, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#06b6d4' },
     ],
   },
 };
@@ -323,21 +324,45 @@ export default function ProfileScreen() {
   }, []);
 
   const handleRefresh = async () => {
+    console.log('🔄 Profile handleRefresh triggered');
     setRefreshing(true);
     try {
+      // Try to get session from supabase
       const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        const userData = await fetchUser(session.user.id, session.access_token);
+      console.log('🔄 Profile session:', session?.user?.id);
+
+      // Get userId and token - prefer session, fall back to stored values
+      let userId = session?.user?.id;
+      let token = session?.access_token;
+
+      // If no session, try to get from SecureStore
+      if (!userId || !token) {
+        console.log('🔄 No session, checking SecureStore...');
+        token = await SecureStore.getItemAsync('token');
+        const storedUser = await SecureStore.getItemAsync('user');
+        if (storedUser) {
+          const parsedUser = JSON.parse(storedUser);
+          userId = parsedUser.id;
+        }
+        console.log('🔄 From SecureStore - userId:', userId, 'token:', token ? 'YES' : 'NO');
+      }
+
+      if (userId && token) {
+        console.log('🔄 Profile calling fetchUser...');
+        const userData = await fetchUser(userId, token);
+        console.log('🔄 Profile userData received:', userData ? 'YES' : 'NO');
+        console.log('🔄 Profile driverRouteAssignments:', userData?.transportStaffData?.driverRouteAssignments);
         if (userData) {
           setUser(userData);
           await SecureStore.setItemAsync('user', JSON.stringify(userData));
-          // Role might also change/update
           if (userData.role?.name) {
             setRole(userData.role.name);
             await SecureStore.setItemAsync('userRole', userData.role.name);
           }
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         }
+      } else {
+        console.log('🔄 No userId or token available');
       }
     } catch (error) {
       console.error("Refresh failed:", error);
@@ -474,6 +499,72 @@ export default function ProfileScreen() {
           </View>
         )}
 
+        {/* Assigned Vehicle Card - for Driver/Conductor */}
+        {config.showVehicleCard && user?.transportStaffData && (() => {
+          // Get vehicle from route assignments or vehicle assignments
+          const routeAssignment = user.transportStaffData.driverRouteAssignments?.[0] ||
+            user.transportStaffData.conductorRouteAssignments?.[0];
+          const vehicle = routeAssignment?.vehicle || user.transportStaffData.vehicleAssignments?.[0]?.vehicle;
+          const route = routeAssignment?.route;
+
+          console.log('🚌 Profile - showVehicleCard:', config.showVehicleCard);
+          console.log('🚌 Profile - transportStaffData:', user.transportStaffData);
+          console.log('🚌 Profile - driverRouteAssignments:', user.transportStaffData.driverRouteAssignments);
+          console.log('🚌 Profile - routeAssignment:', routeAssignment);
+          console.log('🚌 Profile - vehicle:', vehicle);
+
+          if (!vehicle) return null;
+
+          return (
+            <Animated.View entering={FadeInDown.delay(350).duration(600)} style={styles.section}>
+              <Text style={styles.sectionTitle}>Assigned Vehicle</Text>
+              <HapticTouchable onPress={() => router.push('/(screens)/transport/my-vehicle')}>
+                <View style={styles.vehicleCard}>
+                  <View style={styles.vehicleHeader}>
+                    <View style={styles.vehicleIconContainer}>
+                      <Bus size={28} color="#0469ff" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.vehiclePlate}>{vehicle.licensePlate}</Text>
+                      <Text style={styles.vehicleModel}>{vehicle.model || 'Unknown Model'}</Text>
+                    </View>
+                    <View style={styles.vehicleStatusBadge}>
+                      <Text style={styles.vehicleStatusText}>Active</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.vehicleStats}>
+                    <View style={styles.vehicleStatItem}>
+                      <Users size={16} color="#64748b" />
+                      <Text style={styles.vehicleStatLabel}>Capacity</Text>
+                      <Text style={styles.vehicleStatValue}>{vehicle.capacity || '-'}</Text>
+                    </View>
+                    <View style={styles.vehicleStatDivider} />
+                    <View style={styles.vehicleStatItem}>
+                      <Fuel size={16} color="#64748b" />
+                      <Text style={styles.vehicleStatLabel}>Fuel</Text>
+                      <Text style={styles.vehicleStatValue}>{vehicle.fuelType || 'N/A'}</Text>
+                    </View>
+                    <View style={styles.vehicleStatDivider} />
+                    <View style={styles.vehicleStatItem}>
+                      <Gauge size={16} color="#64748b" />
+                      <Text style={styles.vehicleStatLabel}>Mileage</Text>
+                      <Text style={styles.vehicleStatValue}>{vehicle.mileage ? `${vehicle.mileage} km` : 'N/A'}</Text>
+                    </View>
+                  </View>
+
+                  {route && (
+                    <View style={styles.vehicleRoute}>
+                      <MapPin size={14} color="#10b981" />
+                      <Text style={styles.vehicleRouteText}>Route: {route.name}</Text>
+                    </View>
+                  )}
+                </View>
+              </HapticTouchable>
+            </Animated.View>
+          );
+        })()}
+
         {/* Contact Info */}
         <Animated.View entering={FadeInDown.delay(400).duration(600)} style={styles.section}>
           <Text style={styles.sectionTitle}>Contact Information</Text>
@@ -525,7 +616,7 @@ export default function ProfileScreen() {
                   }
 
                   // Format date fields
-                  if (info.key === 'dob' && value && value !== 'N/A') {
+                  if ((info.key === 'dob' || info.key === 'licenseExpiry' || info.key === 'joiningDate' || info.key === 'admissionDate') && value && value !== 'N/A') {
                     try {
                       const date = new Date(value);
                       value = date.toLocaleDateString('en-IN', {
@@ -956,5 +1047,89 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     marginTop: 12,
+  },
+  // Vehicle Card Styles
+  vehicleCard: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  vehicleHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  vehicleIconContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#DBEAFE',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  vehiclePlate: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#1e293b',
+  },
+  vehicleModel: {
+    fontSize: 14,
+    color: '#64748b',
+    marginTop: 2,
+  },
+  vehicleStatusBadge: {
+    backgroundColor: '#dcfce7',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  vehicleStatusText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#16a34a',
+  },
+  vehicleStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+  },
+  vehicleStatItem: {
+    alignItems: 'center',
+    flex: 1,
+    gap: 4,
+  },
+  vehicleStatDivider: {
+    width: 1,
+    height: 36,
+    backgroundColor: '#f1f5f9',
+  },
+  vehicleStatLabel: {
+    fontSize: 11,
+    color: '#94a3b8',
+  },
+  vehicleStatValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1e293b',
+  },
+  vehicleRoute: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+  },
+  vehicleRouteText: {
+    fontSize: 13,
+    color: '#10b981',
+    fontWeight: '600',
   },
 });

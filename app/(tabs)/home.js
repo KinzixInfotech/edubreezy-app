@@ -166,6 +166,45 @@ export default function HomeScreen() {
         enabled: user_acc?.role?.name === "TEACHING_STAFF" && !!schoolId,
         staleTime: 1000 * 60 * 2,
     });
+
+    // Pre-fetch transport staff data for Driver/Conductor roles
+    const isTransportRole = user_acc?.role?.name === 'DRIVER' || user_acc?.role?.name === 'CONDUCTOR';
+
+    const { data: transportStaffData, isLoading: isTransportStaffLoading } = useQuery({
+        queryKey: ['transport-staff-home', schoolId, userId],
+        queryFn: async () => {
+            const res = await api.get(`/schools/transport/staff?schoolId=${schoolId}&userId=${userId}`);
+            return res.data;
+        },
+        enabled: isTransportRole && !!schoolId && !!userId,
+        staleTime: 1000 * 60 * 5,
+    });
+
+    const transportStaff = transportStaffData?.staff?.[0];
+    const transportStaffId = transportStaff?.id;
+
+    // Pre-fetch trips for Driver/Conductor
+    const { data: transportTripsData, isLoading: isTransportTripsLoading } = useQuery({
+        queryKey: ['transport-trips-home', schoolId, transportStaffId],
+        queryFn: async () => {
+            const today = new Date().toISOString().split('T')[0];
+            const weekAgo = new Date();
+            weekAgo.setDate(weekAgo.getDate() - 7);
+            const startDate = weekAgo.toISOString().split('T')[0];
+
+            const isDriver = user_acc?.role?.name === 'DRIVER';
+            const paramKey = isDriver ? 'driverId' : 'conductorId';
+
+            const res = await api.get(`/schools/transport/trips?schoolId=${schoolId}&${paramKey}=${transportStaffId}&startDate=${startDate}&endDate=${today}`);
+            return res.data;
+        },
+        enabled: isTransportRole && !!schoolId && !!transportStaffId,
+        staleTime: 1000 * 60,
+    });
+
+    // Check if transport data is still loading
+    const isTransportDataLoading = isTransportRole && (isTransportStaffLoading || (transportStaffId && isTransportTripsLoading));
+
     const { data: upcomingEventsData, isLoading: eventsLoading } = useQuery({
         queryKey: ['upcomingEvents', schoolId],
         queryFn: async () => {
@@ -263,10 +302,14 @@ export default function HomeScreen() {
         return name.length > max ? name.slice(0, max).toUpperCase() + '...' : name.toUpperCase();
     }, []);
 
-    if (loading) {
+    // Show unified loader for transport roles until all data is ready
+    if (loading || isTransportDataLoading) {
         return (
             <View style={styles.loaderContainer}>
                 <ActivityIndicator size="large" color="#0469ff" />
+                {isTransportDataLoading && (
+                    <Text style={{ marginTop: 12, color: '#666', fontSize: 14 }}>Loading your dashboard...</Text>
+                )}
             </View>
         );
     }
@@ -441,9 +484,23 @@ export default function HomeScreen() {
                     onRefresh={onRefresh}
                 />;
             case 'driver':
-                return <DriverView refreshing={refreshing} onRefresh={onRefresh} schoolId={schoolId} userId={userId} />;
+                return <DriverView
+                    refreshing={refreshing}
+                    onRefresh={onRefresh}
+                    schoolId={schoolId}
+                    userId={userId}
+                    prefetchedStaffData={transportStaff}
+                    prefetchedTripsData={transportTripsData}
+                />;
             case 'conductor':
-                return <ConductorView refreshing={refreshing} onRefresh={onRefresh} schoolId={schoolId} userId={userId} />;
+                return <ConductorView
+                    refreshing={refreshing}
+                    onRefresh={onRefresh}
+                    schoolId={schoolId}
+                    userId={userId}
+                    prefetchedStaffData={transportStaff}
+                    prefetchedTripsData={transportTripsData}
+                />;
             default:
                 return <StudentView refreshing={refreshing} onRefresh={onRefresh} />;
         }
@@ -1760,57 +1817,32 @@ export default function HomeScreen() {
     };
 
     // === DRIVER VIEW ===
-    const DriverView = ({ refreshing, onRefresh, schoolId, userId }) => {
-        console.log('🚀 DriverView - schoolId:', schoolId, 'userId:', userId);
+    const DriverView = ({ refreshing, onRefresh, schoolId, userId, prefetchedStaffData, prefetchedTripsData }) => {
+        console.log('🚀 DriverView - using prefetched data');
 
         // Location tracking state
         const [isPollingLocation, setIsPollingLocation] = useState(false);
         const locationWatchRef = useRef(null);
         const appStateRef = useRef(AppState.currentState);
+        const queryClient = useQueryClient();
 
-        // First, get the transport staff record for this user
-        const { data: staffListData } = useQuery({
-            queryKey: ['transport-staff-list', schoolId, userId],
-            queryFn: async () => {
-                const res = await api.get(`/schools/transport/staff?schoolId=${schoolId}&userId=${userId}`);
-                return res.data;
-            },
-            enabled: !!schoolId && !!userId,
-            staleTime: 1000 * 60 * 5,
-        });
-
-        // Use the first result since we filtered by userId
-        const staffData = staffListData?.staff?.[0];
+        // Use prefetched data directly
+        const staffData = prefetchedStaffData;
         const transportStaffId = staffData?.id;
         const vehicle = staffData?.vehicleAssignments?.[0]?.vehicle;
         const route = staffData?.vehicleAssignments?.[0]?.vehicle?.routes?.[0];
         const routeStopsCount = route?.stops?.length || route?.busStops?.length || 0;
 
-        console.log('👤 Staff Data:', staffData, 'Transport Staff ID:', transportStaffId);
-
-        // Then fetch trips using the transportStaff ID
-        // Fetch today's trips + any ongoing IN_PROGRESS trips from previous days
-        const { data: tripsData, refetch, isLoading, isError, error } = useQuery({
-            queryKey: ['driver-trips-today', schoolId, transportStaffId],
-            queryFn: async () => {
-                console.log('📡 Fetching trips for transportStaffId:', transportStaffId);
-                const today = new Date().toISOString().split('T')[0];
-
-                // Fetch trips from the last 7 days to catch any lingering IN_PROGRESS trips
-                const weekAgo = new Date();
-                weekAgo.setDate(weekAgo.getDate() - 7);
-                const startDate = weekAgo.toISOString().split('T')[0];
-
-                const res = await api.get(`/schools/transport/trips?schoolId=${schoolId}&driverId=${transportStaffId}&startDate=${startDate}&endDate=${today}`);
-                console.log('✅ Trips fetched:', res.data);
-                return res.data;
-            },
-            enabled: !!schoolId && !!transportStaffId,
-            staleTime: 1000 * 60,
-            retry: 2,
-        });
-
+        // Use prefetched trips data
+        const tripsData = prefetchedTripsData;
         const trips = tripsData?.trips || [];
+
+        // Refetch function for manual refresh
+        const refetch = () => {
+            queryClient.invalidateQueries({ queryKey: ['transport-trips-home'] });
+            queryClient.invalidateQueries({ queryKey: ['transport-staff-home'] });
+        };
+
         // Filter: Show today's trips + any IN_PROGRESS trips from previous days
         const today = new Date().toISOString().split('T')[0];
         const relevantTrips = trips.filter(t => {
@@ -1937,27 +1969,7 @@ export default function HomeScreen() {
             { icon: Settings, label: 'Profile', color: '#64748B', bgColor: '#F1F5F9', href: '/profile' },
         ];
 
-        if (isLoading) {
-            return (
-                <View style={styles.loaderContainer}>
-                    <ActivityIndicator size="large" color="#0469ff" />
-                    <Text style={{ marginTop: 12, color: '#666' }}>Loading trips...</Text>
-                </View>
-            );
-        }
-
-
-        if (isError) {
-            return (
-                <View style={styles.loaderContainer}>
-                    <Text style={{ fontSize: 16, color: '#EF4444', marginBottom: 8 }}>Error loading trips</Text>
-                    <Text style={{ fontSize: 14, color: '#666' }}>{error?.message || 'Please try again'}</Text>
-                    <HapticTouchable onPress={() => refetch()} style={{ marginTop: 16, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: '#0469ff', borderRadius: 8 }}>
-                        <Text style={{ color: '#fff', fontWeight: '600' }}>Retry</Text>
-                    </HapticTouchable>
-                </View>
-            );
-        }
+        // Note: Loading is handled at HomeScreen level now
 
         // Get today's scheduled trips for this driver
         const todaysScheduledTrips = trips.filter(t => t.status === 'SCHEDULED');
@@ -2265,36 +2277,24 @@ export default function HomeScreen() {
     };
 
     // === CONDUCTOR VIEW ===
-    const ConductorView = ({ refreshing, onRefresh, schoolId, userId }) => {
-        // First, get the transport staff record for this user
-        const { data: staffListData } = useQuery({
-            queryKey: ['transport-staff-list', schoolId],
-            queryFn: async () => {
-                const res = await api.get(`/schools/transport/staff?schoolId=${schoolId}&limit=100`);
-                return res.data;
-            },
-            enabled: !!schoolId,
-            staleTime: 1000 * 60 * 5,
-        });
+    const ConductorView = ({ refreshing, onRefresh, schoolId, userId, prefetchedStaffData, prefetchedTripsData }) => {
+        const queryClient = useQueryClient();
 
-        // Find the staff record for this user
-        const staffData = staffListData?.staff?.find(s => s.userId === userId);
+        // Use prefetched data directly
+        const staffData = prefetchedStaffData;
         const transportStaffId = staffData?.id;
         const vehicle = staffData?.vehicleAssignments?.[0]?.vehicle;
 
-        const { data: tripsData, isLoading, isError, error, refetch } = useQuery({
-            queryKey: ['conductor-trips-today', schoolId, transportStaffId],
-            queryFn: async () => {
-                const today = new Date().toISOString().split('T')[0];
-                const res = await api.get(`/schools/transport/trips?schoolId=${schoolId}&conductorId=${transportStaffId}&startDate=${today}&endDate=${today}`);
-                return res.data;
-            },
-            enabled: !!schoolId && !!transportStaffId,
-            staleTime: 1000 * 60,
-            retry: 2,
-        });
-
+        // Use prefetched trips data
+        const tripsData = prefetchedTripsData;
         const trips = tripsData?.trips || [];
+
+        // Refetch function for manual refresh
+        const refetch = () => {
+            queryClient.invalidateQueries({ queryKey: ['transport-trips-home'] });
+            queryClient.invalidateQueries({ queryKey: ['transport-staff-home'] });
+        };
+
         const activeTrip = trips.find(t => t.status === 'IN_PROGRESS');
         const totalStudents = activeTrip?.route?.busStops?.reduce((sum, stop) => sum + (stop.students?.length || 0), 0) || 0;
         const completedTrips = trips.filter(t => t.status === 'COMPLETED').length;
@@ -2308,26 +2308,7 @@ export default function HomeScreen() {
             { icon: Settings, label: 'Profile', color: '#64748B', bgColor: '#F1F5F9', href: '/profile' },
         ];
 
-        if (isLoading) {
-            return (
-                <View style={styles.loaderContainer}>
-                    <ActivityIndicator size="large" color="#0469ff" />
-                    <Text style={{ marginTop: 12, color: '#666' }}>Loading trips...</Text>
-                </View>
-            );
-        }
-
-        if (isError) {
-            return (
-                <View style={styles.loaderContainer}>
-                    <Text style={{ fontSize: 16, color: '#EF4444', marginBottom: 8 }}>Error loading trips</Text>
-                    <Text style={{ fontSize: 14, color: '#666' }}>{error?.message || 'Please try again'}</Text>
-                    <HapticTouchable onPress={() => refetch()} style={{ marginTop: 16, paddingHorizontal: 20, paddingVertical: 10, backgroundColor: '#0469ff', borderRadius: 8 }}>
-                        <Text style={{ color: '#fff', fontWeight: '600' }}>Retry</Text>
-                    </HapticTouchable>
-                </View>
-            );
-        }
+        // Note: Loading is handled at HomeScreen level now
 
         return (
             <ScrollView style={styles.container} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" colors={['#0469ff']} />}>

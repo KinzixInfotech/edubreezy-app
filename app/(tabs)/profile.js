@@ -1,16 +1,33 @@
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Modal, Dimensions, TouchableWithoutFeedback, Animated as RNAnimated, RefreshControl, Linking, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Settings, Edit, LogOut, Mail, Phone, Calendar, MapPin, Award, BookOpen, School, X, Users, ClipboardList, FileText, Bell, Shield, Clock, Bus, Fuel, Gauge } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../components/HapticTouch';
 import { useCallback, useEffect, useState } from 'react';
-import fetchUser from '../../lib/queries/user';
 import { supabase } from '../../lib/supabase';
 import Animated, { FadeInDown, FadeInUp, FadeInRight } from 'react-native-reanimated';
 import * as Haptics from 'expo-haptics';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import api from '../../lib/api';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const isSmallDevice = SCREEN_WIDTH < 375;
+const isTablet = SCREEN_WIDTH >= 768;
+
+// Role-based colors for avatar backgrounds
+const ROLE_COLORS = {
+  STUDENT: '#10B981',
+  PARENT: '#0469ff',
+  TEACHING_STAFF: '#8B5CF6',
+  ADMIN: '#EF4444',
+  DRIVER: '#F59E0B',
+  CONDUCTOR: '#06B6D4',
+  NON_TEACHING_STAFF: '#64748B',
+  LIBRARIAN: '#14B8A6',
+  ACCOUNTANT: '#84CC16',
+};
 
 // ==================== ROLE-BASED CONFIGURATION ====================
 const PROFILE_CONFIG = {
@@ -288,14 +305,14 @@ const getNestedValue = (obj, path, defaultValue = 'N/A') => {
 };
 
 export default function ProfileScreen() {
-  const [user, setUser] = useState(null);
-  const [role, setRole] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const { schoolConfig: schoolConfigParam } = useLocalSearchParams();
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [fadeAnim] = useState(new RNAnimated.Value(0));
+  const [storedUserId, setStoredUserId] = useState(null);
+  const queryClient = useQueryClient();
+
   const getInitials = useCallback((name) => {
     if (!name) return '';
     const parts = name.trim().split(' ');
@@ -303,67 +320,56 @@ export default function ProfileScreen() {
     if (parts.length === 2) return parts[0][0] + parts[1][0];
     return parts[0][0] + parts[parts.length - 1][0];
   }, []);
+
+  // Get stored userId on mount
   useEffect(() => {
     (async () => {
-      try {
-        const stored = await SecureStore.getItemAsync('user');
-        let savedRole = await SecureStore.getItemAsync('userRole');
-        savedRole = savedRole?.replace(/^"|"$/g, '');
-
-        if (stored) {
-          setUser(JSON.parse(stored));
-          setRole(savedRole || 'STUDENT');
-        } else {
-          // Initial fetch if no stored data
-          handleRefresh();
-        }
-      } finally {
-        setLoading(false);
+      const stored = await SecureStore.getItemAsync('user');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setStoredUserId(parsed.id);
       }
     })();
   }, []);
+
+  // Fetch user data with TanStack Query
+  const { data: userData, isLoading: loading, refetch } = useQuery({
+    queryKey: ['user-profile', storedUserId],
+    queryFn: async () => {
+      console.log('🔄 Profile - Fetching user data via API...');
+      const res = await api.get(`/auth/user?userId=${storedUserId}`);
+      console.log('🔄 Profile - User data received:', res.data ? 'YES' : 'NO');
+
+      // Update SecureStore with fresh data
+      if (res.data) {
+        await SecureStore.setItemAsync('user', JSON.stringify(res.data));
+        if (res.data.role?.name) {
+          await SecureStore.setItemAsync('userRole', res.data.role.name);
+        }
+      }
+      return res.data;
+    },
+    enabled: !!storedUserId,
+    staleTime: 1000 * 60 * 2, // Cache for 2 minutes
+    refetchOnMount: true,
+    // Use stored data as initial data for instant display
+    initialData: async () => {
+      const stored = await SecureStore.getItemAsync('user');
+      if (stored) return JSON.parse(stored);
+      return undefined;
+    },
+    initialDataUpdatedAt: 0, // Force refetch even with initialData
+  });
+
+  const user = userData;
+  const role = user?.role?.name;
 
   const handleRefresh = async () => {
     console.log('🔄 Profile handleRefresh triggered');
     setRefreshing(true);
     try {
-      // Try to get session from supabase
-      const { data: { session } } = await supabase.auth.getSession();
-      console.log('🔄 Profile session:', session?.user?.id);
-
-      // Get userId and token - prefer session, fall back to stored values
-      let userId = session?.user?.id;
-      let token = session?.access_token;
-
-      // If no session, try to get from SecureStore
-      if (!userId || !token) {
-        console.log('🔄 No session, checking SecureStore...');
-        token = await SecureStore.getItemAsync('token');
-        const storedUser = await SecureStore.getItemAsync('user');
-        if (storedUser) {
-          const parsedUser = JSON.parse(storedUser);
-          userId = parsedUser.id;
-        }
-        console.log('🔄 From SecureStore - userId:', userId, 'token:', token ? 'YES' : 'NO');
-      }
-
-      if (userId && token) {
-        console.log('🔄 Profile calling fetchUser...');
-        const userData = await fetchUser(userId, token);
-        console.log('🔄 Profile userData received:', userData ? 'YES' : 'NO');
-        console.log('🔄 Profile driverRouteAssignments:', userData?.transportStaffData?.driverRouteAssignments);
-        if (userData) {
-          setUser(userData);
-          await SecureStore.setItemAsync('user', JSON.stringify(userData));
-          if (userData.role?.name) {
-            setRole(userData.role.name);
-            await SecureStore.setItemAsync('userRole', userData.role.name);
-          }
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        }
-      } else {
-        console.log('🔄 No userId or token available');
-      }
+      await refetch();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       console.error("Refresh failed:", error);
     } finally {
@@ -417,19 +423,25 @@ export default function ProfileScreen() {
     setImageViewerVisible(false);
   };
 
-  if (loading) {
+  if (loading || !storedUserId) {
     return (
-      <View style={styles.loaderContainer}>
-        <ActivityIndicator size="large" color="#0469ff" />
-      </View>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <View style={styles.loaderContainer}>
+          <ActivityIndicator size="large" color="#0469ff" />
+          <Text style={{ marginTop: 12, color: '#666', fontSize: 14 }}>Loading profile...</Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
   if (!user || !role) {
     return (
-      <View style={styles.loaderContainer}>
-        <Text style={{ fontSize: 16, color: '#666' }}>No user found</Text>
-      </View>
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <View style={styles.loaderContainer}>
+          <ActivityIndicator size="large" color="#0469ff" />
+          <Text style={{ marginTop: 12, color: '#666', fontSize: 14 }}>Fetching your data...</Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
@@ -442,341 +454,364 @@ export default function ProfileScreen() {
   const schoolName = getNestedValue(user, config.fieldMappings.school);
   const profilePicture = getNestedValue(user, config.fieldMappings.profilePicture, 'https://via.placeholder.com/150');
 
+  // Get role color for avatar
+  const roleColor = ROLE_COLORS[role] || '#0469ff';
 
   return (
-    <View style={styles.container}>
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#0469ff" />
-        }
-      >
-        {/* Profile Header */}
-        <Animated.View entering={FadeInUp.duration(600)} style={styles.profileHeader}>
-          <HapticTouchable onPress={openImageViewer}>
-            {profilePicture && profilePicture !== 'default.png' ? (
-              <View style={styles.avatarContainer}>
-                <Image source={{ uri: profilePicture }} style={styles.avatar} />
-                <View style={styles.statusDot} />
-              </View>
-            ) : (
-              <View style={[styles.avatar, styles.parentAvatar]}>
-                <Text style={styles.fallbackText}>
-                  {userName ? getInitials(userName) : 'U'}
-                </Text>
-              </View>
-            )}
-          </HapticTouchable>
-          <Text style={styles.userName}>{userName}</Text>
-          <Text style={styles.userRole}>{userRole}</Text>
-          <View style={styles.schoolBadge}>
-            <School size={14} color="#666" />
-            <Text style={styles.schoolText}>
-              {schoolName.length > 30 ? schoolName.slice(0, 30) + '...' : schoolName}
-            </Text>
-          </View>
-        </Animated.View>
-
-        {/* Stats Cards - only show if stats exist */}
-        {config.stats && config.stats.length > 0 && (
-          <View style={styles.statsContainer}>
-            {config.stats.map((stat, index) => {
-              const value = stat.dataPath ? getNestedValue(user, stat.dataPath, stat.value) : stat.value;
-              return (
-                <Animated.View
-                  key={stat.key}
-                  entering={FadeInDown.delay(100 + index * 100).duration(600)}
-                  style={[styles.statCard, { backgroundColor: stat.color + '15' }]}
-                >
-                  <Text style={styles.statEmoji}>{stat.icon}</Text>
-                  <Text style={[styles.statValue, { color: stat.color }]}>{value}</Text>
-                  <Text style={styles.statLabel}>{stat.label}</Text>
-                </Animated.View>
-              );
-            })}
-          </View>
-        )}
-
-        {/* Assigned Vehicle Card - for Driver/Conductor */}
-        {config.showVehicleCard && user?.transportStaffData && (() => {
-          // Get vehicle from route assignments or vehicle assignments
-          const routeAssignment = user.transportStaffData.driverRouteAssignments?.[0] ||
-            user.transportStaffData.conductorRouteAssignments?.[0];
-          const vehicle = routeAssignment?.vehicle || user.transportStaffData.vehicleAssignments?.[0]?.vehicle;
-          const route = routeAssignment?.route;
-
-          console.log('🚌 Profile - showVehicleCard:', config.showVehicleCard);
-          console.log('🚌 Profile - transportStaffData:', user.transportStaffData);
-          console.log('🚌 Profile - driverRouteAssignments:', user.transportStaffData.driverRouteAssignments);
-          console.log('🚌 Profile - routeAssignment:', routeAssignment);
-          console.log('🚌 Profile - vehicle:', vehicle);
-
-          if (!vehicle) return null;
-
-          return (
-            <Animated.View entering={FadeInDown.delay(350).duration(600)} style={styles.section}>
-              <Text style={styles.sectionTitle}>Assigned Vehicle</Text>
-              <HapticTouchable onPress={() => router.push('/(screens)/transport/my-vehicle')}>
-                <View style={styles.vehicleCard}>
-                  <View style={styles.vehicleHeader}>
-                    <View style={styles.vehicleIconContainer}>
-                      <Bus size={28} color="#0469ff" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.vehiclePlate}>{vehicle.licensePlate}</Text>
-                      <Text style={styles.vehicleModel}>{vehicle.model || 'Unknown Model'}</Text>
-                    </View>
-                    <View style={styles.vehicleStatusBadge}>
-                      <Text style={styles.vehicleStatusText}>Active</Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.vehicleStats}>
-                    <View style={styles.vehicleStatItem}>
-                      <Users size={16} color="#64748b" />
-                      <Text style={styles.vehicleStatLabel}>Capacity</Text>
-                      <Text style={styles.vehicleStatValue}>{vehicle.capacity || '-'}</Text>
-                    </View>
-                    <View style={styles.vehicleStatDivider} />
-                    <View style={styles.vehicleStatItem}>
-                      <Fuel size={16} color="#64748b" />
-                      <Text style={styles.vehicleStatLabel}>Fuel</Text>
-                      <Text style={styles.vehicleStatValue}>{vehicle.fuelType || 'N/A'}</Text>
-                    </View>
-                    <View style={styles.vehicleStatDivider} />
-                    <View style={styles.vehicleStatItem}>
-                      <Gauge size={16} color="#64748b" />
-                      <Text style={styles.vehicleStatLabel}>Mileage</Text>
-                      <Text style={styles.vehicleStatValue}>{vehicle.mileage ? `${vehicle.mileage} km` : 'N/A'}</Text>
-                    </View>
-                  </View>
-
-                  {route && (
-                    <View style={styles.vehicleRoute}>
-                      <MapPin size={14} color="#10b981" />
-                      <Text style={styles.vehicleRouteText}>Route: {route.name}</Text>
-                    </View>
-                  )}
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <View style={styles.container}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={[
+            styles.content,
+            isTablet && styles.contentTablet
+          ]}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#0469ff" />
+          }
+        >
+          {/* Profile Header */}
+          <Animated.View entering={FadeInUp.duration(600)} style={[styles.profileHeader, isTablet && styles.profileHeaderTablet]}>
+            <HapticTouchable onPress={openImageViewer}>
+              {profilePicture && profilePicture !== 'default.png' && profilePicture !== 'N/A' ? (
+                <View style={[styles.avatarContainer, isTablet && styles.avatarContainerTablet]}>
+                  <Image source={{ uri: profilePicture }} style={[styles.avatar, isTablet && styles.avatarTablet]} />
+                  <View style={[styles.statusDot, isTablet && styles.statusDotTablet]} />
                 </View>
-              </HapticTouchable>
-            </Animated.View>
-          );
-        })()}
-
-        {/* Contact Info */}
-        <Animated.View entering={FadeInDown.delay(400).duration(600)} style={styles.section}>
-          <Text style={styles.sectionTitle}>Contact Information</Text>
-          <View style={styles.infoCard}>
-            {config.contactInfo.map((info, index) => {
-              const value = getNestedValue(user, info.dataPath);
-              return (
-                <View key={info.key}>
-                  {index > 0 && <View style={styles.divider} />}
-                  <View style={styles.infoRow}>
-                    <View style={[styles.infoIconContainer, { backgroundColor: info.color + '15' }]}>
-                      <info.icon size={18} color={info.color} />
-                    </View>
-                    <View style={styles.infoTextContainer}>
-                      <Text style={styles.infoLabel}>{info.label}</Text>
-                      <Text style={styles.infoValue}>{value}</Text>
-                    </View>
-                  </View>
-                </View>
-              );
-            })}
-          </View>
-        </Animated.View>
-
-        {/* Additional Info Section */}
-        {config.additionalInfo && config.additionalInfo.length > 0 && (() => {
-          // Filter to only show items with actual values
-          const validItems = config.additionalInfo.filter((info) => {
-            const value = getNestedValue(user, info.dataPath, null);
-            return value !== null && value !== 'N/A' && value !== '';
-          });
-
-          if (validItems.length === 0) return null;
-
-          return (
-            <Animated.View entering={FadeInDown.delay(450).duration(600)} style={styles.section}>
-              <Text style={styles.sectionTitle}>Additional Information</Text>
-              <View style={styles.infoCard}>
-                {validItems.map((info, index) => {
-                  let value = getNestedValue(user, info.dataPath);
-
-                  // Handle array values
-                  if (info.isArray && Array.isArray(value)) {
-                    if (info.displayKey) {
-                      value = value.map(item => item[info.displayKey]).join(', ');
-                    } else {
-                      value = value.join(', ');
-                    }
-                  }
-
-                  // Format date fields
-                  if ((info.key === 'dob' || info.key === 'licenseExpiry' || info.key === 'joiningDate' || info.key === 'admissionDate') && value && value !== 'N/A') {
-                    try {
-                      const date = new Date(value);
-                      value = date.toLocaleDateString('en-IN', {
-                        day: 'numeric',
-                        month: 'long',
-                        year: 'numeric'
-                      });
-                    } catch (e) {
-                      // Keep original value if parsing fails
-                    }
-                  }
-
-                  return (
-                    <View key={info.key}>
-                      {index > 0 && <View style={styles.divider} />}
-                      <View style={styles.additionalInfoRow}>
-                        <Text style={styles.additionalInfoLabel}>{info.label}</Text>
-                        <Text style={styles.additionalInfoValue}>{value}</Text>
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
-            </Animated.View>
-          );
-        })()}
-
-        {/* Linked Children Section */}
-        {config.childrenSection && user?.parentData?.studentLinks?.length > 0 && (
-          <Animated.View entering={FadeInDown.delay(480).duration(600)} style={styles.section}>
-            <Text style={styles.sectionTitle}>My Children</Text>
-            <View style={styles.menuContainer}>
-              {user.parentData.studentLinks.map((link, index) => (
-                <View
-                  key={link.id}
-                  style={[
-                    styles.menuItem,
-                    index === user.parentData.studentLinks.length - 1 && styles.lastMenuItem
-                  ]}
-                >
-                  <View style={styles.avatarContainer}>
-                    <Image
-                      source={{ uri: link.student?.user?.profilePicture || 'https://via.placeholder.com/100' }}
-                      style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#eee' }}
-                    />
-                  </View>
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={{ fontSize: 16, fontWeight: '600', color: '#111' }}>
-                      {link.student?.name || 'Loading...'}
-                    </Text>
-                    <Text style={{ fontSize: 13, color: '#666' }}>
-                      {link.student?.class ? `Class ${link.student.class.className} - ${link.student.section?.name} • ` : ''}{link.relation}
+              ) : (
+                <View style={[
+                  styles.avatarContainer,
+                  isTablet && styles.avatarContainerTablet
+                ]}>
+                  <View style={[
+                    styles.avatar,
+                    styles.avatarFallback,
+                    isTablet && styles.avatarTablet,
+                    { backgroundColor: roleColor }
+                  ]}>
+                    <Text style={[styles.fallbackText, isTablet && styles.fallbackTextTablet]}>
+                      {userName ? getInitials(userName) : 'U'}
                     </Text>
                   </View>
-                  <View style={{ backgroundColor: '#E0F2FE', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
-                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#0284C7' }}>
-                      {link.student?.admissionNo || 'ID'}
-                    </Text>
-                  </View>
+                  <View style={[styles.statusDot, isTablet && styles.statusDotTablet]} />
                 </View>
-              ))}
+              )}
+            </HapticTouchable>
+            <Text style={[styles.userName, isSmallDevice && styles.userNameSmall, isTablet && styles.userNameTablet]}>{userName}</Text>
+            <View style={[styles.roleBadge, { backgroundColor: roleColor + '20' }]}>
+              <Text style={[styles.userRole, { color: roleColor }]}>{userRole}</Text>
+            </View>
+            <View style={[styles.schoolBadge, isTablet && styles.schoolBadgeTablet]}>
+              <School size={isTablet ? 18 : 14} color="#666" />
+              <Text style={[styles.schoolText, isTablet && styles.schoolTextTablet]}>
+                {schoolName.length > (isTablet ? 50 : 30) ? schoolName.slice(0, isTablet ? 50 : 30) + '...' : schoolName}
+              </Text>
             </View>
           </Animated.View>
-        )}
 
-        {/* Menu Items */}
-        <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
-          <View style={styles.menuContainer}>
-            {config.menuItems.map((item, index) => (
-              <Animated.View
-                key={item.id}
-                entering={FadeInRight.delay(600 + index * 80).duration(500)}
-              >
-                <HapticTouchable onPress={() => handleMenuPress(item)}>
-                  <View style={[
-                    styles.menuItem,
-                    index === config.menuItems.length - 1 && styles.lastMenuItem
-                  ]}>
-                    <View style={[styles.menuIconContainer, { backgroundColor: item.color + '15' }]}>
-                      <item.icon size={20} color={item.color} />
+          {/* Stats Cards - only show if stats exist */}
+          {config.stats && config.stats.length > 0 && (
+            <View style={styles.statsContainer}>
+              {config.stats.map((stat, index) => {
+                const value = stat.dataPath ? getNestedValue(user, stat.dataPath, stat.value) : stat.value;
+                return (
+                  <Animated.View
+                    key={stat.key}
+                    entering={FadeInDown.delay(100 + index * 100).duration(600)}
+                    style={[styles.statCard, { backgroundColor: stat.color + '15' }]}
+                  >
+                    <Text style={styles.statEmoji}>{stat.icon}</Text>
+                    <Text style={[styles.statValue, { color: stat.color }]}>{value}</Text>
+                    <Text style={styles.statLabel}>{stat.label}</Text>
+                  </Animated.View>
+                );
+              })}
+            </View>
+          )}
+
+          {/* Assigned Vehicle Card - for Driver/Conductor */}
+          {config.showVehicleCard && user?.transportStaffData && (() => {
+            // Get vehicle from route assignments or vehicle assignments
+            const routeAssignment = user.transportStaffData.driverRouteAssignments?.[0] ||
+              user.transportStaffData.conductorRouteAssignments?.[0];
+            const vehicle = routeAssignment?.vehicle || user.transportStaffData.vehicleAssignments?.[0]?.vehicle;
+            const route = routeAssignment?.route;
+
+            console.log('🚌 Profile - showVehicleCard:', config.showVehicleCard);
+            console.log('🚌 Profile - transportStaffData:', user.transportStaffData);
+            console.log('🚌 Profile - driverRouteAssignments:', user.transportStaffData.driverRouteAssignments);
+            console.log('🚌 Profile - routeAssignment:', routeAssignment);
+            console.log('🚌 Profile - vehicle:', vehicle);
+
+            if (!vehicle) return null;
+
+            return (
+              <Animated.View entering={FadeInDown.delay(350).duration(600)} style={styles.section}>
+                <Text style={styles.sectionTitle}>Assigned Vehicle</Text>
+                <HapticTouchable onPress={() => router.push('/(screens)/transport/my-vehicle')}>
+                  <View style={styles.vehicleCard}>
+                    <View style={styles.vehicleHeader}>
+                      <View style={styles.vehicleIconContainer}>
+                        <Bus size={28} color="#0469ff" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.vehiclePlate}>{vehicle.licensePlate}</Text>
+                        <Text style={styles.vehicleModel}>{vehicle.model || 'Unknown Model'}</Text>
+                      </View>
+                      <View style={styles.vehicleStatusBadge}>
+                        <Text style={styles.vehicleStatusText}>Active</Text>
+                      </View>
                     </View>
-                    <Text style={styles.menuText}>{item.label}</Text>
-                    <View style={styles.menuArrow}>
-                      <Text style={styles.arrowText}>›</Text>
+
+                    <View style={styles.vehicleStats}>
+                      <View style={styles.vehicleStatItem}>
+                        <Users size={16} color="#64748b" />
+                        <Text style={styles.vehicleStatLabel}>Capacity</Text>
+                        <Text style={styles.vehicleStatValue}>{vehicle.capacity || '-'}</Text>
+                      </View>
+                      <View style={styles.vehicleStatDivider} />
+                      <View style={styles.vehicleStatItem}>
+                        <Fuel size={16} color="#64748b" />
+                        <Text style={styles.vehicleStatLabel}>Fuel</Text>
+                        <Text style={styles.vehicleStatValue}>{vehicle.fuelType || 'N/A'}</Text>
+                      </View>
+                      <View style={styles.vehicleStatDivider} />
+                      <View style={styles.vehicleStatItem}>
+                        <Gauge size={16} color="#64748b" />
+                        <Text style={styles.vehicleStatLabel}>Mileage</Text>
+                        <Text style={styles.vehicleStatValue}>{vehicle.mileage ? `${vehicle.mileage} km` : 'N/A'}</Text>
+                      </View>
                     </View>
+
+                    {route && (
+                      <View style={styles.vehicleRoute}>
+                        <MapPin size={14} color="#10b981" />
+                        <Text style={styles.vehicleRouteText}>Route: {route.name}</Text>
+                      </View>
+                    )}
                   </View>
                 </HapticTouchable>
               </Animated.View>
-            ))}
-          </View>
-        </Animated.View>
+            );
+          })()}
 
-        {/* Bottom Spacing */}
-        <View style={{ height: 80 }} />
-      </ScrollView>
+          {/* Contact Info */}
+          <Animated.View entering={FadeInDown.delay(400).duration(600)} style={styles.section}>
+            <Text style={styles.sectionTitle}>Contact Information</Text>
+            <View style={styles.infoCard}>
+              {config.contactInfo.map((info, index) => {
+                const value = getNestedValue(user, info.dataPath);
+                return (
+                  <View key={info.key}>
+                    {index > 0 && <View style={styles.divider} />}
+                    <View style={styles.infoRow}>
+                      <View style={[styles.infoIconContainer, { backgroundColor: info.color + '15' }]}>
+                        <info.icon size={18} color={info.color} />
+                      </View>
+                      <View style={styles.infoTextContainer}>
+                        <Text style={styles.infoLabel}>{info.label}</Text>
+                        <Text style={styles.infoValue}>{value}</Text>
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          </Animated.View>
 
-      {/* Image Viewer Modal */}
-      <Modal
-        visible={imageViewerVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={closeImageViewer}
-        statusBarTranslucent
-      >
-        <TouchableWithoutFeedback onPress={closeImageViewer}>
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={styles.modalContent}>
-                {/* Close Button */}
-                <View style={styles.closeButton}>
-                  <HapticTouchable onPress={closeImageViewer}>
-                    <View style={styles.closeButtonInner}>
-                      <X size={24} color="#fff" />
+          {/* Additional Info Section */}
+          {config.additionalInfo && config.additionalInfo.length > 0 && (() => {
+            // Filter to only show items with actual values
+            const validItems = config.additionalInfo.filter((info) => {
+              const value = getNestedValue(user, info.dataPath, null);
+              return value !== null && value !== 'N/A' && value !== '';
+            });
+
+            if (validItems.length === 0) return null;
+
+            return (
+              <Animated.View entering={FadeInDown.delay(450).duration(600)} style={styles.section}>
+                <Text style={styles.sectionTitle}>Additional Information</Text>
+                <View style={styles.infoCard}>
+                  {validItems.map((info, index) => {
+                    let value = getNestedValue(user, info.dataPath);
+
+                    // Handle array values
+                    if (info.isArray && Array.isArray(value)) {
+                      if (info.displayKey) {
+                        value = value.map(item => item[info.displayKey]).join(', ');
+                      } else {
+                        value = value.join(', ');
+                      }
+                    }
+
+                    // Format date fields
+                    if ((info.key === 'dob' || info.key === 'licenseExpiry' || info.key === 'joiningDate' || info.key === 'admissionDate') && value && value !== 'N/A') {
+                      try {
+                        const date = new Date(value);
+                        value = date.toLocaleDateString('en-IN', {
+                          day: 'numeric',
+                          month: 'long',
+                          year: 'numeric'
+                        });
+                      } catch (e) {
+                        // Keep original value if parsing fails
+                      }
+                    }
+
+                    return (
+                      <View key={info.key}>
+                        {index > 0 && <View style={styles.divider} />}
+                        <View style={styles.additionalInfoRow}>
+                          <Text style={styles.additionalInfoLabel}>{info.label}</Text>
+                          <Text style={styles.additionalInfoValue}>{value}</Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              </Animated.View>
+            );
+          })()}
+
+          {/* Linked Children Section */}
+          {config.childrenSection && user?.parentData?.studentLinks?.length > 0 && (
+            <Animated.View entering={FadeInDown.delay(480).duration(600)} style={styles.section}>
+              <Text style={styles.sectionTitle}>My Children</Text>
+              <View style={styles.menuContainer}>
+                {user.parentData.studentLinks.map((link, index) => (
+                  <View
+                    key={link.id}
+                    style={[
+                      styles.menuItem,
+                      index === user.parentData.studentLinks.length - 1 && styles.lastMenuItem
+                    ]}
+                  >
+                    <View style={styles.avatarContainer}>
+                      <Image
+                        source={{ uri: link.student?.user?.profilePicture || 'https://via.placeholder.com/100' }}
+                        style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#eee' }}
+                      />
+                    </View>
+                    <View style={{ flex: 1, marginLeft: 12 }}>
+                      <Text style={{ fontSize: 16, fontWeight: '600', color: '#111' }}>
+                        {link.student?.name || 'Loading...'}
+                      </Text>
+                      <Text style={{ fontSize: 13, color: '#666' }}>
+                        {link.student?.class ? `Class ${link.student.class.className} - ${link.student.section?.name} • ` : ''}{link.relation}
+                      </Text>
+                    </View>
+                    <View style={{ backgroundColor: '#E0F2FE', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: '#0284C7' }}>
+                        {link.student?.admissionNo || 'ID'}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </Animated.View>
+          )}
+
+          {/* Menu Items */}
+          <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
+            <Text style={styles.sectionTitle}>Quick Actions</Text>
+            <View style={styles.menuContainer}>
+              {config.menuItems.map((item, index) => (
+                <Animated.View
+                  key={item.id}
+                  entering={FadeInRight.delay(600 + index * 80).duration(500)}
+                >
+                  <HapticTouchable onPress={() => handleMenuPress(item)}>
+                    <View style={[
+                      styles.menuItem,
+                      index === config.menuItems.length - 1 && styles.lastMenuItem
+                    ]}>
+                      <View style={[styles.menuIconContainer, { backgroundColor: item.color + '15' }]}>
+                        <item.icon size={20} color={item.color} />
+                      </View>
+                      <Text style={styles.menuText}>{item.label}</Text>
+                      <View style={styles.menuArrow}>
+                        <Text style={styles.arrowText}>›</Text>
+                      </View>
                     </View>
                   </HapticTouchable>
-                </View>
+                </Animated.View>
+              ))}
+            </View>
+          </Animated.View>
 
-                {/* Profile Image - Circular */}
-                <View style={styles.imageContainer}>
-                  <Image
-                    source={{ uri: profilePicture }}
-                    style={styles.fullImage}
-                    contentFit="cover"
-                  />
-                </View>
+          {/* Bottom Spacing */}
+          <View style={{ height: 80 }} />
+        </ScrollView>
 
-                {/* User Info Overlay */}
-                <View style={styles.userInfoOverlay}>
-                  <Text style={styles.overlayName}>{userName}</Text>
-                  <Text style={styles.overlayRole}>{userRole}</Text>
+        {/* Image Viewer Modal */}
+        <Modal
+          visible={imageViewerVisible}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={closeImageViewer}
+          statusBarTranslucent
+        >
+          <TouchableWithoutFeedback onPress={closeImageViewer}>
+            <View style={styles.modalOverlay}>
+              <TouchableWithoutFeedback>
+                <View style={styles.modalContent}>
+                  {/* Close Button */}
+                  <View style={styles.closeButton}>
+                    <HapticTouchable onPress={closeImageViewer}>
+                      <View style={styles.closeButtonInner}>
+                        <X size={24} color="#fff" />
+                      </View>
+                    </HapticTouchable>
+                  </View>
+
+                  {/* Profile Image - Circular */}
+                  <View style={styles.imageContainer}>
+                    <Image
+                      source={{ uri: profilePicture }}
+                      style={styles.fullImage}
+                      contentFit="cover"
+                    />
+                  </View>
+
+                  {/* User Info Overlay */}
+                  <View style={styles.userInfoOverlay}>
+                    <Text style={styles.overlayName}>{userName}</Text>
+                    <Text style={styles.overlayRole}>{userRole}</Text>
+                  </View>
                 </View>
-              </View>
-            </TouchableWithoutFeedback>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </Modal>
+
+        {/* Logout Modal */}
+        <Modal
+          visible={isLoggingOut}
+          transparent={true}
+          animationType="fade"
+        >
+          <View style={styles.logoutModalOverlay}>
+            <View style={styles.logoutContent}>
+              <ActivityIndicator size="large" color="#ffffff" />
+              <Text style={styles.logoutText}>Logging Out...</Text>
+            </View>
           </View>
-        </TouchableWithoutFeedback>
-      </Modal>
-
-      {/* Logout Modal */}
-      <Modal
-        visible={isLoggingOut}
-        transparent={true}
-        animationType="fade"
-      >
-        <View style={styles.logoutModalOverlay}>
-          <View style={styles.logoutContent}>
-            <ActivityIndicator size="large" color="#ffffff" />
-            <Text style={styles.logoutText}>Logging Out...</Text>
-          </View>
-        </View>
-      </Modal>
-    </View>
+        </Modal>
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
   container: {
     flex: 1,
     backgroundColor: '#fff',
-    paddingTop: 20,
   },
   loaderContainer: {
     flex: 1,
@@ -1131,5 +1166,60 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#10b981',
     fontWeight: '600',
+  },
+  // Responsive styles
+  contentTablet: {
+    paddingHorizontal: 40,
+    maxWidth: 600,
+    alignSelf: 'center',
+    width: '100%',
+  },
+  profileHeaderTablet: {
+    paddingVertical: 40,
+    marginBottom: 32,
+  },
+  avatarContainerTablet: {
+    marginBottom: 24,
+  },
+  avatarTablet: {
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    borderWidth: 5,
+  },
+  avatarFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusDotTablet: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    bottom: 6,
+    right: 6,
+    borderWidth: 4,
+  },
+  userNameSmall: {
+    fontSize: 20,
+  },
+  userNameTablet: {
+    fontSize: 32,
+    marginBottom: 8,
+  },
+  roleBadge: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginBottom: 12,
+  },
+  schoolBadgeTablet: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  schoolTextTablet: {
+    fontSize: 15,
+  },
+  fallbackTextTablet: {
+    fontSize: 36,
   },
 });

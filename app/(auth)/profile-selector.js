@@ -14,9 +14,9 @@ import { Image } from 'expo-image';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
-import { Plus, LogOut, ChevronRight } from 'lucide-react-native';
+import { Plus, LogOut, ChevronRight, Building2 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
-import { getProfilesForSchool, removeProfile, updateLastUsed, clearSchoolProfiles, updateProfileSession } from '../../lib/profileManager';
+import { getProfilesForSchool, removeProfile, updateLastUsed, clearSchoolProfiles, updateProfileSession, getCurrentSchool, clearCurrentSchool } from '../../lib/profileManager';
 import HapticTouchable from '../components/HapticTouch';
 import { supabase } from '../../lib/supabase';
 
@@ -36,20 +36,65 @@ const ROLE_COLORS = {
 export default function ProfileSelectorScreen() {
     const router = useRouter();
     const params = useLocalSearchParams();
-    const schoolCode = params.schoolCode;
-    const schoolData = params.schoolData ? JSON.parse(params.schoolData) : null;
 
+    // Initialize with params, will update with saved data if needed
+    const [schoolCode, setSchoolCode] = useState(params.schoolCode || null);
+    const [schoolData, setSchoolData] = useState(params.schoolData ? JSON.parse(params.schoolData) : null);
     const [profiles, setProfiles] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selectingProfile, setSelectingProfile] = useState(null);
 
     useEffect(() => {
-        loadProfiles();
+        initializeScreen();
     }, []);
 
-    const loadProfiles = async () => {
+    // Initialize screen - load school data if not provided via params
+    const initializeScreen = async () => {
         try {
-            const savedProfiles = await getProfilesForSchool(schoolCode);
+            let code = schoolCode;
+            let data = schoolData;
+
+            // If no school code in params, try to get from saved data
+            if (!code) {
+                const savedSchool = await getCurrentSchool();
+                if (savedSchool?.schoolCode) {
+                    code = savedSchool.schoolCode;
+                    data = savedSchool.schoolData;
+                    setSchoolCode(code);
+                    setSchoolData(data);
+                    console.log('📚 Loaded school from saved data:', code);
+                } else {
+                    // No school data found, redirect to schoolcode screen
+                    console.log('❌ No school data found, redirecting to schoolcode');
+                    router.replace('/(auth)/schoolcode');
+                    return;
+                }
+            }
+
+            // Now load profiles for this school
+            await loadProfilesForCode(code, data);
+        } catch (error) {
+            console.error('Error initializing screen:', error);
+            setLoading(false);
+        }
+    };
+
+    const loadProfilesForCode = async (code, schoolDataParam) => {
+        try {
+            const savedProfiles = await getProfilesForSchool(code);
+
+            // If no profiles exist, redirect to login directly
+            if (savedProfiles.length === 0) {
+                console.log('📭 No profiles found, redirecting to login');
+                router.replace({
+                    pathname: '/(auth)/login',
+                    params: {
+                        schoolConfig: JSON.stringify(schoolDataParam || schoolData),
+                    },
+                });
+                return;
+            }
+
             // Sort by last used (most recent first)
             savedProfiles.sort((a, b) => new Date(b.lastUsed) - new Date(a.lastUsed));
             setProfiles(savedProfiles);
@@ -151,10 +196,28 @@ export default function ProfileSelectorScreen() {
         router.push({
             pathname: '/(auth)/login',
             params: {
-                schoolConfig: params.schoolData,
+                schoolConfig: JSON.stringify(schoolData),
                 isAddingAccount: 'true',
             },
         });
+    };
+
+    const handleSwitchSchool = () => {
+        Alert.alert(
+            'Switch School',
+            'Do you want to switch to a different school?',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Switch School',
+                    onPress: async () => {
+                        // Clear current school data and go to schoolcode screen
+                        await clearCurrentSchool();
+                        router.replace('/(auth)/schoolcode');
+                    },
+                },
+            ]
+        );
     };
 
     const handleLogoutAll = () => {
@@ -168,9 +231,10 @@ export default function ProfileSelectorScreen() {
                     style: 'destructive',
                     onPress: async () => {
                         await clearSchoolProfiles(schoolCode);
+                        // After clearing all profiles, go to login for this school
                         router.replace({
                             pathname: '/(auth)/login',
-                            params: { schoolConfig: params.schoolData },
+                            params: { schoolConfig: JSON.stringify(schoolData) },
                         });
                     },
                 },
@@ -189,7 +253,7 @@ export default function ProfileSelectorScreen() {
                     style: 'destructive',
                     onPress: async () => {
                         await removeProfile(schoolCode, profile.id);
-                        loadProfiles();
+                        await loadProfilesForCode(schoolCode);
                     },
                 },
             ]
@@ -311,17 +375,26 @@ export default function ProfileSelectorScreen() {
                 </ScrollView>
             </Animated.View>
 
-            {/* Logout All Button */}
-            {profiles.length > 0 && (
-                <Animated.View entering={FadeInDown.delay(500).duration(500)} style={styles.footer}>
-                    <HapticTouchable onPress={handleLogoutAll}>
+            {/* Footer Buttons - Row layout */}
+            <Animated.View entering={FadeInDown.delay(500).duration(500)} style={styles.footer}>
+                {/* Switch School Button */}
+                <HapticTouchable onPress={handleSwitchSchool} style={styles.footerButtonWrapper}>
+                    <View style={styles.switchSchoolButton}>
+                        <Building2 size={20} color="#0469ff" />
+                        <Text style={styles.switchSchoolText}>Change School</Text>
+                    </View>
+                </HapticTouchable>
+
+                {/* Logout All Button - only show if there are profiles */}
+                {profiles.length > 0 && (
+                    <HapticTouchable onPress={handleLogoutAll} style={styles.footerButtonWrapper}>
                         <View style={styles.logoutButton}>
                             <LogOut size={20} color="#EF4444" />
-                            <Text style={styles.logoutText}>Logout All Accounts</Text>
+                            <Text style={styles.logoutText}>Logout All</Text>
                         </View>
                     </HapticTouchable>
-                </Animated.View>
-            )}
+                )}
+            </Animated.View>
         </SafeAreaView>
     );
 }
@@ -471,22 +544,44 @@ const styles = StyleSheet.create({
     footer: {
         paddingHorizontal: 24,
         paddingBottom: 20,
+        flexDirection: 'row',
+        gap: 12,
+    },
+    footerButtonWrapper: {
+        flex: 1,
+    },
+    switchSchoolButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+        backgroundColor: '#EFF6FF',
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: '#DBEAFE',
+    },
+    switchSchoolText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#0469ff',
     },
     logoutButton: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 10,
-        paddingVertical: 16,
-        paddingHorizontal: 20,
-        backgroundColor: '#FEE2E2',
-        borderRadius: 16,
+        gap: 8,
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+        backgroundColor: '#FEF2F2',
+        borderRadius: 14,
         borderWidth: 1,
         borderColor: '#FECACA',
     },
     logoutText: {
-        fontSize: 16,
-        fontWeight: '700',
+        fontSize: 14,
+        fontWeight: '600',
         color: '#EF4444',
     },
 });

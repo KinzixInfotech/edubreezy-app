@@ -3,37 +3,55 @@ import { Redirect } from 'expo-router';
 import { View, ActivityIndicator } from 'react-native';
 import { supabase } from '../lib/supabase';
 import * as SecureStore from 'expo-secure-store';
+import { getCurrentSchool } from '../lib/profileManager';
 
 export default function Index() {
   const [isLoading, setIsLoading] = useState(true);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [redirectTo, setRedirectTo] = useState(null);
 
   useEffect(() => {
     console.log('Index screen mounted');
 
     const checkAuth = async () => {
       try {
-        // Check SecureStore FIRST (much faster than Supabase call)
+        // Check SecureStore - this is the source of truth for authentication
+        // We need user data to be present to consider user authenticated
         const userData = await SecureStore.getItemAsync('user');
+
         if (userData) {
-          console.log('✅ User found in SecureStore - fast path');
-          setIsAuthenticated(true);
-          setIsLoading(false);
-          return; // Skip Supabase check - we have local data
+          // Verify the user data is valid JSON and has required fields
+          try {
+            const parsedUser = JSON.parse(userData);
+            if (parsedUser && (parsedUser.id || parsedUser.email)) {
+              console.log('✅ Valid user found in SecureStore - going to greeting');
+              setRedirectTo('greeting');
+              setIsLoading(false);
+              return;
+            }
+          } catch (parseError) {
+            console.warn('⚠️ Invalid user data in SecureStore, clearing...');
+            await SecureStore.deleteItemAsync('user');
+          }
         }
 
-        // Only check Supabase if no local data exists
-        const { data } = await supabase.auth.getSession();
-        if (data.session) {
-          console.log('✅ Supabase session found');
-          setIsAuthenticated(true);
-        } else {
-          console.log('❌ No session or user data found');
-          setIsAuthenticated(false);
+        // No valid user data - check for saved school data
+        console.log('❌ No valid user data in SecureStore');
+
+        const currentSchool = await getCurrentSchool();
+        if (currentSchool?.schoolCode && currentSchool?.schoolData) {
+          // We have saved school data - go to profile selector
+          console.log('📚 Found saved school data, going to profile-selector');
+          setRedirectTo('profile-selector');
+          setIsLoading(false);
+          return;
         }
+
+        // No school data either - go to school code screen
+        console.log('🏫 No saved school data, going to schoolcode');
+        setRedirectTo('schoolcode');
       } catch (error) {
         console.error('Error checking auth:', error);
-        setIsAuthenticated(false);
+        setRedirectTo('schoolcode');
       } finally {
         setIsLoading(false);
       }
@@ -41,12 +59,17 @@ export default function Index() {
 
     checkAuth();
 
-    // Listen for session changes
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    // Listen for session changes - but only set authenticated if we would have user data
+    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session) {
-        setIsAuthenticated(true);
+        // Check if user data exists before setting authenticated
+        const userData = await SecureStore.getItemAsync('user');
+        if (userData) {
+          setRedirectTo('greeting');
+        }
+        // If no user data, don't change redirect even if session exists
       }
-      // Don't set to false on session loss - we might still have SecureStore data
+      // Don't change on session loss - handled elsewhere
     });
 
     return () => listener.subscription.unsubscribe();
@@ -60,8 +83,12 @@ export default function Index() {
     );
   }
 
-  if (isAuthenticated) {
+  if (redirectTo === 'greeting') {
     return <Redirect href="/(screens)/greeting" />;
+  }
+
+  if (redirectTo === 'profile-selector') {
+    return <Redirect href="/(auth)/profile-selector" />;
   }
 
   return <Redirect href="/(auth)/schoolcode" />;

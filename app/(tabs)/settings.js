@@ -11,6 +11,8 @@ import HapticTouchable from '../components/HapticTouch';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import * as SecureStore from 'expo-secure-store';
 import { supabase } from '../../lib/supabase';
+import { getCurrentSchool } from '../../lib/profileManager';
+
 export default function SettingsScreen() {
     const [notificationsEnabled, setNotificationsEnabled] = useState(true);
     const [darkMode, setDarkMode] = useState(false);
@@ -28,19 +30,33 @@ export default function SettingsScreen() {
                         // Simulate delay for better UX
                         setTimeout(async () => {
                             try {
-                                // Don't sign out from Supabase, just clear local state to allow profile switching
-                                // const { error } = await supabase.auth.signOut();
-                                // if (error) throw error;
-
+                                // Clear user data
                                 await SecureStore.deleteItemAsync('user');
                                 await SecureStore.deleteItemAsync('userRole');
-                                router.replace('/(auth)/schoolcode'); // Or /login based on your flow
+                                await SecureStore.deleteItemAsync('token');
+
+                                // Get saved school data to redirect to profile-selector
+                                const currentSchool = await getCurrentSchool();
+
+                                if (currentSchool?.schoolCode && currentSchool?.schoolData) {
+                                    // Redirect to profile-selector with school data
+                                    router.replace({
+                                        pathname: '/(auth)/profile-selector',
+                                        params: {
+                                            schoolCode: currentSchool.schoolCode,
+                                            schoolData: JSON.stringify(currentSchool.schoolData),
+                                        },
+                                    });
+                                } else {
+                                    // Fallback to schoolcode if no saved school data
+                                    router.replace('/(auth)/schoolcode');
+                                }
                             } catch (error) {
                                 console.log('Logout error:', error);
                                 setIsLoggingOut(false);
                                 Alert.alert('Error', 'Failed to logout. Please try again.');
                             }
-                        }, 2000);
+                        }, 1500);
                     },
                 },
             ]);

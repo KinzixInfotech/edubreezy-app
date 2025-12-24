@@ -865,7 +865,7 @@ const styles = StyleSheet.create({
   userRole: {
     fontSize: 15,
     color: '#666',
-    marginBottom: 8,
+    // marginBottom: 8,
   },
   schoolBadge: {
     flexDirection: 'row',
@@ -1032,7 +1032,7 @@ const styles = StyleSheet.create({
   parentAvatar: {
     backgroundColor: '#0469ff',
   },
-  fallbackText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  fallbackText: { color: '#fff', fontSize: 50, fontWeight: 'bold' },
 
   imageContainer: {
     width: SCREEN_WIDTH * 0.85,
@@ -1211,6 +1211,9 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 20,
     marginBottom: 12,
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   schoolBadgeTablet: {
     paddingHorizontal: 16,

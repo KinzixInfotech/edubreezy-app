@@ -32,7 +32,7 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { supabase } from '../../lib/supabase';
 import { StatusBar } from 'expo-status-bar';
-import { saveProfile } from '../../lib/profileManager';
+import { saveProfile, saveCurrentSchool } from '../../lib/profileManager';
 
 const { width, height } = Dimensions.get('window');
 
@@ -223,6 +223,9 @@ export default function LoginScreen() {
                     // Pass session data so we can restore the session later
                     await saveProfile(schoolCode, user, data.session);
                     console.log('✅ Profile saved successfully with session for', schoolCode);
+
+                    // Save current school for logout redirect
+                    await saveCurrentSchool(schoolCode, { school: schoolConfig });
                 } catch (saveError) {
                     console.error('❌ Failed to save profile:', saveError);
                     // Continue to home even if profile save fails

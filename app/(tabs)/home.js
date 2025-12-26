@@ -1,7 +1,13 @@
-import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Dimensions, RefreshControl, Alert, AppState } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Dimensions, RefreshControl, Alert, AppState, FlatList } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, router } from 'expo-router';
-import { Bell, Calendar, TrendingUp, FileText, DollarSign, MessageCircle, Award, BookOpen, Clock, Users, ChevronRight, RefreshCw, Settings, Plus, CheckCircle2, TimerIcon, Book, CalendarDays, Umbrella, ChartPie, User, UserCheck, X, ArrowRight, Paperclip, PartyPopperIcon, ScrollText, ClipboardList, Wallet, BellOff, Bus, MapPin } from 'lucide-react-native';
+import {
+    Users, User, UserCheck, DollarSign, Wallet, BookOpen, ClipboardList, Bus,
+    ChevronLeft, ChevronRight, GraduationCap, BookMarked, ClipboardCheck,
+    Calendar, Bell, X, CheckCircle, AlertCircle, Building, MapPin,
+    RefreshCcw,
+    Settings
+} from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import * as Notifications from 'expo-notifications';
@@ -24,9 +30,10 @@ import DelegationCheckModal from '../components/DelegationCheckModal';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const isSmallDevice = SCREEN_WIDTH < 375;
 
+
 // Icon mapping
 const IconMap = {
-    refresh: RefreshCw,
+    refresh: RefreshCcw,
     bell: Bell,
     settings: Settings,
 };
@@ -42,6 +49,7 @@ const QUERY_KEYS = {
     todaysClasses: (userId, schoolId) => ['todaysClasses', userId, schoolId],
     subjects: (userId, schoolId) => ['subjects', userId, schoolId],
     upcomingExam: (userId, schoolId) => ['upcomingExam', userId, schoolId],
+    dashboardOverview: (schoolId, academicYearId) => ['dashboard', 'overview', schoolId, academicYearId],
 };
 
 export default function HomeScreen() {
@@ -367,6 +375,16 @@ export default function HomeScreen() {
                 '{role.name}': user_acc?.role?.name || 'Transport Staff',
                 '{school.name}': user_acc?.school?.name || '',
             },
+            director: {
+                '{name}': user_acc?.name || 'Director',
+                '{role.name}': user_acc?.role?.name || 'Director',
+                '{school.name}': user_acc?.school?.name || '',
+            },
+            principal: {
+                '{name}': user_acc?.name || 'Principal',
+                '{role.name}': user_acc?.role?.name || 'Principal',
+                '{school.name}': user_acc?.school?.name || '',
+            },
         };
 
         const map = placeholders[role.toLowerCase()] || {};
@@ -500,6 +518,20 @@ export default function HomeScreen() {
                     userId={userId}
                     prefetchedStaffData={transportStaff}
                     prefetchedTripsData={transportTripsData}
+                />;
+            case 'director':
+                return <DirectorView
+                    refreshing={refreshing}
+                    onRefresh={onRefresh}
+                    schoolId={schoolId}
+                    userId={userId}
+                />;
+            case 'principal':
+                return <PrincipalView
+                    refreshing={refreshing}
+                    onRefresh={onRefresh}
+                    schoolId={schoolId}
+                    userId={userId}
                 />;
             default:
                 return <StudentView refreshing={refreshing} onRefresh={onRefresh} />;
@@ -1525,41 +1557,134 @@ export default function HomeScreen() {
                             </HapticTouchable>
                         </View>
                     </View>
-
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.childrenScroll}>
-                        {uiChildren.map((child, index) => (
-                            <Animated.View key={child.id} entering={FadeInRight.delay(200 + index * 100).duration(500)}>
-                                <HapticTouchable onPress={() => setSelectedChild(child)}>
-                                    <LinearGradient
-                                        colors={selectedChild?.id === child.id ? ['#0469ff', '#0347b8'] : ['#f8f9fa', '#e9ecef']}
-                                        style={[styles.childCard, selectedChild?.id === child.id && styles.selectedChildCard]}
-                                    >
-                                        <Image source={{ uri: child.avatar }} style={styles.childAvatar} />
-                                        <View style={styles.childInfo}>
-                                            <Text style={[styles.childName, selectedChild?.id === child.id && styles.selectedText]} numberOfLines={1}>
-                                                {child.name}
-                                            </Text>
-                                            <Text style={[styles.childClass, selectedChild?.id === child.id && styles.selectedSubText]}>
-                                                Class {child.class} - {child.section}
-                                            </Text>
-                                            <View style={styles.childMeta}>
-                                                <View style={[styles.metaBadge, selectedChild?.id === child.id && styles.selectedBadge]}>
-                                                    <Text style={[styles.metaText, selectedChild?.id === child.id && styles.selectedText]}>
-                                                        Roll: {child.rollNo}
-                                                    </Text>
+                    {/* Carousel Container */}
+                    <View style={[styles.carouselContainer, uiChildren.length === 1 && { height: 'auto' }]}>
+                        {uiChildren.length === 1 ? (
+                            // Single child - fill like other sections, no vertical centering
+                            <View style={{ width: '100%' }}>
+                                <Animated.View entering={FadeInRight.delay(200).duration(500)} style={{ width: '100%' }}>
+                                    <HapticTouchable onPress={() => setSelectedChild(uiChildren[0])}>
+                                        <LinearGradient
+                                            colors={['#0469ff', '#0347b8']}
+                                            style={[
+                                                {
+                                                    // Use childCard styles but override width
+                                                    flexDirection: 'row',
+                                                    padding: 16,
+                                                    borderRadius: 16,
+                                                    gap: 12,
+                                                    position: 'relative',
+                                                    width: '100%', // Full width instead of fixed SCREEN_WIDTH * 0.75
+                                                },
+                                                styles.selectedChildCard,
+                                                {
+                                                    shadowColor: '#0469ff',
+                                                    shadowOpacity: 0.3,
+                                                    shadowRadius: 12,
+                                                    elevation: 8,
+                                                }
+                                            ]}
+                                        >
+                                            <Image source={{ uri: uiChildren[0].avatar }} style={styles.childAvatar} />
+                                            <View style={styles.childInfo}>
+                                                <Text style={[styles.childName, styles.selectedText]} numberOfLines={1}>
+                                                    {uiChildren[0].name}
+                                                </Text>
+                                                <Text style={[styles.childClass, styles.selectedSubText]}>
+                                                    Class {uiChildren[0].class} - {uiChildren[0].section}
+                                                </Text>
+                                                <View style={styles.childMeta}>
+                                                    <View style={[styles.metaBadge, styles.selectedBadge]}>
+                                                        <Text style={[styles.metaText, styles.selectedText]}>
+                                                            Roll: {uiChildren[0].rollNo}
+                                                        </Text>
+                                                    </View>
                                                 </View>
                                             </View>
-                                        </View>
-                                        {selectedChild?.id === child.id && (
                                             <View style={styles.selectedIndicator}>
                                                 <Text style={styles.checkmark}>✓</Text>
                                             </View>
-                                        )}
-                                    </LinearGradient>
-                                </HapticTouchable>
-                            </Animated.View>
-                        ))}
-                    </ScrollView>
+                                        </LinearGradient>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            </View>
+                        ) : (
+                            // Multiple children - use carousel
+                            <FlatList
+                                data={uiChildren}
+                                horizontal
+                                pagingEnabled={false}
+                                showsHorizontalScrollIndicator={false}
+                                snapToInterval={SCREEN_WIDTH * 0.75 + 16} // card width + margin
+                                snapToAlignment="center"
+                                decelerationRate="fast"
+                                contentContainerStyle={{
+                                    paddingHorizontal: (SCREEN_WIDTH - (isSmallDevice ? SCREEN_WIDTH * 0.7 : SCREEN_WIDTH * 0.75)) / 2,
+                                    alignItems: 'center',
+                                }}
+                                keyExtractor={(item) => item.id}
+                                renderItem={({ item: child, index }) => {
+                                    const isSelected = selectedChild?.id === child.id;
+                                    const distanceFromCenter = Math.abs(
+                                        index - uiChildren.findIndex(c => c.id === selectedChild?.id)
+                                    );
+
+                                    // Calculate opacity and scale based on distance from selected
+                                    const opacity = isSelected ? 1 : Math.max(0.3, 1 - (distanceFromCenter * 0.4));
+                                    const scale = isSelected ? 1 : Math.max(0.85, 1 - (distanceFromCenter * 0.1));
+
+                                    return (
+                                        <Animated.View
+                                            entering={FadeInRight.delay(200 + index * 100).duration(500)}
+                                            style={{
+                                                marginHorizontal: 8,
+                                                opacity,
+                                                transform: [{ scale }],
+                                            }}
+                                        >
+                                            <HapticTouchable onPress={() => setSelectedChild(child)}>
+                                                <LinearGradient
+                                                    colors={isSelected ? ['#0469ff', '#0347b8'] : ['#f8f9fa', '#e9ecef']}
+                                                    style={[
+                                                        styles.childCard,
+                                                        isSelected && styles.selectedChildCard,
+                                                        {
+                                                            shadowColor: isSelected ? '#0469ff' : '#000',
+                                                            shadowOpacity: isSelected ? 0.3 : 0.1,
+                                                            shadowRadius: isSelected ? 12 : 4,
+                                                            elevation: isSelected ? 8 : 2,
+                                                        }
+                                                    ]}
+                                                >
+                                                    <Image source={{ uri: child.avatar }} style={styles.childAvatar} />
+                                                    <View style={styles.childInfo}>
+                                                        <Text style={[styles.childName, isSelected && styles.selectedText]} numberOfLines={1}>
+                                                            {child.name}
+                                                        </Text>
+                                                        <Text style={[styles.childClass, isSelected && styles.selectedSubText]}>
+                                                            Class {child.class} - {child.section}
+                                                        </Text>
+                                                        <View style={styles.childMeta}>
+                                                            <View style={[styles.metaBadge, isSelected && styles.selectedBadge]}>
+                                                                <Text style={[styles.metaText, isSelected && styles.selectedText]}>
+                                                                    Roll: {child.rollNo}
+                                                                </Text>
+                                                            </View>
+                                                        </View>
+                                                    </View>
+                                                    {isSelected && (
+                                                        <View style={styles.selectedIndicator}>
+                                                            <Text style={styles.checkmark}>✓</Text>
+                                                        </View>
+                                                    )}
+                                                </LinearGradient>
+                                            </HapticTouchable>
+                                        </Animated.View>
+                                    );
+                                }}
+                            />
+                        )}
+                    </View>
                 </Animated.View>
 
                 {/* Updates & Alerts Widget */}
@@ -2407,6 +2532,418 @@ export default function HomeScreen() {
             </ScrollView>
         );
     };
+
+    // === DIRECTOR VIEW ===
+    const DirectorView = ({ refreshing, onRefresh, schoolId, userId }) => {
+        // Get active academic year
+        const academicYearId = user_acc?.school?.academicYears?.find(ay => ay.isActive)?.id;
+
+        console.log('🎯 DirectorView Debug:', {
+            schoolId,
+            academicYearId,
+            hasSchool: !!user_acc?.school,
+            academicYears: user_acc?.school?.academicYears,
+            queryEnabled: !!schoolId
+        });
+
+        // Fetch dashboard stats with TanStack Query
+        const { data: apiStats, isLoading, error } = useQuery({
+            queryKey: QUERY_KEYS.dashboardOverview(schoolId, academicYearId),
+            queryFn: async () => {
+                console.log('📡 Fetching dashboard data...');
+                const res = await api.get(
+                    `/schools/${schoolId}/dashboard/overview`,
+                    { params: { academicYearId: academicYearId || undefined } }
+                );
+                console.log('✅ Dashboard data received:', res.data);
+                return res.data;
+            },
+            staleTime: 60 * 1000, // 1 minute
+            cacheTime: 5 * 60 * 1000, // 5 minutes
+            refetchOnWindowFocus: true,
+            refetchInterval: 2 * 60 * 1000, // Background refetch every 2min
+            enabled: !!schoolId, // Only require schoolId
+            onError: (err) => {
+                console.error('❌ Dashboard API error:', err);
+            }
+        });
+
+        console.log('📊 Query State:', { isLoading, hasData: !!apiStats, error, statsLength: apiStats ? 'has data' : 'no data' });
+
+        // Smart currency formatter
+        const formatCurrency = (amount) => {
+            if (amount === 0) return '₹0';
+            if (amount < 1000) return `₹${amount}`;
+            if (amount < 100000) return `₹${(amount / 1000).toFixed(1)}K`; // Thousands
+            if (amount < 10000000) return `₹${(amount / 100000).toFixed(1)}L`; // Lakhs
+            return `₹${(amount / 10000000).toFixed(1)}Cr`; // Crores
+        };
+
+        // Map API data to dashboard cards
+        const dashboardStats = apiStats ? [
+            {
+                label: 'Total Students',
+                value: apiStats.students.total.toString(),
+                subtext: `${apiStats.students.present} present today`,
+                icon: Users,
+                color: '#3B82F6',
+                bgColor: '#EFF6FF',
+                href: null
+            },
+            {
+                label: 'Total Teachers',
+                value: apiStats.teachers.total.toString(),
+                subtext: `${apiStats.teachers.onLeave} on leave`,
+                icon: User,
+                color: '#10B981',
+                bgColor: '#F0FDF4',
+                href: null
+            },
+            {
+                label: 'Present Today',
+                value: apiStats.attendance.present.toString(),
+                subtext: `${apiStats.attendance.percentage}% attendance`,
+                icon: UserCheck,
+                color: '#8B5CF6',
+                bgColor: '#F5F3FF',
+                href: '/attendance/view'
+            },
+            {
+                label: 'Fees Collected',
+                value: formatCurrency(apiStats.fees.collected),
+                subtext: 'This month',
+                icon: DollarSign,
+                color: '#F59E0B',
+                bgColor: '#FFFBEB',
+                href: null
+            },
+            {
+                label: 'Fees Pending',
+                value: formatCurrency(apiStats.fees.pending),
+                subtext: `${apiStats.fees.pendingCount} students`,
+                icon: Wallet,
+                color: '#EF4444',
+                bgColor: '#FEF2F2',
+                href: null
+            },
+            {
+                label: 'Payroll Due',
+                value: formatCurrency(apiStats.payroll.pending),
+                subtext: 'Pending approval',
+                icon: DollarSign,
+                color: '#EC4899',
+                bgColor: '#FDF2F8',
+                href: null
+            },
+            {
+                label: 'Library Books',
+                value: apiStats.library.totalBooks.toString(),
+                subtext: `${apiStats.library.issued} issued`,
+                icon: BookOpen,
+                color: '#0EA5E9',
+                bgColor: '#F0F9FF',
+                href: null
+            },
+            {
+                label: 'Inventory Items',
+                value: apiStats.inventory.totalItems.toString(),
+                subtext: `${apiStats.inventory.lowStock} low stock`,
+                icon: ClipboardList,
+                color: '#8B5CF6',
+                bgColor: '#F5F3FF',
+                href: null
+            },
+            {
+                label: 'Active Buses',
+                value: apiStats.transport.totalBuses.toString(),
+                subtext: `${apiStats.transport.activeRoutes} on route`,
+                icon: Bus,
+                color: '#F59E0B',
+                bgColor: '#FFFBEB',
+                href: null
+            },
+        ] : [];
+
+        return (
+            <ScrollView
+                style={styles.container}
+                showsVerticalScrollIndicator={false}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
+                        tintColor="#0469ff"
+                        colors={['#0469ff']}
+                    />
+                }
+            >
+                {/* School Card */}
+                <View style={styles.schoolCard}>
+                    <View style={styles.schoolCardGradient}>
+                        <View style={styles.schoolCardContent}>
+                            <View style={styles.schoolLogoContainer}>
+                                {user_acc?.school?.profilePicture && user_acc.school.profilePicture !== 'default.png' ? (
+                                    <Image source={{ uri: user_acc.school.profilePicture }} style={styles.schoolLogo} />
+                                ) : (
+                                    <View style={[styles.schoolLogo, styles.schoolLogoPlaceholder]}>
+                                        <Building size={28} color="#6366F1" />
+                                    </View>
+                                )}
+                            </View>
+                            <View style={styles.schoolInfo}>
+                                <Text style={styles.schoolName}>{user_acc?.school?.name || 'School Name'}</Text>
+                                <Text style={styles.schoolLocation}>
+                                    <MapPin size={11} color="#94A3B8" /> {user_acc?.school?.location || 'Location'}
+                                </Text>
+                            </View>
+                        </View>
+                    </View>
+                </View>
+
+                {/* Dashboard Stats */}
+                <View style={styles.dashboardSection}>
+                    <Text style={styles.dashboardSectionTitle}>Dashboard Overview</Text>
+                    <View style={styles.statsCardGrid}>
+                        {isLoading ? (
+                            // Loading skeleton
+                            [...Array(9)].map((_, index) => (
+                                <View key={`skeleton-${index}`} style={[styles.statDataCard, { backgroundColor: '#F3F4F6' }]}>
+                                    <View style={styles.statDataHeader}>
+                                        <View style={[styles.statDataIconContainer, { backgroundColor: '#E5E7EB' }]} />
+                                        <View style={{ flex: 1, height: 10, backgroundColor: '#E5E7EB', borderRadius: 4 }} />
+                                    </View>
+                                    <View style={{ height: 24, backgroundColor: '#E5E7EB', borderRadius: 4, marginBottom: 4 }} />
+                                    <View style={{ height: 10, backgroundColor: '#E5E7EB', borderRadius: 4, width: '60%' }} />
+                                </View>
+                            ))
+                        ) : dashboardStats.length > 0 ? (
+                            dashboardStats.map((stat, index) => (
+                                <HapticTouchable
+                                    key={index}
+                                    onPress={() => stat.href && router.push(stat.href)}
+                                    disabled={!stat.href}
+                                >
+                                    <View style={[styles.statDataCard, { backgroundColor: stat.bgColor }]}>
+                                        <View style={styles.statDataHeader}>
+                                            <View style={[styles.statDataIconContainer, { backgroundColor: stat.color + '20' }]}>
+                                                <stat.icon size={20} color={stat.color} />
+                                            </View>
+                                            <Text style={styles.statDataLabel}>{stat.label}</Text>
+                                        </View>
+                                        <Text style={[styles.statDataValue, { color: stat.color }]}>{stat.value}</Text>
+                                        <Text style={styles.statDataSubtext}>{stat.subtext}</Text>
+                                    </View>
+                                </HapticTouchable>
+                            ))
+                        ) : (
+                            <View style={{ padding: 20, alignItems: 'center' }}>
+                                <Text style={{ color: '#9CA3AF' }}>No data available</Text>
+                            </View>
+                        )}
+                    </View>
+                </View>
+            </ScrollView>
+        );
+    };
+
+    // === PRINCIPAL VIEW ===
+    const PrincipalView = ({ refreshing, onRefresh, schoolId, userId }) => {
+        // Get active academic year
+        const academicYearId = user_acc?.school?.academicYears?.find(ay => ay.isActive)?.id;
+
+        // Fetch dashboard stats with TanStack Query
+        const { data: apiStats, isLoading, error } = useQuery({
+            queryKey: QUERY_KEYS.dashboardOverview(schoolId, academicYearId),
+            queryFn: async () => {
+                const res = await api.get(
+                    `/schools/${schoolId}/dashboard/overview`,
+                    { params: { academicYearId: academicYearId || undefined } }
+                );
+                return res.data;
+            },
+            staleTime: 60 * 1000,
+            cacheTime: 5 * 60 * 1000,
+            refetchOnWindowFocus: true,
+            refetchInterval: 2 * 60 * 1000,
+            enabled: !!schoolId, // Only require schoolId
+        });
+
+        // Smart currency formatter
+        const formatCurrency = (amount) => {
+            if (amount === 0) return '₹0';
+            if (amount < 1000) return `₹${amount}`;
+            if (amount < 100000) return `₹${(amount / 1000).toFixed(1)}K`;
+            if (amount < 10000000) return `₹${(amount / 100000).toFixed(1)}L`;
+            return `₹${(amount / 10000000).toFixed(1)}Cr`;
+        };
+
+        // Map API data to dashboard cards (Principal-specific view)
+        const dashboardStats = apiStats ? [
+            {
+                label: 'Total Students',
+                value: apiStats.students.total.toString(),
+                subtext: `${apiStats.students.present} present today`,
+                icon: Users,
+                color: '#3B82F6',
+                bgColor: '#EFF6FF',
+                href: null
+            },
+            {
+                label: 'Total Teachers',
+                value: apiStats.teachers.total.toString(),
+                subtext: `${apiStats.teachers.onLeave} on leave`,
+                icon: User,
+                color: '#10B981',
+                bgColor: '#F0FDF4',
+                href: null
+            },
+            {
+                label: 'Present Today',
+                value: apiStats.attendance.present.toString(),
+                subtext: `${apiStats.attendance.percentage}% attendance`,
+                icon: UserCheck,
+                color: '#8B5CF6',
+                bgColor: '#F5F3FF',
+                href: '/attendance/view'
+            },
+            {
+                label: 'Absent Today',
+                value: apiStats.students.absent.toString(),
+                subtext: `${(100 - apiStats.attendance.percentage).toFixed(1)}% absent`,
+                icon: X,
+                color: '#EF4444',
+                bgColor: '#FEF2F2',
+                href: null
+            },
+            {
+                label: 'Payroll Approval',
+                value: apiStats.payroll.approvalCount.toString(),
+                subtext: 'Pending review',
+                icon: DollarSign,
+                color: '#F59E0B',
+                bgColor: '#FFFBEB',
+                href: null
+            },
+            {
+                label: 'Library Requests',
+                value: apiStats.library.approvalRequests.toString(),
+                subtext: 'Need approval',
+                icon: BookOpen,
+                color: '#0EA5E9',
+                bgColor: '#F0F9FF',
+                href: null
+            },
+            {
+                label: 'Active Classes',
+                value: apiStats.academics.totalClasses.toString(),
+                subtext: `${apiStats.academics.activeNow} in session`,
+                icon: Book,
+                color: '#8B5CF6',
+                bgColor: '#F5F3FF',
+                href: null
+            },
+            {
+                label: 'Exam Schedule',
+                value: apiStats.academics.examsThisWeek.toString(),
+                subtext: 'This week',
+                icon: Calendar,
+                color: '#EC4899',
+                bgColor: '#FDF2F8',
+                href: null
+            },
+            {
+                label: 'Active Buses',
+                value: apiStats.transport.totalBuses.toString(),
+                subtext: `${apiStats.transport.activeRoutes} on route`,
+                icon: Bus,
+                color: '#F59E0B',
+                bgColor: '#FFFBEB',
+                href: null
+            },
+        ] : [];
+
+        return (
+            <ScrollView
+                style={styles.container}
+                showsVerticalScrollIndicator={false}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
+                        tintColor="#0469ff"
+                        colors={['#0469ff']}
+                    />
+                }
+            >
+                {/* School Card */}
+                <View style={styles.schoolCard}>
+                    <View style={styles.schoolCardGradient}>
+                        <View style={styles.schoolCardContent}>
+                            <View style={styles.schoolLogoContainer}>
+                                {user_acc?.school?.profilePicture && user_acc.school.profilePicture !== 'default.png' ? (
+                                    <Image source={{ uri: user_acc.school.profilePicture }} style={styles.schoolLogo} />
+                                ) : (
+                                    <View style={[styles.schoolLogo, styles.schoolLogoPlaceholder]}>
+                                        <Building size={32} color="#FFFFFF" />
+                                    </View>
+                                )}
+                            </View>
+                            <View style={styles.schoolInfo}>
+                                <Text style={styles.schoolName}>{user_acc?.school?.name || 'School Name'}</Text>
+                                <Text style={styles.schoolLocation}>
+                                    <MapPin size={12} color="rgba(255, 255, 255, 0.9)" /> {user_acc?.school?.location || 'Location'}
+                                </Text>
+                            </View>
+                        </View>
+                    </View>
+                </View>
+
+                {/* Dashboard Stats */}
+                <View style={styles.dashboardSection}>
+                    <Text style={styles.dashboardSectionTitle}>Dashboard Overview</Text>
+                    <View style={styles.statsCardGrid}>
+                        {isLoading ? (
+                            // Loading skeleton
+                            [...Array(9)].map((_, index) => (
+                                <View key={`skeleton-${index}`} style={[styles.statDataCard, { backgroundColor: '#F3F4F6' }]}>
+                                    <View style={styles.statDataHeader}>
+                                        <View style={[styles.statDataIconContainer, { backgroundColor: '#E5E7EB' }]} />
+                                        <View style={{ flex: 1, height: 10, backgroundColor: '#E5E7EB', borderRadius: 4 }} />
+                                    </View>
+                                    <View style={{ height: 24, backgroundColor: '#E5E7EB', borderRadius: 4, marginBottom: 4 }} />
+                                    <View style={{ height: 10, backgroundColor: '#E5E7EB', borderRadius: 4, width: '60%' }} />
+                                </View>
+                            ))
+                        ) : dashboardStats.length > 0 ? (
+                            dashboardStats.map((stat, index) => (
+                                <HapticTouchable
+                                    key={index}
+                                    onPress={() => stat.href && router.push(stat.href)}
+                                    disabled={!stat.href}
+                                >
+                                    <View style={[styles.statDataCard, { backgroundColor: stat.bgColor }]}>
+                                        <View style={styles.statDataHeader}>
+                                            <View style={[styles.statDataIconContainer, { backgroundColor: stat.color + '20' }]}>
+                                                <stat.icon size={20} color={stat.color} />
+                                            </View>
+                                            <Text style={styles.statDataLabel}>{stat.label}</Text>
+                                        </View>
+                                        <Text style={[styles.statDataValue, { color: stat.color }]}>{stat.value}</Text>
+                                        <Text style={styles.statDataSubtext}>{stat.subtext}</Text>
+                                    </View>
+                                </HapticTouchable>
+                            ))
+                        ) : (
+                            <View style={{ padding: 20, alignItems: 'center' }}>
+                                <Text style={{ color: '#9CA3AF' }}>No data available</Text>
+                            </View>
+                        )}
+                    </View>
+                </View>
+            </ScrollView>
+        );
+    };
+
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
             {!loading && <Header />}
@@ -2436,9 +2973,7 @@ export default function HomeScreen() {
                     </View>
                 </Animated.View>
             )}
-
             {/* Today's Events (if any) */}
-
             {renderContent()}
         </SafeAreaView>
     );
@@ -2448,6 +2983,74 @@ export default function HomeScreen() {
 // === STYLES ===
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#fff' },
+    schoolBadge: {
+        marginHorizontal: 16,
+        marginTop: 12,
+        marginBottom: 8,
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+        backgroundColor: '#F3F4F6',
+        borderRadius: 8,
+        alignSelf: 'flex-start',
+    },
+    schoolBadgeText: {
+        fontSize: 14,
+        color: '#6B7280',
+        fontWeight: '600',
+    },
+    dashboardSection: {
+        marginHorizontal: 16,
+        marginBottom: 20,
+    },
+    dashboardSectionTitle: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#6B7280',
+        marginBottom: 16,
+        textTransform: 'uppercase',
+        letterSpacing: 0.8,
+    },
+    statsCardGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 12,
+    },
+    statDataCard: {
+        width: (SCREEN_WIDTH - 56) / 2,
+        borderRadius: 12,
+        padding: 14,
+        borderWidth: 1,
+        borderColor: '#00000008',
+    },
+    statDataHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 10,
+    },
+    statDataIconContainer: {
+        width: 32,
+        height: 32,
+        borderRadius: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 8,
+    },
+    statDataLabel: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: '#6B7280',
+        flex: 1,
+    },
+    statDataValue: {
+        fontSize: 24,
+        fontWeight: '700',
+        marginBottom: 2,
+    },
+    statDataSubtext: {
+        fontSize: 11,
+        color: '#9CA3AF',
+        fontWeight: '500',
+    },
     loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#fff' },
     header: {
         flexDirection: 'row',
@@ -2856,6 +3459,10 @@ const styles = StyleSheet.create({
         color: '#0469ff',
         fontWeight: '600',
     },
+    carouselContainer: {
+        height: 160,
+        marginTop: 12,
+    },
     childrenScroll: {
         gap: 12,
         paddingRight: 16,
@@ -3161,16 +3768,56 @@ const styles = StyleSheet.create({
         borderRadius: 4,
         backgroundColor: '#0469ff',
     },
-    todayBadge: {
-        backgroundColor: '#FF6B6B',
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-        borderRadius: 8,
+    // School Card Styles
+    schoolCard: {
+        marginHorizontal: 16,
+        marginBottom: 16,
+        borderRadius: 16,
+        overflow: 'hidden',
+        backgroundColor: '#F8FAFC',
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
     },
-    todayBadgeText: {
-        color: '#fff',
-        fontSize: 10,
+    schoolCardGradient: {
+        backgroundColor: '#F8FAFC',
+        padding: 16,
+        borderBottomWidth: 2,
+        borderBottomColor: '#E0E7FF',
+    },
+    schoolCardContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    schoolLogoContainer: {
+        marginRight: 12,
+    },
+    schoolLogo: {
+        width: 56,
+        height: 56,
+        borderRadius: 12,
+        backgroundColor: '#FFFFFF',
+        borderWidth: 1.5,
+        borderColor: '#E0E7FF',
+    },
+    schoolLogoPlaceholder: {
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: '#EEF2FF',
+    },
+    schoolInfo: {
+        flex: 1,
+    },
+    schoolName: {
+        fontSize: 18,
         fontWeight: '700',
+        color: '#1E293B',
+        marginBottom: 4,
+    },
+    schoolLocation: {
+        fontSize: 13,
+        color: '#64748B',
+        flexDirection: 'row',
+        alignItems: 'center',
     },
     todayEventCard: {
         flexDirection: 'row',

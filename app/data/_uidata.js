@@ -53,6 +53,20 @@ export const dataUi = {
         { "text": "{school.name}", "type": "school" }
       ],
       "icons": ["refresh", "bell"]
+    },
+    "director": {
+      "title": "{name}",
+      "subtitle": [
+        { "text": "Director", "type": "role" }
+      ],
+      "icons": ["refresh", "bell"]
+    },
+    "principal": {
+      "title": "{name}",
+      "subtitle": [
+        { "text": "Principal", "type": "role" }
+      ],
+      "icons": ["refresh", "bell"]
     }
   },
   "upcomingExam": {

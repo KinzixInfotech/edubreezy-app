@@ -173,13 +173,30 @@ export default function ProfileSelectorScreen() {
             await SecureStore.setItemAsync('user', JSON.stringify(profile.userData));
             await SecureStore.setItemAsync('userRole', JSON.stringify(profile.role));
 
-            // Store access token for API calls
+            // CRITICAL: Always store access token for API calls
+            // If we have a current session (freshly restored), use that token
+            // Otherwise, fallback to the profile's stored token (may be stale but better than nothing)
+            let tokenToStore = null;
+
             if (sessionRestored) {
                 const { data: { session: currentSession } } = await supabase.auth.getSession();
                 if (currentSession?.access_token) {
-                    await SecureStore.setItemAsync('token', currentSession.access_token);
-                    console.log('✅ Token stored in SecureStore for API calls');
+                    tokenToStore = currentSession.access_token;
+                    console.log('✅ Storing fresh token from restored session');
                 }
+            }
+
+            // Fallback: if no fresh token, use the stored one (might be expired but API will handle retry)
+            if (!tokenToStore && profile.sessionTokens?.access_token) {
+                tokenToStore = profile.sessionTokens.access_token;
+                console.log('⚠️ Storing old token as fallback (may need refresh)');
+            }
+
+            if (tokenToStore) {
+                await SecureStore.setItemAsync('token', tokenToStore);
+                console.log('✅ Token stored in SecureStore for API calls');
+            } else {
+                console.error('❌ No token available to store - API calls may fail');
             }
 
             // Navigate to home

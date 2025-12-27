@@ -2588,7 +2588,7 @@ export default function HomeScreen() {
                 icon: Users,
                 color: '#3B82F6',
                 bgColor: '#EFF6FF',
-                href: null
+                href: '/director/students'
             },
             {
                 label: 'Total Teachers',
@@ -2597,7 +2597,7 @@ export default function HomeScreen() {
                 icon: User,
                 color: '#10B981',
                 bgColor: '#F0FDF4',
-                href: null
+                href: '/director/teachers'
             },
             {
                 label: 'Present Today',
@@ -2615,7 +2615,7 @@ export default function HomeScreen() {
                 icon: DollarSign,
                 color: '#F59E0B',
                 bgColor: '#FFFBEB',
-                href: null
+                href: '/director/fees-collected'
             },
             {
                 label: 'Fees Pending',
@@ -2624,7 +2624,7 @@ export default function HomeScreen() {
                 icon: Wallet,
                 color: '#EF4444',
                 bgColor: '#FEF2F2',
-                href: null
+                href: '/director/fees-pending'
             },
             {
                 label: 'Payroll Due',
@@ -2633,7 +2633,7 @@ export default function HomeScreen() {
                 icon: DollarSign,
                 color: '#EC4899',
                 bgColor: '#FDF2F8',
-                href: null
+                href: '/director/payroll'
             },
             {
                 label: 'Library Books',
@@ -2642,7 +2642,7 @@ export default function HomeScreen() {
                 icon: BookOpen,
                 color: '#0EA5E9',
                 bgColor: '#F0F9FF',
-                href: null
+                href: '/director/library'
             },
             {
                 label: 'Inventory Items',
@@ -2651,7 +2651,7 @@ export default function HomeScreen() {
                 icon: ClipboardList,
                 color: '#8B5CF6',
                 bgColor: '#F5F3FF',
-                href: null
+                href: '/director/inventory'
             },
             {
                 label: 'Active Buses',
@@ -2660,7 +2660,7 @@ export default function HomeScreen() {
                 icon: Bus,
                 color: '#F59E0B',
                 bgColor: '#FFFBEB',
-                href: null
+                href: '/director/transport'
             },
         ] : [];
 
@@ -2720,7 +2720,7 @@ export default function HomeScreen() {
                             dashboardStats.map((stat, index) => (
                                 <HapticTouchable
                                     key={index}
-                                    onPress={() => stat.href && router.push(stat.href)}
+                                    onPress={() => stat.href && router.push({ pathname: stat.href, params: { schoolId } })}
                                     disabled={!stat.href}
                                 >
                                     <View style={[styles.statDataCard, { backgroundColor: stat.bgColor }]}>
@@ -2786,7 +2786,7 @@ export default function HomeScreen() {
                 icon: Users,
                 color: '#3B82F6',
                 bgColor: '#EFF6FF',
-                href: null
+                href: '/director/students'
             },
             {
                 label: 'Total Teachers',
@@ -2795,7 +2795,7 @@ export default function HomeScreen() {
                 icon: User,
                 color: '#10B981',
                 bgColor: '#F0FDF4',
-                href: null
+                href: '/director/teachers'
             },
             {
                 label: 'Present Today',
@@ -2813,7 +2813,7 @@ export default function HomeScreen() {
                 icon: X,
                 color: '#EF4444',
                 bgColor: '#FEF2F2',
-                href: null
+                href: '/attendance/absent'
             },
             {
                 label: 'Payroll Approval',
@@ -2822,7 +2822,7 @@ export default function HomeScreen() {
                 icon: DollarSign,
                 color: '#F59E0B',
                 bgColor: '#FFFBEB',
-                href: null
+                href: '/director/payroll'
             },
             {
                 label: 'Library Requests',
@@ -2831,7 +2831,7 @@ export default function HomeScreen() {
                 icon: BookOpen,
                 color: '#0EA5E9',
                 bgColor: '#F0F9FF',
-                href: null
+                href: '/director/library'
             },
             {
                 label: 'Active Classes',
@@ -2840,7 +2840,7 @@ export default function HomeScreen() {
                 icon: Book,
                 color: '#8B5CF6',
                 bgColor: '#F5F3FF',
-                href: null
+                href: '/classes'
             },
             {
                 label: 'Exam Schedule',
@@ -2849,7 +2849,7 @@ export default function HomeScreen() {
                 icon: Calendar,
                 color: '#EC4899',
                 bgColor: '#FDF2F8',
-                href: null
+                href: '/exams'
             },
             {
                 label: 'Active Buses',
@@ -2858,7 +2858,7 @@ export default function HomeScreen() {
                 icon: Bus,
                 color: '#F59E0B',
                 bgColor: '#FFFBEB',
-                href: null
+                href: '/director/transport'
             },
         ] : [];
 
@@ -2884,14 +2884,14 @@ export default function HomeScreen() {
                                     <Image source={{ uri: user_acc.school.profilePicture }} style={styles.schoolLogo} />
                                 ) : (
                                     <View style={[styles.schoolLogo, styles.schoolLogoPlaceholder]}>
-                                        <Building size={32} color="#FFFFFF" />
+                                        <Building size={28} color="#6366F1" />
                                     </View>
                                 )}
                             </View>
                             <View style={styles.schoolInfo}>
                                 <Text style={styles.schoolName}>{user_acc?.school?.name || 'School Name'}</Text>
                                 <Text style={styles.schoolLocation}>
-                                    <MapPin size={12} color="rgba(255, 255, 255, 0.9)" /> {user_acc?.school?.location || 'Location'}
+                                    <MapPin size={11} color="#94A3B8" /> {user_acc?.school?.location || 'Location'}
                                 </Text>
                             </View>
                         </View>
@@ -2918,7 +2918,7 @@ export default function HomeScreen() {
                             dashboardStats.map((stat, index) => (
                                 <HapticTouchable
                                     key={index}
-                                    onPress={() => stat.href && router.push(stat.href)}
+                                    onPress={() => stat.href && router.push({ pathname: stat.href, params: { schoolId } })}
                                     disabled={!stat.href}
                                 >
                                     <View style={[styles.statDataCard, { backgroundColor: stat.bgColor }]}>
@@ -3773,6 +3773,7 @@ const styles = StyleSheet.create({
         marginHorizontal: 16,
         marginBottom: 16,
         borderRadius: 16,
+        marginTop: 20,
         overflow: 'hidden',
         backgroundColor: '#F8FAFC',
         borderWidth: 1,
@@ -3781,8 +3782,8 @@ const styles = StyleSheet.create({
     schoolCardGradient: {
         backgroundColor: '#F8FAFC',
         padding: 16,
-        borderBottomWidth: 2,
-        borderBottomColor: '#E0E7FF',
+        // borderBottomWidth: 2,
+        // borderBottomColor: '#E0E7FF',
     },
     schoolCardContent: {
         flexDirection: 'row',
@@ -4035,10 +4036,12 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
     });
 
     // Extract data
-    const delegationCheck = dashboardData?.delegations;
-    const recentNotices = dashboardData?.notices;
-    const attendanceStats = dashboardData?.attendance;
-    const leaveData = dashboardData?.leaves;
+    const delegationCheck = apiStats?.delegations;
+    // Get events and notices from dashboard data
+    // const upcomingEvents = apiStats?.events || [];
+    const recentNotices = apiStats?.notices || [];
+    const attendanceStats = apiStats?.attendance;
+    const leaveData = apiStats?.leaves;
 
     const notices = recentNotices?.notices?.map((n) => ({
         id: n.id,

@@ -237,9 +237,11 @@ export default function GreetingScreen() {
                     </View>
                 </Animated.View>
 
-                <Animated.View style={nameAnimatedStyle}>
-                    <Text style={styles.nameText}>{userName}</Text>
-                </Animated.View>
+                {userName && userName.trim() !== '' && (
+                    <Animated.View style={nameAnimatedStyle}>
+                        <Text style={styles.nameText}>{userName}</Text>
+                    </Animated.View>
+                )}
             </View>
         </View>
     );

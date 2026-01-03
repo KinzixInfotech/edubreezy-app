@@ -11,13 +11,29 @@ export default function FeesCollectedScreen() {
     const { schoolId } = useLocalSearchParams();
     const [refreshing, setRefreshing] = useState(false);
 
-    const { data, isLoading, refetch } = useQuery({
-        queryKey: ['director-fees-collected', schoolId],
+    // First fetch academic years to get the active one
+    const { data: academicYears } = useQuery({
+        queryKey: ['academic-years', schoolId],
         queryFn: async () => {
-            const res = await api.get(`/schools/${schoolId}/director/fees-collected`);
-            return res.data;
+            const res = await api.get(`/schools/academic-years?schoolId=${schoolId}`);
+            return Array.isArray(res.data) ? res.data : (res.data?.academicYears || []);
         },
         enabled: !!schoolId,
+        staleTime: 1000 * 60 * 10,
+    });
+
+    const academicYearId = academicYears?.find(ay => ay.isActive)?.id;
+
+    // Use the fee dashboard API which has proper data
+    const { data, isLoading, refetch } = useQuery({
+        queryKey: ['fee-dashboard', schoolId, academicYearId],
+        queryFn: async () => {
+            const res = await api.get('/schools/fee/admin/dashboard', {
+                params: { schoolId, academicYearId }
+            });
+            return res.data;
+        },
+        enabled: !!schoolId && !!academicYearId,
         staleTime: 60 * 1000,
     });
 
@@ -30,14 +46,26 @@ export default function FeesCollectedScreen() {
     const formatCurrency = (amount) => {
         if (!amount) return '₹0';
         if (amount >= 10000000) return `₹${(amount / 10000000).toFixed(1)}Cr`;
-        if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)}L`;
-        if (amount >= 1000) return `₹${(amount / 1000).toFixed(1)}K`;
-        return `₹${amount}`;
+        return `₹${amount.toLocaleString('en-IN')}`;
     };
 
-    const summary = data?.summary || {};
-    const paymentMethods = data?.paymentMethods || [];
-    const recentPayments = data?.recentPayments || [];
+    // Map API response to screen data
+    const summary = {
+        thisMonth: data?.summary?.totalCollected || 0,
+        growthPercent: data?.summary?.collectionPercentage || 0
+    };
+    const paymentMethods = (data?.paymentMethodStats || []).map(pm => ({
+        method: pm.paymentMethod || 'Other',
+        amount: pm._sum?.amount || 0,
+        count: pm._count || 0
+    }));
+    const recentPayments = (data?.recentPayments || []).map(p => ({
+        studentName: p.student?.name || 'Unknown',
+        class: p.student?.class?.className || '-',
+        date: p.paymentDate,
+        amount: p.amount,
+        method: p.paymentMethod
+    }));
 
     const getPaymentIcon = (method) => {
         switch (method?.toLowerCase()) {
@@ -89,38 +117,58 @@ export default function FeesCollectedScreen() {
 
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Payment Methods</Text>
-                    <View style={styles.methodsContainer}>
-                        {paymentMethods.map((method, index) => {
-                            const Icon = getPaymentIcon(method.method);
-                            return (
-                                <View key={index} style={styles.methodCard}>
-                                    <View style={[styles.methodIcon, { backgroundColor: '#FEF3C7' }]}>
-                                        <Icon size={20} color="#D97706" />
+                    {paymentMethods.length > 0 ? (
+                        <View style={styles.methodsContainer}>
+                            {paymentMethods.map((method, index) => {
+                                const Icon = getPaymentIcon(method.method);
+                                return (
+                                    <View key={index} style={styles.methodCard}>
+                                        <View style={[styles.methodIcon, { backgroundColor: '#FEF3C7' }]}>
+                                            <Icon size={20} color="#D97706" />
+                                        </View>
+                                        <Text style={styles.methodName}>{method.method}</Text>
+                                        <Text style={styles.methodAmount}>{formatCurrency(method.amount)}</Text>
+                                        <Text style={styles.methodCount}>{method.count} payments</Text>
                                     </View>
-                                    <Text style={styles.methodName}>{method.method}</Text>
-                                    <Text style={styles.methodAmount}>{formatCurrency(method.amount)}</Text>
-                                    <Text style={styles.methodCount}>{method.count} payments</Text>
-                                </View>
-                            );
-                        })}
-                    </View>
+                                );
+                            })}
+                        </View>
+                    ) : (
+                        <View style={styles.emptyCard}>
+                            <View style={styles.emptyIcon}>
+                                <CreditCard size={32} color="#9CA3AF" />
+                            </View>
+                            <Text style={styles.emptyTitle}>No Payment Methods</Text>
+                            <Text style={styles.emptyText}>Payment method data will appear here once fees are collected</Text>
+                        </View>
+                    )}
                 </View>
 
                 <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Recent Payments</Text>
-                    {recentPayments.map((payment, index) => (
-                        <View key={index} style={styles.paymentCard}>
-                            <View style={styles.paymentInfo}>
-                                <Text style={styles.paymentStudent}>{payment.studentName}</Text>
-                                <Text style={styles.paymentClass}>{payment.class}</Text>
-                                <Text style={styles.paymentDate}>{new Date(payment.date).toLocaleDateString()}</Text>
+                    {recentPayments.length > 0 ? (
+                        recentPayments.map((payment, index) => (
+                            <View key={index} style={styles.paymentCard}>
+                                <View style={styles.paymentInfo}>
+                                    <Text style={styles.paymentStudent}>{payment.studentName}</Text>
+                                    <Text style={styles.paymentClass}>{payment.class}</Text>
+                                    <Text style={styles.paymentDate}>{new Date(payment.date).toLocaleDateString()}</Text>
+                                </View>
+                                <View style={styles.paymentAmount}>
+                                    <Text style={styles.amountText}>{formatCurrency(payment.amount)}</Text>
+                                    <Text style={styles.paymentMethod}>{payment.method}</Text>
+                                </View>
                             </View>
-                            <View style={styles.paymentAmount}>
-                                <Text style={styles.amountText}>{formatCurrency(payment.amount)}</Text>
-                                <Text style={styles.paymentMethod}>{payment.method}</Text>
+                        ))
+                    ) : (
+                        <View style={styles.emptyCard}>
+                            <View style={styles.emptyIcon}>
+                                <DollarSign size={32} color="#9CA3AF" />
                             </View>
+                            <Text style={styles.emptyTitle}>No Payments Yet</Text>
+                            <Text style={styles.emptyText}>Recent fee payments will appear here</Text>
                         </View>
-                    ))}
+                    )}
                 </View>
             </ScrollView>
         </SafeAreaView>
@@ -154,4 +202,8 @@ const styles = StyleSheet.create({
     paymentAmount: { alignItems: 'flex-end' },
     amountText: { fontSize: 16, fontWeight: '700', color: '#10B981' },
     paymentMethod: { fontSize: 12, color: '#9CA3AF', marginTop: 2, textTransform: 'capitalize' },
+    emptyCard: { backgroundColor: '#FFFFFF', padding: 32, borderRadius: 16, borderWidth: 1, borderColor: '#E5E7EB', alignItems: 'center' },
+    emptyIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#F3F4F6', justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+    emptyTitle: { fontSize: 16, fontWeight: '600', color: '#1F2937', marginBottom: 8 },
+    emptyText: { fontSize: 14, color: '#9CA3AF', textAlign: 'center', lineHeight: 20 },
 });

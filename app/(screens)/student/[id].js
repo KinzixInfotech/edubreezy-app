@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Image, Linking, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
@@ -64,6 +64,13 @@ export default function StudentDetailScreen() {
         );
     }
 
+    const getInitials = (name) => {
+        if (!name) return '?';
+        const parts = name.trim().split(' ').filter(Boolean);
+        if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+        return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+    };
+
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
             <Stack.Screen options={{ headerShown: false }} />
@@ -82,11 +89,11 @@ export default function StudentDetailScreen() {
             >
                 {/* Profile Card */}
                 <View style={styles.profileCard}>
-                    {student?.profilePicture ? (
+                    {(student?.profilePicture !== 'default.png' && student.profilePicture.length > 0) ? (
                         <Image source={{ uri: student.profilePicture }} style={styles.profileImage} />
                     ) : (
                         <View style={[styles.profileImage, styles.profilePlaceholder]}>
-                            <Text style={styles.profileInitial}>{student?.name?.charAt(0)?.toUpperCase() || '?'}</Text>
+                            <Text style={styles.profileInitial}>{getInitials(student?.name)}</Text>
                         </View>
                     )}
                     <Text style={styles.profileName}>{student?.name || 'Unknown'}</Text>
@@ -105,8 +112,20 @@ export default function StudentDetailScreen() {
 
                     <View style={styles.infoCard}>
                         <InfoRow icon={User} label="Full Name" value={student?.name || 'N/A'} />
-                        <InfoRow icon={Mail} label="Email" value={student?.email || 'N/A'} />
-                        <InfoRow icon={Phone} label="Phone" value={student?.phone || student?.contactNumber || 'N/A'} />
+                        <InfoRow
+                            icon={Mail}
+                            label="Email"
+                            value={student?.email || 'N/A'}
+                            onPress={student?.email ? () => Linking.openURL(`mailto:${student.email}`) : null}
+                            isLink={!!student?.email}
+                        />
+                        <InfoRow
+                            icon={Phone}
+                            label="Phone"
+                            value={student?.phone || student?.contactNumber || 'N/A'}
+                            onPress={(student?.phone || student?.contactNumber) ? () => Linking.openURL(`tel:${student.phone || student.contactNumber}`) : null}
+                            isLink={!!(student?.phone || student?.contactNumber)}
+                        />
                         <InfoRow icon={Calendar} label="Date of Birth" value={student?.dob || 'N/A'} />
                         <InfoRow icon={User} label="Gender" value={student?.gender || 'N/A'} />
                         <InfoRow icon={MapPin} label="Address" value={student?.address || 'N/A'} isLast />
@@ -130,7 +149,14 @@ export default function StudentDetailScreen() {
                     <View style={styles.infoCard}>
                         <InfoRow icon={Users} label="Father's Name" value={student?.fatherName || 'N/A'} />
                         <InfoRow icon={Users} label="Mother's Name" value={student?.motherName || 'N/A'} />
-                        <InfoRow icon={Phone} label="Guardian Phone" value={student?.guardianPhone || student?.parentPhone || 'N/A'} isLast />
+                        <InfoRow
+                            icon={Phone}
+                            label="Guardian Phone"
+                            value={student?.guardianPhone || student?.parentPhone || 'N/A'}
+                            onPress={(student?.guardianPhone || student?.parentPhone) ? () => Linking.openURL(`tel:${student.guardianPhone || student.parentPhone}`) : null}
+                            isLink={!!(student?.guardianPhone || student?.parentPhone)}
+                            isLast
+                        />
                     </View>
                 </View>
 
@@ -148,17 +174,28 @@ export default function StudentDetailScreen() {
     );
 }
 
-const InfoRow = ({ icon: Icon, label, value, isLast }) => (
-    <View style={[styles.infoRow, !isLast && styles.infoRowBorder]}>
-        <View style={styles.infoIcon}>
-            <Icon size={18} color="#6B7280" />
+const InfoRow = ({ icon: Icon, label, value, isLast, onPress, isLink }) => {
+    const content = (
+        <View style={[styles.infoRow, !isLast && styles.infoRowBorder]}>
+            <View style={[styles.infoIcon, isLink && { backgroundColor: '#DBEAFE' }]}>
+                <Icon size={18} color={isLink ? '#3B82F6' : '#6B7280'} />
+            </View>
+            <View style={styles.infoContent}>
+                <Text style={styles.infoLabel}>{label}</Text>
+                <Text style={[styles.infoValue, isLink && { color: '#3B82F6' }]}>{value}</Text>
+            </View>
         </View>
-        <View style={styles.infoContent}>
-            <Text style={styles.infoLabel}>{label}</Text>
-            <Text style={styles.infoValue}>{value}</Text>
-        </View>
-    </View>
-);
+    );
+
+    if (onPress) {
+        return (
+            <TouchableOpacity onPress={onPress} activeOpacity={0.7}>
+                {content}
+            </TouchableOpacity>
+        );
+    }
+    return content;
+};
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#F9FAFB' },

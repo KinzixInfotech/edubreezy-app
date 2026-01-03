@@ -52,33 +52,44 @@ export default function StudentsScreen() {
         setSelectedSection(null);
     };
 
-    const renderStudent = ({ item }) => (
-        <HapticTouchable onPress={() => router.push({ pathname: `/student/${item.id}`, params: { schoolId } })}>
-            <View style={styles.studentCard}>
-                {item.profilePicture ? (
-                    <Image source={{ uri: item.profilePicture }} style={styles.avatar} />
-                ) : (
-                    <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                        <Text style={styles.avatarText}>
-                            {item.name?.charAt(0)?.toUpperCase() || '?'}
+    const getInitials = (name) => {
+        if (!name) return '?';
+        const parts = name.trim().split(' ').filter(Boolean);
+        if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+        return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+    };
+
+    const renderStudent = ({ item }) => {
+        const hasValidPic = item.profilePicture !== 'default.png' && item.profilePicture.length > 0;
+
+        return (
+            <HapticTouchable onPress={() => router.push({ pathname: `/student/${item.id}`, params: { schoolId } })}>
+                <View style={styles.studentCard}>
+                    {hasValidPic ? (
+                        <Image source={{ uri: item.profilePicture }} style={styles.avatar} />
+                    ) : (
+                        <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                            <Text style={styles.avatarText}>
+                                {getInitials(item.name)}
+                            </Text>
+                        </View>
+                    )}
+                    <View style={styles.studentInfo}>
+                        <Text style={styles.studentName}>{item.name || 'Unknown'}</Text>
+                        <Text style={styles.studentClass}>
+                            {item.class?.name || 'No Class'} {item.section?.name ? `• ${item.section.name}` : ''}
+                        </Text>
+                        <Text style={styles.admissionNo}>Adm: {item.admissionNumber || 'N/A'}</Text>
+                    </View>
+                    <View style={[styles.statusBadge, { backgroundColor: item.status === 'active' ? '#DCFCE7' : '#FEE2E2' }]}>
+                        <Text style={[styles.statusText, { color: item.status === 'active' ? '#16A34A' : '#DC2626' }]}>
+                            {item.status}
                         </Text>
                     </View>
-                )}
-                <View style={styles.studentInfo}>
-                    <Text style={styles.studentName}>{item.name || 'Unknown'}</Text>
-                    <Text style={styles.studentClass}>
-                        {item.class?.name || 'No Class'} {item.section?.name ? `• ${item.section.name}` : ''}
-                    </Text>
-                    <Text style={styles.admissionNo}>Adm: {item.admissionNumber || 'N/A'}</Text>
                 </View>
-                <View style={[styles.statusBadge, { backgroundColor: item.status === 'active' ? '#DCFCE7' : '#FEE2E2' }]}>
-                    <Text style={[styles.statusText, { color: item.status === 'active' ? '#16A34A' : '#DC2626' }]}>
-                        {item.status}
-                    </Text>
-                </View>
-            </View>
-        </HapticTouchable>
-    );
+            </HapticTouchable>
+        );
+    };
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>

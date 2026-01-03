@@ -2,7 +2,7 @@ import { View, Text, StyleSheet, RefreshControl, TextInput, ActivityIndicator, F
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useState, useCallback, useMemo, useEffect } from 'react';
 import { Users, Search, ChevronLeft, GraduationCap, Briefcase } from 'lucide-react-native';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
@@ -11,16 +11,25 @@ export default function TeachersScreen() {
     const { schoolId } = useLocalSearchParams();
 
     const [searchQuery, setSearchQuery] = useState('');
+    const [debouncedSearch, setDebouncedSearch] = useState('');
     const [refreshing, setRefreshing] = useState(false);
     const [filter, setFilter] = useState('all');
     const [statusFilter, setStatusFilter] = useState('all'); // all, active, on-leave
 
+    // Debounce search input
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setDebouncedSearch(searchQuery);
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [searchQuery]);
+
     const { data, isLoading, refetch } = useQuery({
-        queryKey: ['director-teachers', schoolId, searchQuery, filter, statusFilter],
+        queryKey: ['director-teachers', schoolId, debouncedSearch, filter, statusFilter],
         queryFn: async () => {
             const res = await api.get(`/schools/${schoolId}/director/teachers`, {
                 params: {
-                    search: searchQuery,
+                    search: debouncedSearch,
                     type: filter !== 'all' ? filter : undefined,
                     status: statusFilter !== 'all' ? (statusFilter === 'active' ? 'ACTIVE' : 'ON_LEAVE') : undefined
                 }
@@ -40,33 +49,43 @@ export default function TeachersScreen() {
     const teachers = data?.staff || [];
     const summary = data?.summary || { total: 0, teaching: 0, nonTeaching: 0 };
 
-    const renderTeacher = ({ item }) => (
-        <HapticTouchable onPress={() => router.push({ pathname: `/staff/${item.id}`, params: { schoolId } })}>
-            <View style={styles.teacherCard}>
-                {item.profilePicture ? (
-                    <Image source={{ uri: item.profilePicture }} style={styles.avatar} />
-                ) : (
-                    <View style={[styles.avatar, styles.avatarPlaceholder, { backgroundColor: item.type === 'teaching' ? '#EFF6FF' : '#FEF3C7' }]}>
-                        <Text style={[styles.avatarText, { color: item.type === 'teaching' ? '#3B82F6' : '#D97706' }]}>
-                            {item.name?.charAt(0)?.toUpperCase() || '?'}
-                        </Text>
-                    </View>
-                )}
-                <View style={styles.teacherInfo}>
-                    <Text style={styles.teacherName}>{item.name || 'Unknown'}</Text>
-                    <Text style={styles.teacherRole}>{item.designation || item.type}</Text>
-                    <Text style={styles.employeeId}>ID: {item.employeeId || 'N/A'}</Text>
-                </View>
-                <View style={[styles.typeBadge, { backgroundColor: item.type === 'teaching' ? '#DBEAFE' : '#FEF3C7' }]}>
-                    {item.type === 'teaching' ? (
-                        <GraduationCap size={16} color="#3B82F6" />
+    const getInitials = (name) => {
+        if (!name) return '?';
+        const parts = name.trim().split(' ').filter(Boolean);
+        if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+        return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+    };
+
+    const renderTeacher = ({ item }) => {
+        const hasValidPic = item.profilePicture !== 'default.png' && item.profilePicture.length > 0;
+        return (
+            <HapticTouchable onPress={() => router.push({ pathname: `/staff/${item.id}`, params: { schoolId } })}>
+                <View style={styles.teacherCard}>
+                    {hasValidPic ? (
+                        <Image source={{ uri: item.profilePicture }} style={styles.avatar} />
                     ) : (
-                        <Briefcase size={16} color="#D97706" />
+                        <View style={[styles.avatar, styles.avatarPlaceholder, { backgroundColor: item.type === 'teaching' ? '#DBEAFE' : '#FEF3C7' }]}>
+                            <Text style={[styles.avatarText, { color: item.type === 'teaching' ? '#3B82F6' : '#D97706' }]}>
+                                {getInitials(item.name)}
+                            </Text>
+                        </View>
                     )}
+                    <View style={styles.teacherInfo}>
+                        <Text style={styles.teacherName}>{item.name || 'Unknown'}</Text>
+                        <Text style={styles.teacherRole}>{item.designation || item.type}</Text>
+                        <Text style={styles.employeeId}>ID: {item.employeeId || 'N/A'}</Text>
+                    </View>
+                    <View style={[styles.typeBadge, { backgroundColor: item.type === 'teaching' ? '#DBEAFE' : '#FEF3C7' }]}>
+                        {item.type === 'teaching' ? (
+                            <GraduationCap size={16} color="#3B82F6" />
+                        ) : (
+                            <Briefcase size={16} color="#D97706" />
+                        )}
+                    </View>
                 </View>
-            </View>
-        </HapticTouchable>
-    );
+            </HapticTouchable>
+        );
+    };
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
@@ -154,6 +173,16 @@ export default function TeachersScreen() {
                             <Text style={styles.emptyText}>No staff found</Text>
                         </View>
                     }
+                    // Performance optimizations for large lists
+                    initialNumToRender={10}
+                    maxToRenderPerBatch={10}
+                    windowSize={5}
+                    removeClippedSubviews={true}
+                    getItemLayout={(data, index) => ({
+                        length: 92, // card height (80) + marginBottom (12)
+                        offset: 92 * index,
+                        index,
+                    })}
                 />
             )}
         </SafeAreaView>

@@ -12,7 +12,6 @@ export default function AttendanceViewScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [filter, setFilter] = useState('all'); // all, present, absent, late
 
-    console.log('📅 Attendance Screen - schoolId:', schoolId);
 
     const { data, isLoading, refetch } = useQuery({
         queryKey: ['attendance-today', schoolId, filter],

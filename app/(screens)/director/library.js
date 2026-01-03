@@ -13,17 +13,21 @@ export default function LibraryScreen() {
     const [activeTab, setActiveTab] = useState('catalog'); // catalog, transactions
     const [searchQuery, setSearchQuery] = useState('');
 
-    const { data, isLoading, refetch } = useQuery({
+    const { data, isLoading, refetch, error } = useQuery({
         queryKey: ['director-library', schoolId, searchQuery],
         queryFn: async () => {
+            console.log('📚 Fetching library data for schoolId:', schoolId);
             const res = await api.get(`/schools/${schoolId}/director/library`, {
                 params: { search: searchQuery }
             });
+            console.log('📚 Library data received:', res.data);
             return res.data;
         },
         enabled: !!schoolId,
         staleTime: 60 * 1000,
     });
+
+    console.log('📚 Library Screen - schoolId:', schoolId, 'isLoading:', isLoading, 'error:', error?.message, 'hasData:', !!data);
 
     const onRefresh = async () => {
         setRefreshing(true);
@@ -34,6 +38,13 @@ export default function LibraryScreen() {
     const summary = data?.summary || {};
     const books = data?.books || [];
     const recentTransactions = data?.recentTransactions || [];
+
+    console.log('📚 Library Data:', {
+        summary,
+        booksCount: books.length,
+        transactionsCount: recentTransactions.length,
+        firstBook: books[0]
+    });
 
     const renderBook = ({ item }) => (
         <View style={styles.bookCard}>

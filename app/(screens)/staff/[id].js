@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, Image, Linking, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
@@ -39,6 +39,13 @@ export default function StaffDetailScreen() {
 
     const isTeaching = staff?.type === 'teaching' || staff?.role?.name === 'TEACHING_STAFF';
 
+    const getInitials = (name) => {
+        if (!name) return '?';
+        const parts = name.trim().split(' ').filter(Boolean);
+        if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+        return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+    };
+
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
             <Stack.Screen options={{ headerShown: false }} />
@@ -57,11 +64,13 @@ export default function StaffDetailScreen() {
             >
                 {/* Profile Card */}
                 <View style={styles.profileCard}>
-                    {staff?.profilePicture ? (
+                    {(staff?.profilePicture && staff.profilePicture.length > 0 && staff.profilePicture !== 'default.png') ? (
                         <Image source={{ uri: staff.profilePicture }} style={styles.profileImage} />
                     ) : (
-                        <View style={[styles.profileImage, styles.profilePlaceholder]}>
-                            <Text style={styles.profileInitial}>{staff?.name?.charAt(0)?.toUpperCase() || '?'}</Text>
+                        <View style={[styles.profileImage, styles.profilePlaceholder, { backgroundColor: isTeaching ? '#DBEAFE' : '#FEF3C7' }]}>
+                            <Text style={[styles.profileInitial, { color: isTeaching ? '#3B82F6' : '#D97706' }]}>
+                                {getInitials(staff?.name)}
+                            </Text>
                         </View>
                     )}
                     <Text style={styles.profileName}>{staff?.name || 'Unknown'}</Text>
@@ -84,8 +93,20 @@ export default function StaffDetailScreen() {
 
                     <View style={styles.infoCard}>
                         <InfoRow icon={User} label="Employee ID" value={staff?.employeeId || 'N/A'} />
-                        <InfoRow icon={Mail} label="Email" value={staff?.email || 'N/A'} />
-                        <InfoRow icon={Phone} label="Phone" value={staff?.phone || staff?.contactNumber || 'N/A'} />
+                        <InfoRow
+                            icon={Mail}
+                            label="Email"
+                            value={staff?.email || 'N/A'}
+                            onPress={staff?.email ? () => Linking.openURL(`mailto:${staff.email}`) : null}
+                            isLink={!!staff?.email}
+                        />
+                        <InfoRow
+                            icon={Phone}
+                            label="Phone"
+                            value={staff?.phone || staff?.contactNumber || 'N/A'}
+                            onPress={(staff?.phone || staff?.contactNumber) ? () => Linking.openURL(`tel:${staff.phone || staff.contactNumber}`) : null}
+                            isLink={!!(staff?.phone || staff?.contactNumber)}
+                        />
                         <InfoRow icon={Calendar} label="Date of Birth" value={staff?.dob || 'N/A'} />
                         <InfoRow icon={MapPin} label="Address" value={staff?.address || 'N/A'} isLast />
                     </View>
@@ -115,17 +136,28 @@ export default function StaffDetailScreen() {
     );
 }
 
-const InfoRow = ({ icon: Icon, label, value, isLast }) => (
-    <View style={[styles.infoRow, !isLast && styles.infoRowBorder]}>
-        <View style={styles.infoIcon}>
-            <Icon size={18} color="#6B7280" />
+const InfoRow = ({ icon: Icon, label, value, isLast, onPress, isLink }) => {
+    const content = (
+        <View style={[styles.infoRow, !isLast && styles.infoRowBorder]}>
+            <View style={[styles.infoIcon, isLink && { backgroundColor: '#DBEAFE' }]}>
+                <Icon size={18} color={isLink ? '#3B82F6' : '#6B7280'} />
+            </View>
+            <View style={styles.infoContent}>
+                <Text style={styles.infoLabel}>{label}</Text>
+                <Text style={[styles.infoValue, isLink && { color: '#3B82F6' }]}>{value}</Text>
+            </View>
         </View>
-        <View style={styles.infoContent}>
-            <Text style={styles.infoLabel}>{label}</Text>
-            <Text style={styles.infoValue}>{value}</Text>
-        </View>
-    </View>
-);
+    );
+
+    if (onPress) {
+        return (
+            <TouchableOpacity onPress={onPress} activeOpacity={0.7}>
+                {content}
+            </TouchableOpacity>
+        );
+    }
+    return content;
+};
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#F9FAFB' },

@@ -11,13 +11,29 @@ export default function FeesPendingScreen() {
     const { schoolId } = useLocalSearchParams();
     const [refreshing, setRefreshing] = useState(false);
 
-    const { data, isLoading, refetch } = useQuery({
-        queryKey: ['director-fees-pending', schoolId],
+    // First fetch academic years to get the active one
+    const { data: academicYears } = useQuery({
+        queryKey: ['academic-years', schoolId],
         queryFn: async () => {
-            const res = await api.get(`/schools/${schoolId}/director/fees-pending`);
-            return res.data;
+            const res = await api.get(`/schools/academic-years?schoolId=${schoolId}`);
+            return Array.isArray(res.data) ? res.data : (res.data?.academicYears || []);
         },
         enabled: !!schoolId,
+        staleTime: 1000 * 60 * 10,
+    });
+
+    const academicYearId = academicYears?.find(ay => ay.isActive)?.id;
+
+    // Use the fee dashboard API which has proper data
+    const { data, isLoading, refetch } = useQuery({
+        queryKey: ['fee-dashboard', schoolId, academicYearId],
+        queryFn: async () => {
+            const res = await api.get('/schools/fee/admin/dashboard', {
+                params: { schoolId, academicYearId }
+            });
+            return res.data;
+        },
+        enabled: !!schoolId && !!academicYearId,
         staleTime: 60 * 1000,
     });
 
@@ -30,13 +46,24 @@ export default function FeesPendingScreen() {
     const formatCurrency = (amount) => {
         if (!amount) return '₹0';
         if (amount >= 10000000) return `₹${(amount / 10000000).toFixed(1)}Cr`;
-        if (amount >= 100000) return `₹${(amount / 100000).toFixed(1)}L`;
-        if (amount >= 1000) return `₹${(amount / 1000).toFixed(1)}K`;
-        return `₹${amount}`;
+        return `₹${amount.toLocaleString('en-IN')}`;
     };
 
-    const summary = data?.summary || {};
-    const pendingStudents = data?.students || [];
+    // Map API response
+    const summary = {
+        totalPending: data?.summary?.totalBalance || 0,
+        studentCount: (data?.statusCounts?.unpaid || 0) + (data?.statusCounts?.partial || 0),
+        overdueCount: data?.statusCounts?.overdue || 0
+    };
+    const pendingStudents = (data?.overdueStudents || []).map(s => ({
+        id: s.userId,
+        studentName: s.name || 'Unknown',
+        class: s.class?.className || '-',
+        dueDate: s.overdueInstallments?.[0]?.dueDate || new Date(),
+        pendingAmount: s.balanceAmount || 0,
+        feeType: 'Tuition Fee',
+        isOverdue: true
+    }));
 
     const renderStudent = ({ item }) => (
         <HapticTouchable onPress={() => router.push(`/student/${item.id}/fees`)}>

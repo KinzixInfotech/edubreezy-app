@@ -2283,9 +2283,6 @@ export default function HomeScreen() {
                         </HapticTouchable>
                     </Animated.View>
                 )}
-
-
-
                 <Animated.View entering={FadeInDown.delay(200).duration(600)} style={styles.section}>
                     <Text style={styles.sectionTitle}>Quick Actions</Text>
                     <View style={styles.actionsGrid}>
@@ -2535,14 +2532,24 @@ export default function HomeScreen() {
 
     // === DIRECTOR VIEW ===
     const DirectorView = ({ refreshing, onRefresh, schoolId, userId }) => {
-        // Get active academic year
-        const academicYearId = user_acc?.school?.academicYears?.find(ay => ay.isActive)?.id;
+        // Fetch academic years first (like admin web dashboard)
+        const { data: academicYears, isLoading: isLoadingYears } = useQuery({
+            queryKey: ['academic-years', schoolId],
+            queryFn: async () => {
+                const res = await api.get(`/schools/academic-years?schoolId=${schoolId}`);
+                return Array.isArray(res.data) ? res.data : (res.data?.academicYears || []);
+            },
+            enabled: !!schoolId,
+            staleTime: 1000 * 60 * 10, // Cache for 10 minutes
+        });
+
+        // Get active academic year from fetched data
+        const academicYearId = academicYears?.find(ay => ay.isActive)?.id;
 
         console.log('🎯 DirectorView Debug:', {
             schoolId,
             academicYearId,
-            hasSchool: !!user_acc?.school,
-            academicYears: user_acc?.school?.academicYears,
+            academicYears,
             queryEnabled: !!schoolId
         });
 
@@ -2550,7 +2557,7 @@ export default function HomeScreen() {
         const { data: apiStats, isLoading, error } = useQuery({
             queryKey: QUERY_KEYS.dashboardOverview(schoolId, academicYearId),
             queryFn: async () => {
-                console.log('📡 Fetching dashboard data...');
+                console.log('📡 Fetching dashboard data with academicYearId:', academicYearId);
                 const res = await api.get(
                     `/schools/${schoolId}/dashboard/overview`,
                     { params: { academicYearId: academicYearId || undefined } }
@@ -2562,15 +2569,28 @@ export default function HomeScreen() {
             cacheTime: 5 * 60 * 1000, // 5 minutes
             refetchOnWindowFocus: true,
             refetchInterval: 2 * 60 * 1000, // Background refetch every 2min
-            enabled: !!schoolId, // Only require schoolId
+            enabled: !!schoolId && !!academicYearId, // Wait for academicYearId
             onError: (err) => {
                 console.error('❌ Dashboard API error:', err);
             }
         });
+        // Fetch detailed fee dashboard data
+        const { data: feeStats } = useQuery({
+            queryKey: ['fee-dashboard', schoolId, academicYearId],
+            queryFn: async () => {
+                const res = await api.get('/schools/fee/admin/dashboard', {
+                    params: { schoolId, academicYearId }
+                });
+                return res.data;
+            },
+            enabled: !!schoolId && !!academicYearId,
+            staleTime: 60 * 1000,
+        });
 
-        console.log('📊 Query State:', { isLoading, hasData: !!apiStats, error, statsLength: apiStats ? 'has data' : 'no data' });
+        // Combined loading state for both academic years and dashboard data
+        const isFetching = isLoadingYears || isLoading || (!academicYearId && !!schoolId);
 
-        // Smart currency formatter
+        // Smart currency formatter (abbreviated for small cards)
         const formatCurrency = (amount) => {
             if (amount === 0) return '₹0';
             if (amount < 1000) return `₹${amount}`;
@@ -2579,48 +2599,55 @@ export default function HomeScreen() {
             return `₹${(amount / 10000000).toFixed(1)}Cr`; // Crores
         };
 
+        // Exact currency formatter for fees (shows full amount up to lakhs, then abbreviates)
+        const formatExactCurrency = (amount) => {
+            if (amount === 0 || !amount) return '₹0';
+            if (amount >= 10000000) return `₹${(amount / 10000000).toFixed(1)}Cr`; // 1 Crore+
+            return `₹${amount.toLocaleString('en-IN')}`; // Show exact: ₹7,44,000
+        };
+
         // Map API data to dashboard cards
         const dashboardStats = apiStats ? [
             {
-                label: 'Total Students',
-                value: apiStats.students.total.toString(),
-                subtext: `${apiStats.students.present} present today`,
-                icon: Users,
-                color: '#3B82F6',
-                bgColor: '#EFF6FF',
-                href: '/director/students'
-            },
-            {
-                label: 'Total Teachers',
-                value: apiStats.teachers.total.toString(),
-                subtext: `${apiStats.teachers.onLeave} on leave`,
-                icon: User,
-                color: '#10B981',
-                bgColor: '#F0FDF4',
-                href: '/director/teachers'
-            },
-            {
-                label: 'Present Today',
-                value: apiStats.attendance.present.toString(),
-                subtext: `${apiStats.attendance.percentage}% attendance`,
+                label: 'Students Present',
+                value: apiStats.students.present.toString(),
+                subtext: `of ${apiStats.students.total} • ${apiStats.attendance.percentage}%`,
                 icon: UserCheck,
-                color: '#8B5CF6',
-                bgColor: '#F5F3FF',
+                color: '#10B981',
+                bgColor: '#D1FAE5',
                 href: '/attendance/view'
             },
             {
+                label: 'Staff Present',
+                value: apiStats.teachers.present.toString(),
+                subtext: `of ${apiStats.teachers.total} total staff`,
+                icon: User,
+                color: '#8B5CF6',
+                bgColor: '#F5F3FF',
+                href: '/director/teachers'
+            },
+            {
+                label: 'Fees Expected',
+                value: formatExactCurrency(feeStats?.summary?.totalExpected || 0),
+                subtext: `${feeStats?.summary?.collectionPercentage || 0}% collected`,
+                icon: DollarSign,
+                color: '#10B981',
+                bgColor: '#D1FAE5',
+                href: '/director/fees-collected'
+            },
+            {
                 label: 'Fees Collected',
-                value: formatCurrency(apiStats.fees.collected),
-                subtext: 'This month',
+                value: formatExactCurrency(feeStats?.summary?.totalCollected || apiStats.fees.collected),
+                subtext: 'This year',
                 icon: DollarSign,
                 color: '#F59E0B',
                 bgColor: '#FFFBEB',
                 href: '/director/fees-collected'
             },
             {
-                label: 'Fees Pending',
-                value: formatCurrency(apiStats.fees.pending),
-                subtext: `${apiStats.fees.pendingCount} students`,
+                label: 'Fees Due',
+                value: formatExactCurrency(feeStats?.summary?.totalBalance || 0),
+                subtext: `${feeStats?.statusCounts?.unpaid || 0} unpaid students`,
                 icon: Wallet,
                 color: '#EF4444',
                 bgColor: '#FEF2F2',
@@ -2704,7 +2731,7 @@ export default function HomeScreen() {
                 <View style={styles.dashboardSection}>
                     <Text style={styles.dashboardSectionTitle}>Dashboard Overview</Text>
                     <View style={styles.statsCardGrid}>
-                        {isLoading ? (
+                        {isFetching ? (
                             // Loading skeleton
                             [...Array(9)].map((_, index) => (
                                 <View key={`skeleton-${index}`} style={[styles.statDataCard, { backgroundColor: '#F3F4F6' }]}>
@@ -2748,8 +2775,19 @@ export default function HomeScreen() {
 
     // === PRINCIPAL VIEW ===
     const PrincipalView = ({ refreshing, onRefresh, schoolId, userId }) => {
-        // Get active academic year
-        const academicYearId = user_acc?.school?.academicYears?.find(ay => ay.isActive)?.id;
+        // Fetch academic years first (like admin web dashboard)
+        const { data: academicYears, isLoading: isLoadingYears } = useQuery({
+            queryKey: ['academic-years', schoolId],
+            queryFn: async () => {
+                const res = await api.get(`/schools/academic-years?schoolId=${schoolId}`);
+                return Array.isArray(res.data) ? res.data : (res.data?.academicYears || []);
+            },
+            enabled: !!schoolId,
+            staleTime: 1000 * 60 * 10, // Cache for 10 minutes
+        });
+
+        // Get active academic year from fetched data
+        const academicYearId = academicYears?.find(ay => ay.isActive)?.id;
 
         // Fetch dashboard stats with TanStack Query
         const { data: apiStats, isLoading, error } = useQuery({
@@ -2765,8 +2803,11 @@ export default function HomeScreen() {
             cacheTime: 5 * 60 * 1000,
             refetchOnWindowFocus: true,
             refetchInterval: 2 * 60 * 1000,
-            enabled: !!schoolId, // Only require schoolId
+            enabled: !!schoolId && !!academicYearId, // Wait for academicYearId
         });
+
+        // Combined loading state for both academic years and dashboard data
+        const isFetching = isLoadingYears || isLoading || (!academicYearId && !!schoolId);
 
         // Smart currency formatter
         const formatCurrency = (amount) => {
@@ -2780,36 +2821,27 @@ export default function HomeScreen() {
         // Map API data to dashboard cards (Principal-specific view)
         const dashboardStats = apiStats ? [
             {
-                label: 'Total Students',
-                value: apiStats.students.total.toString(),
-                subtext: `${apiStats.students.present} present today`,
-                icon: Users,
-                color: '#3B82F6',
-                bgColor: '#EFF6FF',
-                href: '/director/students'
-            },
-            {
-                label: 'Total Teachers',
-                value: apiStats.teachers.total.toString(),
-                subtext: `${apiStats.teachers.onLeave} on leave`,
-                icon: User,
-                color: '#10B981',
-                bgColor: '#F0FDF4',
-                href: '/director/teachers'
-            },
-            {
-                label: 'Present Today',
-                value: apiStats.attendance.present.toString(),
-                subtext: `${apiStats.attendance.percentage}% attendance`,
+                label: 'Students Present',
+                value: apiStats.students.present.toString(),
+                subtext: `of ${apiStats.students.total} • ${apiStats.attendance.percentage}%`,
                 icon: UserCheck,
-                color: '#8B5CF6',
-                bgColor: '#F5F3FF',
+                color: '#10B981',
+                bgColor: '#D1FAE5',
                 href: '/attendance/view'
             },
             {
-                label: 'Absent Today',
+                label: 'Staff Present',
+                value: apiStats.teachers.present.toString(),
+                subtext: `of ${apiStats.teachers.total} total staff`,
+                icon: User,
+                color: '#8B5CF6',
+                bgColor: '#F5F3FF',
+                href: '/director/teachers'
+            },
+            {
+                label: 'Students Absent',
                 value: apiStats.students.absent.toString(),
-                subtext: `${(100 - apiStats.attendance.percentage).toFixed(1)}% absent`,
+                subtext: `${(100 - apiStats.attendance.percentage).toFixed(1)}% absent rate`,
                 icon: X,
                 color: '#EF4444',
                 bgColor: '#FEF2F2',
@@ -2902,7 +2934,7 @@ export default function HomeScreen() {
                 <View style={styles.dashboardSection}>
                     <Text style={styles.dashboardSectionTitle}>Dashboard Overview</Text>
                     <View style={styles.statsCardGrid}>
-                        {isLoading ? (
+                        {isFetching ? (
                             // Loading skeleton
                             [...Array(9)].map((_, index) => (
                                 <View key={`skeleton-${index}`} style={[styles.statDataCard, { backgroundColor: '#F3F4F6' }]}>

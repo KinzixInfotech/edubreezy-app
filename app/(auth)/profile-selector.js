@@ -44,6 +44,21 @@ export default function ProfileSelectorScreen() {
     const [loading, setLoading] = useState(true);
     const [selectingProfile, setSelectingProfile] = useState(null);
 
+    // Keep token synced with Supabase session
+    useEffect(() => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+            console.log('🔑 Auth state changed:', event);
+            if (session?.access_token) {
+                SecureStore.setItemAsync('token', session.access_token);
+                console.log('✅ Token updated in SecureStore');
+            }
+        });
+
+        return () => {
+            subscription?.unsubscribe();
+        };
+    }, []);
+
     useEffect(() => {
         initializeScreen();
     }, []);

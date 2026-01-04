@@ -13,6 +13,7 @@ import * as Notifications from 'expo-notifications';
 import fcmService from '../services/fcmService';
 import { NotificationProvider, useNotification } from '../contexts/NotificationContext';
 import messaging from '@react-native-firebase/messaging';
+import { supabase } from '../lib/supabase';
 
 const BADGE_KEY = 'noticeBadgeCount';
 
@@ -80,6 +81,24 @@ function RootLayoutContent() {
     }, [isAppActive, isLoaded, setBadgeCount]);
 
     // ========================================================================
+    // KEEP AUTH TOKEN SYNCED WITH SUPABASE SESSION
+    // This runs on every app launch to ensure fresh tokens for API calls
+    // ========================================================================
+    useEffect(() => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+            console.log('🔑 Auth state changed:', event);
+            if (session?.access_token) {
+                await SecureStore.setItemAsync('token', session.access_token);
+                console.log('✅ Token synced to SecureStore');
+            }
+        });
+
+        return () => {
+            subscription?.unsubscribe();
+        };
+    }, []);
+
+    // ========================================================================
     // 1. FCM FOREGROUND LISTENER – REGISTERED EARLY (BEFORE USER INIT)
     // ========================================================================
     useEffect(() => {
@@ -104,13 +123,13 @@ function RootLayoutContent() {
             // Increment badge on every new notice (foreground)
             incrementNoticeBadge();
 
-            // Show global alert for foreground notifications
-            if (remoteMessage.notification) {
-                Alert.alert(
-                    remoteMessage.notification.title || 'New Notification',
-                    remoteMessage.notification.body
-                );
-            }
+            // Commented out: Global alert for foreground notifications (Debug only)
+            // if (remoteMessage.notification) {
+            //     Alert.alert(
+            //         remoteMessage.notification.title || 'New Notification',
+            //         remoteMessage.notification.body
+            //     );
+            // }
 
             if (isAppActiveRef.current) {
                 console.log('New notice from FCM:', remoteMessage.notification?.title);

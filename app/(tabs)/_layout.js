@@ -57,6 +57,24 @@ export default function TabsLayout() {
           showMarkAttendance: false,
           showSettings: true,
         };
+      case 'DIRECTOR':
+        return {
+          showHome: true,
+          showProfile: true,
+          markSelf: false,
+          showNoticeBoard: true,
+          showMarkAttendance: false,
+          showSettings: false,
+        };
+      case 'PRINCIPAL':
+        return {
+          showHome: true,
+          showProfile: true,
+          markSelf: false,
+          showNoticeBoard: true,
+          showMarkAttendance: false,
+          showSettings: false,
+        };
       default:
         return {
           showHome: true,

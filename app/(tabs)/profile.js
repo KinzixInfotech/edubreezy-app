@@ -1,7 +1,7 @@
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Modal, Dimensions, TouchableWithoutFeedback, Animated as RNAnimated, RefreshControl, Linking, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Modal, Dimensions, TouchableWithoutFeedback, Animated as RNAnimated, RefreshControl, Linking, Alert, TextInput, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Settings, Edit, LogOut, Mail, Phone, Calendar, MapPin, Award, BookOpen, School, X, Users, ClipboardList, FileText, Bell, Shield, Clock, Bus, Fuel, Gauge } from 'lucide-react-native';
+import { Settings, Edit, LogOut, Mail, Phone, Calendar, MapPin, Award, BookOpen, School, X, Users, ClipboardList, FileText, Bell, Shield, Clock, Bus, Fuel, Gauge, UserCheck, ClipboardCheck, Megaphone } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../components/HapticTouch';
@@ -27,6 +27,8 @@ const ROLE_COLORS = {
   NON_TEACHING_STAFF: '#64748B',
   LIBRARIAN: '#14B8A6',
   ACCOUNTANT: '#84CC16',
+  DIRECTOR: '#7C3AED',
+  PRINCIPAL: '#DC2626',
 };
 
 // ==================== ROLE-BASED CONFIGURATION ====================
@@ -294,6 +296,64 @@ const PROFILE_CONFIG = {
       { id: 5, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#06b6d4' },
     ],
   },
+
+  DIRECTOR: {
+    fieldMappings: {
+      name: 'name', // Name is on User table, returned at top level
+      email: 'email',
+      phone: 'directorData.department', // Using department as placeholder since contactNumber doesn't exist
+      role: 'role.name',
+      school: 'school.name',
+      profilePicture: 'profilePicture',
+    },
+    allowNameEdit: true, // Directors can edit their name
+    stats: [],
+    contactInfo: [
+      { key: 'email', label: 'Email', icon: Mail, color: '#0469ff', dataPath: 'email' },
+    ],
+    additionalInfo: [
+      { key: 'department', label: 'Department', dataPath: 'directorData.department' },
+      { key: 'joinDate', label: 'Join Date', dataPath: 'directorData.joinDate' },
+    ],
+    menuItems: [
+      { id: 1, label: 'Edit Name', icon: Edit, action: 'editName', color: '#7C3AED' },
+      { id: 2, label: 'Manage Principal', icon: UserCheck, route: '/(screens)/director/manage-principal', color: '#DC2626' },
+      { id: 3, label: 'Broadcast', icon: Megaphone, route: '/(screens)/director/broadcast', color: '#0469ff' },
+      { id: 4, label: 'Approvals', icon: ClipboardCheck, route: '/(screens)/principal/approvals', color: '#8B5CF6' },
+      { id: 5, label: 'School Profile', icon: School, action: 'viewSchoolProfile', color: '#10B981' },
+      { id: 6, label: 'Payroll', icon: FileText, route: '/(screens)/director/payroll', color: '#F59E0B' },
+      { id: 7, label: 'Notifications', icon: Bell, route: '/(tabs)/notifications', color: '#0EA5E9' },
+      { id: 8, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#6B7280' },
+    ],
+  },
+
+  PRINCIPAL: {
+    fieldMappings: {
+      name: 'name', // Name is on User table, returned at top level
+      email: 'email',
+      phone: 'principalData.department', // Using department as placeholder
+      role: 'role.name',
+      school: 'school.name',
+      profilePicture: 'profilePicture',
+    },
+    allowNameEdit: true, // Principals can edit their name
+    stats: [],
+    contactInfo: [
+      { key: 'email', label: 'Email', icon: Mail, color: '#0469ff', dataPath: 'email' },
+    ],
+    additionalInfo: [
+      { key: 'department', label: 'Department', dataPath: 'principalData.department' },
+      { key: 'joinDate', label: 'Join Date', dataPath: 'principalData.joinDate' },
+    ],
+    menuItems: [
+      { id: 1, label: 'Edit Name', icon: Edit, action: 'editName', color: '#DC2626' },
+      { id: 2, label: 'Approvals', icon: ClipboardCheck, route: '/(screens)/principal/approvals', color: '#8B5CF6' },
+      { id: 3, label: 'Broadcast', icon: Megaphone, route: '/(screens)/director/broadcast', color: '#0469ff' },
+      { id: 4, label: 'School Profile', icon: School, action: 'viewSchoolProfile', color: '#10B981' },
+      { id: 5, label: 'Notifications', icon: Bell, route: '/(tabs)/notifications', color: '#f59e0b' },
+      { id: 6, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#6B7280' },
+    ],
+  },
 };
 
 // ==================== HELPER FUNCTIONS ====================
@@ -311,6 +371,9 @@ export default function ProfileScreen() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [fadeAnim] = useState(new RNAnimated.Value(0));
   const [storedUserId, setStoredUserId] = useState(null);
+  const [editNameModalVisible, setEditNameModalVisible] = useState(false);
+  const [editNameValue, setEditNameValue] = useState('');
+  const [savingName, setSavingName] = useState(false);
   const queryClient = useQueryClient();
 
   const getInitials = useCallback((name) => {
@@ -361,7 +424,9 @@ export default function ProfileScreen() {
     initialDataUpdatedAt: 0, // Force refetch even with initialData
   });
 
+
   const user = userData;
+  console.warn(user, 'user here')
   const role = user?.role?.name;
 
   const handleRefresh = async () => {
@@ -378,7 +443,12 @@ export default function ProfileScreen() {
   };
 
   const handleMenuPress = async (item) => {
-    if (item.action === 'viewSchoolProfile') {
+    if (item.action === 'editName') {
+      // Get current name and show modal
+      const currentName = getNestedValue(user, config.fieldMappings.name, '');
+      setEditNameValue(currentName);
+      setEditNameModalVisible(true);
+    } else if (item.action === 'viewSchoolProfile') {
       if (user?.schoolId) {
         // Construct URL - update base URL as per your environment
         const url = `https://school.edubreezy.com/explore/schools/${user.schoolId}?ref=com.kinzix.edubreezy`;
@@ -779,6 +849,78 @@ export default function ProfileScreen() {
                   <View style={styles.userInfoOverlay}>
                     <Text style={styles.overlayName}>{userName}</Text>
                     <Text style={styles.overlayRole}>{userRole}</Text>
+                  </View>
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </Modal>
+
+        {/* Edit Name Modal - Cross platform replacement for Alert.prompt */}
+        <Modal
+          visible={editNameModalVisible}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setEditNameModalVisible(false)}
+        >
+          <TouchableWithoutFeedback onPress={() => setEditNameModalVisible(false)}>
+            <View style={styles.editNameModalOverlay}>
+              <TouchableWithoutFeedback>
+                <View style={styles.editNameModalContent}>
+                  <Text style={styles.editNameModalTitle}>Edit Name</Text>
+                  <Text style={styles.editNameModalSubtitle}>Enter your full name</Text>
+
+                  <TextInput
+                    style={styles.editNameInput}
+                    value={editNameValue}
+                    onChangeText={setEditNameValue}
+                    placeholder="Enter your name"
+                    placeholderTextColor="#9CA3AF"
+                    autoFocus={true}
+                  />
+
+                  <View style={styles.editNameModalButtons}>
+                    <HapticTouchable
+                      onPress={() => setEditNameModalVisible(false)}
+                      style={styles.editNameCancelButton}
+                    >
+                      <Text style={styles.editNameCancelText}>Cancel</Text>
+                    </HapticTouchable>
+
+                    <HapticTouchable
+                      onPress={async () => {
+                        if (!editNameValue || editNameValue.trim().length < 2) {
+                          Alert.alert('Error', 'Please enter a valid name');
+                          return;
+                        }
+                        setSavingName(true);
+                        try {
+                          const updateData = {
+                            id: user.id,
+                            role: role,
+                            updates: { name: editNameValue.trim() }
+                          };
+                          await api.put('/auth/user', updateData);
+                          setEditNameModalVisible(false);
+                          Alert.alert('Success', 'Name updated successfully!');
+                          await refetch();
+                          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                        } catch (error) {
+                          console.error('Error updating name:', error);
+                          Alert.alert('Error', 'Failed to update name. Please try again.');
+                        } finally {
+                          setSavingName(false);
+                        }
+                      }}
+                      style={styles.editNameSaveButton}
+                      disabled={savingName}
+                    >
+                      {savingName ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Text style={styles.editNameSaveText}>Save</Text>
+                      )}
+                    </HapticTouchable>
                   </View>
                 </View>
               </TouchableWithoutFeedback>
@@ -1224,5 +1366,72 @@ const styles = StyleSheet.create({
   },
   fallbackTextTablet: {
     fontSize: 36,
+  },
+  // Edit Name Modal styles
+  editNameModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  editNameModalContent: {
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 24,
+    width: '100%',
+    maxWidth: 340,
+  },
+  editNameModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1F2937',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  editNameModalSubtitle: {
+    fontSize: 14,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  editNameInput: {
+    backgroundColor: '#F9FAFB',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: '#1F2937',
+    marginBottom: 20,
+  },
+  editNameModalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  editNameCancelButton: {
+    flex: 1,
+    backgroundColor: '#F3F4F6',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  editNameCancelText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6B7280',
+  },
+  editNameSaveButton: {
+    flex: 1,
+    backgroundColor: '#007bffff',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  editNameSaveText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
 });

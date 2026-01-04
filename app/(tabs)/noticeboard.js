@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
-  TouchableOpacity,
   Modal,
   ScrollView,
   Dimensions,
@@ -12,7 +11,8 @@ import {
   RefreshControl,
 } from 'react-native';
 import { router } from 'expo-router';
-import { ArrowLeft, BellOff, FileText, X } from 'lucide-react-native';
+import { ArrowLeft, BellOff, FileText, X, Megaphone, Send, Inbox, Image as ImageIcon, Eye } from 'lucide-react-native';
+import { Image } from 'expo-image';
 import Animated, { FadeInDown, FadeIn, FadeOut } from 'react-native-reanimated';
 import HapticTouchable from '../components/HapticTouch';
 import * as SecureStore from 'expo-secure-store';
@@ -21,292 +21,325 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNotification } from '../../contexts/NotificationContext';
 import { useMarkNoticeRead } from '../../hooks/useMarkNoticeRead';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const categories = ['All', 'Unread', 'GENERAL', 'EMERGENCY', 'EXAM', 'HOLIDAY'];
+const BROADCAST_ROLES = ['DIRECTOR', 'PRINCIPAL'];
+
 // Empty State Component
-const EmptyState = () => {
-  return (
-    <Animated.View entering={FadeIn.duration(600)} style={styles.emptyContainer}>
-      <Animated.View
-        entering={FadeInDown.delay(100).duration(600).springify()}
-        style={styles.emptyIconContainer}
-      >
-        <BellOff size={64} color="#0469ff" strokeWidth={1.5} />
-      </Animated.View>
-      <Animated.Text
-        entering={FadeInDown.delay(200).duration(600)}
-        style={styles.emptyTitle}
-      >
-        No Notifications
-      </Animated.Text>
-      <Animated.Text
-        entering={FadeInDown.delay(300).duration(600)}
-        style={styles.emptyMessage}
-      >
-        You're all caught up! {'\n'}
-        Check back later for new updates.
-      </Animated.Text>
-    </Animated.View>
-  );
-};
+const EmptyState = React.memo(({ isSentTab }) => (
+  <View style={styles.emptyStateWrapper}>
+    <View style={styles.emptyIconContainer}>
+      {isSentTab ? (
+        <Send size={56} color="#0469ff" strokeWidth={1.5} />
+      ) : (
+        <BellOff size={56} color="#0469ff" strokeWidth={1.5} />
+      )}
+    </View>
+    <Text style={styles.emptyTitle}>
+      {isSentTab ? 'No Broadcasts Yet' : 'No Notifications'}
+    </Text>
+    <Text style={styles.emptyMessage}>
+      {isSentTab
+        ? 'Tap the + button to send your first broadcast.'
+        : "You're all caught up!\nCheck back later for updates."}
+    </Text>
+  </View>
+));
 
 const NoticeBoardScreen = () => {
-  // ──────────────────────────────────────────────────────
-  // 1. User / school ids
-  // ──────────────────────────────────────────────────────
+  // User state
   const [schoolId, setSchoolId] = useState(null);
   const [userId, setUserId] = useState(null);
+  const [userRole, setUserRole] = useState(null);
+  const [isUserLoaded, setIsUserLoaded] = useState(false);
 
   const { clearNoticeBadge } = useNotification();
   const queryClient = useQueryClient();
-  const markRead = useMarkNoticeRead();          // ← NEW
+  const markRead = useMarkNoticeRead();
 
-  // Clear badge when screen opens
+  const canBroadcast = BROADCAST_ROLES.includes(userRole);
+
+  // Clear badge on mount
   useEffect(() => {
     clearNoticeBadge();
-  }, [clearNoticeBadge]);
+  }, []);
 
-  // Load user from SecureStore (once)
+  // Load user from SecureStore
   useEffect(() => {
-    (async () => {
+    const loadUser = async () => {
       try {
         const raw = await SecureStore.getItemAsync('user');
         if (raw) {
           const cfg = JSON.parse(raw);
           setSchoolId(cfg?.schoolId ?? null);
           setUserId(cfg?.id ?? null);
+          setUserRole(cfg?.role?.name ?? null);
         }
       } catch (e) {
-        console.error(e);
+        console.error('Error loading user:', e);
+      } finally {
+        setIsUserLoaded(true);
       }
-    })();
+    };
+    loadUser();
   }, []);
 
-  // ──────────────────────────────────────────────────────
-  // 2. Category & pagination state
-  // ──────────────────────────────────────────────────────
+  // Tab state
+  const [activeTab, setActiveTab] = useState('received');
   const [selectedCategory, setSelectedCategory] = useState('All');
-  const [page, setPage] = useState(1);
-  const [allNotices, setAllNotices] = useState([]);
-  const [hasMore, setHasMore] = useState(true);
 
-  // ──────────────────────────────────────────────────────
-  // 3. Modal state
-  // ──────────────────────────────────────────────────────
-  const [selectedNotice, setSelectedNotice] = useState(null);
-  const [modalVisible, setModalVisible] = useState(false);
-
-  // ──────────────────────────────────────────────────────
-  // 4. React-Query: fetch notices
-  // ──────────────────────────────────────────────────────
+  // Fetch notices
   const {
-    data,
+    data: notices = [],
     isFetching,
     isLoading,
     refetch,
   } = useQuery({
-    queryKey: ['notices', schoolId, userId, selectedCategory, page],
+    queryKey: ['notices', schoolId, userId, selectedCategory, activeTab],
     queryFn: async () => {
-      if (!schoolId || !userId) return { notices: [], pagination: {} };
+      if (!schoolId || !userId) return [];
+
+      if (activeTab === 'sent' && canBroadcast) {
+        const res = await api.get(`/schools/${schoolId}/broadcast?limit=50`);
+        return (res.data.broadcasts || []).map(b => ({
+          ...b,
+          read: true,
+          isSent: true,
+        }));
+      }
 
       const cat = selectedCategory === 'All' ? '' : `&category=${selectedCategory}`;
       const unread = selectedCategory === 'Unread' ? '&unread=true' : '';
-
       const res = await api.get(
-        `/notices/${schoolId}?userId=${userId}${cat}${unread}&limit=20&page=${page}`
+        `/notices/${schoolId}?userId=${userId}${cat}${unread}&limit=50`
       );
-      return res.data; // { notices: [], pagination: { totalPages, currentPage } }
+      return res.data.notices || [];
     },
-    enabled: !!schoolId && !!userId,
-    staleTime: 1000 * 60, // Cache for 1 minute
-    refetchOnMount: 'always', // Always fetch on mount to ensure fresh data
+    enabled: isUserLoaded && !!schoolId && !!userId,
+    staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
-  // ──────────────────────────────────────────────────────
-  // 5. Merge pages into a single array
-  // ──────────────────────────────────────────────────────
+  // Reset category when tab changes
   useEffect(() => {
-    if (!data?.notices) return;
-
-    if (page === 1) {
-      setAllNotices(data.notices);
-    } else {
-      setAllNotices(prev => [...prev, ...data.notices]);
+    if (activeTab === 'sent') {
+      setSelectedCategory('All');
     }
-    setHasMore((data.pagination?.page ?? 0) < (data.pagination?.totalPages ?? 0));
-  }, [data, page]);
+  }, [activeTab]);
 
-  // ──────────────────────────────────────────────────────
-  // 6. Pull-to-refresh & load-more
-  // ──────────────────────────────────────────────────────
   const onRefresh = useCallback(() => {
-    setPage(1);
     refetch();
   }, [refetch]);
 
-  const loadMore = useCallback(() => {
-    if (!isFetching && hasMore) setPage(p => p + 1);
-  }, [isFetching, hasMore]);
+  // Modal state
+  const [selectedNotice, setSelectedNotice] = useState(null);
+  const [modalVisible, setModalVisible] = useState(false);
 
-  // ──────────────────────────────────────────────────────
-  // 7. Open modal → mark as read (background)
-  // ──────────────────────────────────────────────────────
-  // ────── Open modal & mark read ──────
-  const openNoticeDetail = useCallback(
-    (notice) => {
-      setSelectedNotice(notice);
-      setModalVisible(true);
+  const openNoticeDetail = useCallback((notice) => {
+    setSelectedNotice(notice);
+    setModalVisible(true);
+    if (!notice.read && userId && !notice.isSent) {
+      markRead.mutate({ noticeId: notice.id, userId, schoolId });
+    }
+  }, [userId, markRead, schoolId]);
 
-      // <-- ONLY FIRE WHEN IT IS UNREAD
-      if (!notice.read && userId) {
-        markRead.mutate({ noticeId: notice.id, userId, schoolId });
-      }
-    },
-    [userId, markRead, schoolId]   // <-- include markRead in deps
-  );
-  const closeModal = () => {
+  const closeModal = useCallback(() => {
     setModalVisible(false);
-    setTimeout(() => setSelectedNotice(null), 300);
-  };
+    setSelectedNotice(null);
+  }, []);
 
-  // ──────────────────────────────────────────────────────
-  // 8. Render item
-  // ──────────────────────────────────────────────────────
-  const renderNoticeItem = ({ item, index }) => {
+  const openBroadcastScreen = useCallback(() => {
+    router.push('/(screens)/director/broadcast');
+  }, []);
+
+  // Optimized render item
+  const renderNoticeItem = useCallback(({ item }) => {
     const formatted = item.publishedAt
       ? new Date(item.publishedAt).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'long',
+        month: 'short',
         day: 'numeric',
       })
       : '';
 
-    return (
-      <Animated.View entering={FadeInDown.delay(index * 50).duration(400)}>
-        <HapticTouchable onPress={() => openNoticeDetail(item)}>
-          <View style={styles.noticeItem}>
-            <View style={styles.noticeIconContainer}>
-              <FileText size={22} color="#0469ff" />
-            </View>
-            <View style={styles.noticeContent}>
-              <Text style={styles.noticeDate}>{formatted}</Text>
-              <Text style={styles.noticeTitle}>{item.title}</Text>
-              <Text style={styles.noticeSubtitle}>{item.subtitle}</Text>
-            </View>
-            {!item.read && <View style={styles.unreadDot} />}
-          </View>
-        </HapticTouchable>
-      </Animated.View>
-    );
-  };
+    const hasImage = !!item.fileUrl;
 
-  // ──────────────────────────────────────────────────────
-  // 9. UI
-  // ──────────────────────────────────────────────────────
+    return (
+      <HapticTouchable onPress={() => openNoticeDetail(item)}>
+        <View style={[styles.noticeItem, item.isSent && styles.sentNoticeItem]}>
+          {/* Image Preview if exists */}
+          {hasImage && (
+            <Image
+              source={{ uri: item.fileUrl }}
+              style={styles.noticeThumb}
+              contentFit="cover"
+            />
+          )}
+          {/* Icon if no image */}
+          {!hasImage && (
+            <View style={[styles.noticeIconContainer, item.isSent && styles.sentIconContainer]}>
+              {item.isSent ? <Send size={20} color="#10B981" /> : <FileText size={20} color="#0469ff" />}
+            </View>
+          )}
+          <View style={styles.noticeContent}>
+            <View style={styles.noticeHeaderRow}>
+              <Text style={styles.noticeDate}>{formatted}</Text>
+              {item.isSent && (
+                <View style={styles.viewCountContainer}>
+                  <Eye size={12} color="#6B7280" />
+                  <Text style={styles.viewCountText}>{item.viewCount || 0}</Text>
+                </View>
+              )}
+            </View>
+            <Text style={styles.noticeTitle} numberOfLines={1}>{item.title}</Text>
+            <Text style={styles.noticeSubtitle} numberOfLines={1}>
+              {item.subtitle || item.description?.substring(0, 50)}
+            </Text>
+          </View>
+          {!item.read && !item.isSent && <View style={styles.unreadDot} />}
+        </View>
+      </HapticTouchable>
+    );
+  }, [openNoticeDetail]);
+
+  const keyExtractor = useCallback((item) => item.id, []);
+
+  // Show loading only on initial load
+  const showInitialLoader = !isUserLoaded || (isLoading && notices.length === 0);
+
   return (
     <View style={styles.container}>
       {/* Header */}
-      <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
-        <HapticTouchable onPress={() => router.back()} style={styles.backButton}>
+      <View style={styles.header}>
+        <HapticTouchable onPress={() => router.back()}>
           <ArrowLeft size={24} color="#111" />
         </HapticTouchable>
         <Text style={styles.headerTitle}>Notice Board</Text>
-      </Animated.View>
+      </View>
 
-      {/* Category Pills */}
-      <Animated.View entering={FadeInDown.delay(100).duration(400)}>
+      {/* Tabs for Director/Principal */}
+      {canBroadcast && (
+        <View style={styles.tabContainer}>
+          <HapticTouchable
+            style={[styles.tab, activeTab === 'received' && styles.activeTab]}
+            onPress={() => setActiveTab('received')}
+          >
+            <Inbox size={16} color={activeTab === 'received' ? '#0469ff' : '#9CA3AF'} />
+            <Text style={[styles.tabText, activeTab === 'received' && styles.activeTabText]}>
+              Received
+            </Text>
+          </HapticTouchable>
+          <HapticTouchable
+            style={[styles.tab, activeTab === 'sent' && styles.activeTab]}
+            onPress={() => setActiveTab('sent')}
+          >
+            <Send size={16} color={activeTab === 'sent' ? '#0469ff' : '#9CA3AF'} />
+            <Text style={[styles.tabText, activeTab === 'sent' && styles.activeTabText]}>
+              Sent
+            </Text>
+          </HapticTouchable>
+        </View>
+      )}
+
+      {/* Category Pills (only for received tab) */}
+      {activeTab === 'received' && (
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           style={styles.categoryContainer}
           contentContainerStyle={styles.categoryContent}
         >
-          {categories.map((cat, i) => (
+          {categories.map((cat) => (
             <HapticTouchable
               key={cat}
-              onPress={() => {
-                setSelectedCategory(cat);
-                setPage(1);               // reset pagination when category changes
-                queryClient.invalidateQueries({ queryKey: ['notices'] });
-              }}
+              onPress={() => setSelectedCategory(cat)}
             >
-              <Animated.View
-                entering={FadeInDown.delay(150 + i * 50).duration(400)}
-                style={[
-                  styles.categoryPill,
-                  selectedCategory === cat && styles.categoryPillActive,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.categoryText,
-                    selectedCategory === cat && styles.categoryTextActive,
-                  ]}
-                >
+              <View style={[styles.categoryPill, selectedCategory === cat && styles.categoryPillActive]}>
+                <Text style={[styles.categoryText, selectedCategory === cat && styles.categoryTextActive]}>
                   {cat}
                 </Text>
-              </Animated.View>
+              </View>
             </HapticTouchable>
           ))}
         </ScrollView>
-      </Animated.View>
+      )}
 
-      {/* Loading / List */}
-      {(!schoolId || !userId || (isLoading && page === 1)) ? (
-        <View style={styles.loadingContainer}>
+      {/* Content */}
+      {showInitialLoader ? (
+        <View style={styles.centeredContainer}>
           <ActivityIndicator size="large" color="#0469ff" />
         </View>
       ) : (
         <FlatList
-          data={allNotices}
+          data={notices}
           renderItem={renderNoticeItem}
-          keyExtractor={item => item.id}
+          keyExtractor={keyExtractor}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.listContent}
-          refreshControl={<RefreshControl refreshing={isFetching && page === 1} onRefresh={onRefresh} />}
-          onEndReached={loadMore}
-          onEndReachedThreshold={0.3}
-          ListFooterComponent={
-            isFetching && page > 1 ? (
-              <View style={{ paddingVertical: 20 }}>
-                <ActivityIndicator size="small" color="#0469ff" />
-              </View>
-            ) : null
+          contentContainerStyle={[
+            styles.listContent,
+            notices.length === 0 && styles.emptyListContent,
+          ]}
+          refreshControl={
+            <RefreshControl
+              refreshing={isFetching}
+              onRefresh={onRefresh}
+              tintColor="#0469ff"
+            />
           }
-          ListEmptyComponent={
-            <EmptyState />
-
-          }
+          ListEmptyComponent={<EmptyState isSentTab={activeTab === 'sent'} />}
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          initialNumToRender={10}
         />
       )}
 
-      {/* ──────────────────────── Modal ──────────────────────── */}
+      {/* FAB */}
+      {canBroadcast && (
+        <HapticTouchable onPress={openBroadcastScreen} style={styles.fab}>
+          <Megaphone size={24} color="#fff" />
+        </HapticTouchable>
+      )}
+
+      {/* Modal */}
       <Modal
         visible={modalVisible}
         transparent
-        animationType="fade"
+        animationType="slide"
         onRequestClose={closeModal}
-        statusBarTranslucent
       >
         <View style={styles.modalOverlay}>
-          <Animated.View entering={FadeIn.duration(300)} exiting={FadeOut.duration(300)} style={styles.modalContent}>
-            {/* Header */}
+          <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalHeaderTitle}>Notice Details</Text>
+              <Text style={styles.modalHeaderTitle}>
+                {selectedNotice?.isSent ? 'Broadcast Details' : 'Notice Details'}
+              </Text>
               <HapticTouchable onPress={closeModal}>
-                <View style={styles.closeButton}>
-                  <X size={24} color="#111" />
-                </View>
+                <X size={24} color="#111" />
               </HapticTouchable>
             </View>
 
             <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
               {selectedNotice && (
                 <>
+                  {/* Image Display */}
+                  {selectedNotice.fileUrl && (
+                    <View style={styles.modalImageContainer}>
+                      <Image
+                        source={{ uri: selectedNotice.fileUrl }}
+                        style={styles.modalImage}
+                        contentFit="cover"
+                      />
+                    </View>
+                  )}
+
                   {/* Issued By */}
                   <View style={styles.issuedBySection}>
-                    <Text style={styles.issuedByLabel}>Issued by: {selectedNotice.issuedBy}</Text>
+                    <Text style={styles.issuedByLabel}>
+                      {selectedNotice.isSent ? 'Sent by: ' : 'Issued by: '}
+                      {selectedNotice.issuedBy || 'You'}
+                    </Text>
                     <Text style={styles.issuedByRole}>{selectedNotice.issuerRole}</Text>
                   </View>
 
@@ -340,32 +373,24 @@ const NoticeBoardScreen = () => {
 
                   {/* Expiry */}
                   {selectedNotice.expiryDate && (
-                    <View style={styles.datesSection}>
-                      <Text style={styles.datesSectionTitle}>Expiry Date</Text>
-                      <Text style={styles.dateValue}>
-                        {new Date(selectedNotice.expiryDate).toLocaleDateString('en-US', {
-                          year: 'numeric',
-                          month: 'long',
+                    <View style={styles.expiryBadge}>
+                      <Text style={styles.expiryText}>
+                        Expires: {new Date(selectedNotice.expiryDate).toLocaleDateString('en-US', {
+                          month: 'short',
                           day: 'numeric',
+                          year: 'numeric',
                         })}
                       </Text>
                     </View>
                   )}
 
-                  {/* Action Buttons */}
-                  <View style={styles.actionButtons}>
-                    {/* You can keep "Mark as Read" if you want a manual button */}
-                    {/* <HapticTouchable ...>Mark As Read</HapticTouchable> */}
-                    <HapticTouchable onPress={closeModal} style={styles.actionButtonSecondary}>
-                      <View style={styles.actionButtonSecondaryInner}>
-                        <Text style={styles.actionButtonSecondaryText}>Close</Text>
-                      </View>
-                    </HapticTouchable>
-                  </View>
+                  <HapticTouchable onPress={closeModal} style={styles.closeBtn}>
+                    <Text style={styles.closeBtnText}>Close</Text>
+                  </HapticTouchable>
                 </>
               )}
             </ScrollView>
-          </Animated.View>
+          </View>
         </View>
       </Modal>
     </View>
@@ -385,30 +410,56 @@ const styles = StyleSheet.create({
     paddingTop: 50,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
-    backgroundColor: '#fff',
-    gap: 20,
-  },
-  backButton: {
-    // padding: 4,
+    gap: 16,
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#111',
   },
-  categoryContainer: {
+  tabContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 10,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
+  tab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#F9FAFB',
+  },
+  activeTab: {
+    backgroundColor: '#E8F4FF',
+  },
+  tabText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#9CA3AF',
+  },
+  activeTabText: {
+    color: '#0469ff',
+  },
+  categoryContainer: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    maxHeight: 56,
+  },
   categoryContent: {
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 12,
     gap: 8,
   },
   categoryPill: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 18,
     backgroundColor: '#f5f5f5',
     marginRight: 8,
   },
@@ -416,64 +467,98 @@ const styles = StyleSheet.create({
     backgroundColor: '#0469ff',
   },
   categoryText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '500',
     color: '#666',
   },
   categoryTextActive: {
     color: '#fff',
   },
-  loadingContainer: {
+  centeredContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: 60,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: '#999',
-    marginTop: 12,
   },
   listContent: {
     padding: 16,
+    paddingBottom: 100,
+  },
+  emptyListContent: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  emptyStateWrapper: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 40,
+  },
+  emptyIconContainer: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#f0f8ff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#111',
+    marginBottom: 8,
+  },
+  emptyMessage: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 20,
   },
   noticeItem: {
     flexDirection: 'row',
     backgroundColor: '#f9fafb',
     borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    padding: 12,
+    marginBottom: 10,
     gap: 12,
+    alignItems: 'center',
+  },
+  sentNoticeItem: {
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#D1FAE5',
+  },
+  noticeThumb: {
+    width: 50,
+    height: 50,
+    borderRadius: 10,
   },
   noticeIconContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: '#E8F4FF',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  sentIconContainer: {
+    backgroundColor: '#D1FAE5',
   },
   noticeContent: {
     flex: 1,
   },
   noticeDate: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#999',
-    marginBottom: 4,
+    marginBottom: 3,
   },
   noticeTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
     color: '#111',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   noticeSubtitle: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#666',
   },
   unreadDot: {
@@ -481,9 +566,23 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     backgroundColor: '#0469ff',
-    alignSelf: 'center',
   },
-  // Modal Styles
+  fab: {
+    position: 'absolute',
+    bottom: 30,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#0469ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#0469ff',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
@@ -505,136 +604,126 @@ const styles = StyleSheet.create({
     borderBottomColor: '#f0f0f0',
   },
   modalHeaderTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '600',
     color: '#111',
-  },
-  closeButton: {
-    padding: 4,
   },
   modalBody: {
     paddingHorizontal: 20,
   },
+  modalImageContainer: {
+    marginTop: 16,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  modalImage: {
+    width: '100%',
+    height: 200,
+    borderRadius: 12,
+  },
   issuedBySection: {
-    paddingVertical: 16,
+    paddingVertical: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
   issuedByLabel: {
     fontSize: 14,
     color: '#666',
-    marginBottom: 4,
   },
   issuedByRole: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#999',
+    marginTop: 2,
   },
   contentSection: {
-    paddingVertical: 20,
+    paddingVertical: 16,
   },
   contentTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     color: '#111',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   contentDate: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#999',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   contentBody: {
-    fontSize: 15,
+    fontSize: 14,
     color: '#333',
-    lineHeight: 24,
+    lineHeight: 22,
   },
   datesSection: {
     backgroundColor: '#f9fafb',
     borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
+    padding: 14,
+    marginBottom: 12,
   },
   datesSectionTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: '#111',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   dateRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 8,
+    paddingVertical: 6,
   },
   dateLabel: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#666',
   },
   dateValue: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '500',
     color: '#111',
   },
-  actionButtons: {
-    gap: 12,
-    paddingBottom: 30,
+  expiryBadge: {
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginBottom: 16,
+    alignSelf: 'flex-start',
   },
-  actionButtonPrimary: {
-    width: '100%',
-  },
-  actionButtonPrimaryInner: {
-    backgroundColor: '#0469ff',
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  actionButtonPrimaryText: {
-    fontSize: 16,
+  expiryText: {
+    fontSize: 12,
     fontWeight: '600',
-    color: '#fff',
+    color: '#D97706',
   },
-  actionButtonSecondary: {
-    width: '100%',
-  },
-  actionButtonSecondaryInner: {
+  closeBtn: {
     backgroundColor: '#f5f5f5',
     borderRadius: 12,
-    paddingVertical: 16,
+    paddingVertical: 14,
     alignItems: 'center',
+    marginBottom: 30,
   },
-  actionButtonSecondaryText: {
-    fontSize: 16,
+  closeBtnText: {
+    fontSize: 15,
     fontWeight: '600',
     color: '#666',
   },
-  // / Empty State Styles
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
+  noticeHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-
-    paddingHorizontal: 40,
-    paddingBottom: 100,
+    marginBottom: 4,
   },
-  emptyIconContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: '#f0f8ff',
-    justifyContent: 'center',
+  viewCountContainer: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+    gap: 4,
   },
-  emptyTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#111',
-    marginBottom: 12,
-  },
-  emptyMessage: {
-    fontSize: 15,
-    color: '#666',
-    textAlign: 'center',
-    lineHeight: 22,
+  viewCountText: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: '#4B5563',
   },
 });
 

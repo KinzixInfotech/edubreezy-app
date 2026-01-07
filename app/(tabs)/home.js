@@ -7,7 +7,16 @@ import {
     Calendar, Bell, X, CheckCircle, AlertCircle, Building, MapPin,
     RefreshCcw,
     Settings,
-    CheckCircle2
+    CheckCircle2,
+    TrendingUp,
+    ScrollText,
+    Book,
+    FileText,
+    Award,
+    TimerIcon,
+    Plus,
+    ArrowRight,
+    PartyPopperIcon
 } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
@@ -1958,6 +1967,7 @@ export default function HomeScreen() {
         );
     };
 
+
     // === DRIVER VIEW ===
     const DriverView = ({ refreshing, onRefresh, schoolId, userId, prefetchedStaffData, prefetchedTripsData }) => {
         console.log('🚀 DriverView - using prefetched data');
@@ -2813,6 +2823,7 @@ export default function HomeScreen() {
             </ScrollView>
         );
     };
+
 
     // === PRINCIPAL VIEW ===
     const PrincipalView = ({ refreshing, onRefresh, schoolId, userId }) => {

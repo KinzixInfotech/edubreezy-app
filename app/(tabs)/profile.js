@@ -11,6 +11,7 @@ import Animated, { FadeInDown, FadeInUp, FadeInRight } from 'react-native-reanim
 import * as Haptics from 'expo-haptics';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../../lib/api';
+import { getCurrentSchool } from '../../lib/profileManager';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const isSmallDevice = SCREEN_WIDTH < 375;
@@ -69,7 +70,6 @@ const PROFILE_CONFIG = {
       { id: 4, label: 'Homework', icon: ClipboardList, route: '/homework/view', color: '#8b5cf6' },
       { id: 5, label: 'My Timetable', icon: Calendar, route: '/student/timetable', color: '#06b6d4' },
       { id: 6, label: 'Certificates', icon: FileText, route: '/student/certificates', color: '#ec4899' },
-      { id: 7, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#64748b' },
     ],
   },
 
@@ -117,7 +117,6 @@ const PROFILE_CONFIG = {
       { id: 3, label: 'Assign Homework', icon: BookOpen, route: '/homework/assign', color: '#f59e0b' },
       { id: 4, label: 'My Timetable', icon: Calendar, route: '/teachers/timetable', color: '#8b5cf6' },
       { id: 5, label: 'Announcements', icon: Bell, route: '/announcements', color: '#ec4899' },
-      { id: 6, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#06b6d4' },
     ],
   },
 
@@ -161,7 +160,6 @@ const PROFILE_CONFIG = {
       { id: 1, label: 'View Children', icon: Users, route: '/(tabs)/home', color: '#ec4899' },
       { id: 2, label: 'School Profile', icon: School, action: 'viewSchoolProfile', color: '#8b5cf6' },
       { id: 3, label: 'Notifications', icon: Bell, route: '/(tabs)/notifications', color: '#f59e0b' },
-      { id: 4, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#06b6d4' },
     ],
   },
 
@@ -216,10 +214,10 @@ const PROFILE_CONFIG = {
     menuItems: [
       { id: 1, label: 'User Management', icon: Users, route: '/user-management', color: '#0469ff' },
       { id: 2, label: 'School Analytics', icon: Award, route: '/analytics', color: '#10b981' },
-      { id: 3, label: 'System Settings', icon: Settings, route: '/system-settings', color: '#f59e0b' },
+
       { id: 4, label: 'Announcements', icon: Bell, route: '/admin-announcements', color: '#8b5cf6' },
       { id: 5, label: 'Reports', icon: FileText, route: '/reports', color: '#ec4899' },
-      { id: 6, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#06b6d4' },
+
       { id: 7, label: 'Edit Profile', icon: Edit, route: '/edit-profile', color: '#ef4444' },
     ],
   },
@@ -258,7 +256,6 @@ const PROFILE_CONFIG = {
       { id: 2, label: 'My Vehicle', icon: Bus, route: '/(screens)/transport/my-vehicle', color: '#10b981' },
       { id: 3, label: 'My Route', icon: MapPin, route: '/(screens)/transport/my-route', color: '#f59e0b' },
       { id: 4, label: 'Notifications', icon: Bell, route: '/(tabs)/notifications', color: '#8b5cf6' },
-      { id: 5, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#06b6d4' },
     ],
   },
 
@@ -293,7 +290,6 @@ const PROFILE_CONFIG = {
       { id: 2, label: 'My Vehicle', icon: Bus, route: '/(screens)/transport/my-vehicle', color: '#10b981' },
       { id: 3, label: 'My Route', icon: MapPin, route: '/(screens)/transport/my-route', color: '#f59e0b' },
       { id: 4, label: 'Notifications', icon: Bell, route: '/(tabs)/notifications', color: '#8b5cf6' },
-      { id: 5, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#06b6d4' },
     ],
   },
 
@@ -323,7 +319,6 @@ const PROFILE_CONFIG = {
       { id: 5, label: 'School Profile', icon: School, action: 'viewSchoolProfile', color: '#10B981' },
       { id: 6, label: 'Payroll', icon: FileText, route: '/(screens)/director/payroll', color: '#F59E0B' },
       { id: 7, label: 'Notifications', icon: Bell, route: '/(tabs)/notifications', color: '#0EA5E9' },
-      { id: 8, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#6B7280' },
     ],
   },
 
@@ -351,7 +346,6 @@ const PROFILE_CONFIG = {
       { id: 3, label: 'Broadcast', icon: Megaphone, route: '/(screens)/director/broadcast', color: '#0469ff' },
       { id: 4, label: 'School Profile', icon: School, action: 'viewSchoolProfile', color: '#10B981' },
       { id: 5, label: 'Notifications', icon: Bell, route: '/(tabs)/notifications', color: '#f59e0b' },
-      { id: 6, label: 'Settings', icon: Settings, route: '/(tabs)/settings', color: '#6B7280' },
     ],
   },
 };
@@ -471,17 +465,48 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleLogout = async () => {
+  const handleLogout = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-    setIsLoggingOut(true);
+    Alert.alert('Logout', 'Are you sure you want to logout?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Logout',
+        style: 'destructive',
+        onPress: async () => {
+          setIsLoggingOut(true);
+          // Simulate delay for better UX
+          setTimeout(async () => {
+            try {
+              // Clear user data
+              await SecureStore.deleteItemAsync('user');
+              await SecureStore.deleteItemAsync('userRole');
+              await SecureStore.deleteItemAsync('token');
 
-    // Simulate logging out process
-    setTimeout(async () => {
-      await SecureStore.deleteItemAsync('user');
-      await SecureStore.deleteItemAsync('userRole');
-      // Redirect to school code instead of login to show profile selector
-      router.replace('/(auth)/schoolcode');
-    }, 2000);
+              // Get saved school data to redirect to profile-selector
+              const currentSchool = await getCurrentSchool();
+
+              if (currentSchool?.schoolCode && currentSchool?.schoolData) {
+                // Redirect to profile-selector with school data
+                router.replace({
+                  pathname: '/(auth)/profile-selector',
+                  params: {
+                    schoolCode: currentSchool.schoolCode,
+                    schoolData: JSON.stringify(currentSchool.schoolData),
+                  },
+                });
+              } else {
+                // Fallback to schoolcode if no saved school data
+                router.replace('/(auth)/schoolcode');
+              }
+            } catch (error) {
+              console.log('Logout error:', error);
+              setIsLoggingOut(false);
+              Alert.alert('Error', 'Failed to logout. Please try again.');
+            }
+          }, 1500);
+        },
+      },
+    ]);
   };
 
   const openImageViewer = () => {
@@ -509,7 +534,6 @@ export default function ProfileScreen() {
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.loaderContainer}>
           <ActivityIndicator size="large" color="#0469ff" />
-          <Text style={{ marginTop: 12, color: '#666', fontSize: 14 }}>Fetching your data...</Text>
         </View>
       </SafeAreaView>
     );
@@ -808,6 +832,23 @@ export default function ProfileScreen() {
                   </HapticTouchable>
                 </Animated.View>
               ))}
+            </View>
+          </Animated.View>
+
+          {/* Logout Section */}
+          <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
+            <View style={styles.menuContainer}>
+              <HapticTouchable onPress={handleLogout}>
+                <View style={[styles.menuItem, styles.lastMenuItem]}>
+                  <View style={[styles.menuIconContainer, { backgroundColor: '#ff444415' }]}>
+                    <LogOut size={20} color="#ff4444" />
+                  </View>
+                  <Text style={[styles.menuText, { color: '#ff4444' }]}>Logout</Text>
+                  <View style={styles.menuArrow}>
+                    <Text style={[styles.arrowText, { color: '#ff4444' }]}>›</Text>
+                  </View>
+                </View>
+              </HapticTouchable>
             </View>
           </Animated.View>
 

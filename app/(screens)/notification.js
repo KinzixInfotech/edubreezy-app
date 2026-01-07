@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
     View,
     Text,
@@ -120,6 +120,19 @@ export default function NotificationScreen() {
         mutationFn: () => api.put('/notifications', { markAllAsRead: true, userId }),
         onSuccess: () => queryClient.invalidateQueries(['notifications'])
     });
+
+    // Auto-mark all as read when screen opens and invalidate home badge
+    useEffect(() => {
+        if (userId && data?.unreadCount > 0) {
+            // Mark all as read
+            api.put('/notifications', { markAllAsRead: true, userId })
+                .then(() => {
+                    // Invalidate queries to update badge on home screen
+                    queryClient.invalidateQueries(['notifications']);
+                })
+                .catch(err => console.error('Failed to mark all as read:', err));
+        }
+    }, [userId, data?.unreadCount]);
 
     const handlePress = (item) => {
         if (!item.isRead) {

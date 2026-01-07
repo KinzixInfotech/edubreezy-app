@@ -119,7 +119,23 @@ export default function HomeScreen() {
         staleTime: 1000 * 60, // Cache for 1 minute
         refetchInterval: 1000 * 60 * 2, // Auto-refresh every 2 minutes
     });
-    const unreadCount = notificationData?.unreadCount || 0;
+
+    // Filter out self-sent notifications and calculate unread count
+    const filterSentByMe = (notifications) => {
+        if (!notifications || !userId) return notifications || [];
+        return notifications.filter(n => n.sender?.id !== userId);
+    };
+
+    // Calculate filtered unread count (exclude notifications sent by current user)
+    const unreadCount = useMemo(() => {
+        if (!notificationData?.notifications) return 0;
+        const allFiltered = [
+            ...filterSentByMe(notificationData.notifications.today || []),
+            ...filterSentByMe(notificationData.notifications.yesterday || []),
+            ...filterSentByMe(notificationData.notifications.earlier || []),
+        ];
+        return allFiltered.filter(n => !n.isRead).length;
+    }, [notificationData, userId]);
 
     useEffect(() => {
         loadUser();

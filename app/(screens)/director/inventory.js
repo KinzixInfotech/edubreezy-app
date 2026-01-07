@@ -43,6 +43,9 @@ export default function InventoryScreen() {
             <View style={styles.itemInfo}>
                 <Text style={styles.itemName}>{item.name}</Text>
                 <Text style={styles.itemCategory}>{item.category}</Text>
+                {item.location && (
+                    <Text style={styles.itemLocation}>{item.location}</Text>
+                )}
             </View>
             <View style={styles.itemQuantity}>
                 <Text style={[styles.quantityText, { color: item.quantity <= item.minQuantity ? '#DC2626' : '#1F2937' }]}>
@@ -321,6 +324,11 @@ const styles = StyleSheet.create({
     itemCategory: {
         fontSize: 14,
         color: '#6B7280',
+        marginTop: 2,
+    },
+    itemLocation: {
+        fontSize: 12,
+        color: '#9CA3AF',
         marginTop: 2,
     },
     itemQuantity: {

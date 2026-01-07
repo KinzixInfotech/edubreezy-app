@@ -70,7 +70,7 @@ const NotificationCard = ({ item, onPress, index }) => {
 
                     {item.sender && (
                         <Text style={styles.senderText}>
-                            From: {item.sender.name} • {item.sender.role}
+                            From: {item.sender.name} • {item.sender.role?.name || item.sender.role}
                         </Text>
                     )}
                 </View>
@@ -135,11 +135,29 @@ export default function NotificationScreen() {
         setRefreshing(false);
     }, [refetch]);
 
-    // Flatten data for FlatList
+    // Helper to filter out notifications sent by the current user
+    const filterSentByMe = (notifications) => {
+        if (!notifications || !userId) return notifications || [];
+        return notifications.filter(n => n.sender?.id !== userId);
+    };
+
+    // Get filtered notifications for each section
+    const todayFiltered = filterSentByMe(data?.notifications?.today);
+    const yesterdayFiltered = filterSentByMe(data?.notifications?.yesterday);
+    const earlierFiltered = filterSentByMe(data?.notifications?.earlier);
+
+    // Calculate filtered unread count (only from notifications not sent by us)
+    const filteredUnreadCount = [
+        ...todayFiltered,
+        ...yesterdayFiltered,
+        ...earlierFiltered
+    ].filter(n => !n.isRead).length;
+
+    // Flatten data for FlatList (only add headers if section has items after filtering)
     const flatData = [
-        ...(data?.notifications?.today?.length ? [{ type: 'header', title: 'Today' }, ...data.notifications.today] : []),
-        ...(data?.notifications?.yesterday?.length ? [{ type: 'header', title: 'Yesterday' }, ...data.notifications.yesterday] : []),
-        ...(data?.notifications?.earlier?.length ? [{ type: 'header', title: 'Earlier' }, ...data.notifications.earlier] : []),
+        ...(todayFiltered.length ? [{ type: 'header', title: 'Today' }, ...todayFiltered] : []),
+        ...(yesterdayFiltered.length ? [{ type: 'header', title: 'Yesterday' }, ...yesterdayFiltered] : []),
+        ...(earlierFiltered.length ? [{ type: 'header', title: 'Earlier' }, ...earlierFiltered] : []),
     ];
 
     if (isLoading && !refreshing) {
@@ -161,14 +179,14 @@ export default function NotificationScreen() {
                 </TouchableOpacity>
                 <View style={styles.headerTitleContainer}>
                     <Text style={styles.headerTitle}>Notifications</Text>
-                    {data?.unreadCount > 0 && (
+                    {filteredUnreadCount > 0 && (
                         <View style={styles.badgeContainer}>
-                            <Text style={styles.badgeText}>{data.unreadCount} new</Text>
+                            <Text style={styles.badgeText}>{filteredUnreadCount} new</Text>
                         </View>
                     )}
                 </View>
-                <TouchableOpacity onPress={() => markAllReadMutation.mutate()} disabled={!data?.unreadCount}>
-                    <CheckCheck size={24} color={data?.unreadCount ? "#4F46E5" : "#D1D5DB"} />
+                <TouchableOpacity onPress={() => markAllReadMutation.mutate()} disabled={!filteredUnreadCount}>
+                    <CheckCheck size={24} color={filteredUnreadCount ? "#4F46E5" : "#D1D5DB"} />
                 </TouchableOpacity>
             </View>
 

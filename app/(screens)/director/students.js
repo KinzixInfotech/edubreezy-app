@@ -1,21 +1,32 @@
 import { View, Text, StyleSheet, RefreshControl, TextInput, ActivityIndicator, FlatList, Image, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Stack, router, useLocalSearchParams } from 'expo-router';
+import { Stack, router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { useState, useMemo } from 'react';
 import { Users, Search, ChevronLeft, UserCheck, UserX, ChevronDown, X } from 'lucide-react-native';
+import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
 
 export default function StudentsScreen() {
-    const { schoolId } = useLocalSearchParams();
-
     const [searchQuery, setSearchQuery] = useState('');
     const [refreshing, setRefreshing] = useState(false);
     const [selectedClass, setSelectedClass] = useState(null);
     const [selectedSection, setSelectedSection] = useState(null);
     const [showClassFilter, setShowClassFilter] = useState(false);
     const [showSectionFilter, setShowSectionFilter] = useState(false);
+
+    // Get user data from SecureStore
+    const { data: userData } = useQuery({
+        queryKey: ['user-data'],
+        queryFn: async () => {
+            const stored = await SecureStore.getItemAsync('user');
+            return stored ? JSON.parse(stored) : null;
+        },
+        staleTime: Infinity,
+    });
+
+    const schoolId = userData?.schoolId;
 
     const { data, isLoading, refetch } = useQuery({
         queryKey: ['director-students', schoolId, searchQuery, selectedClass, selectedSection],

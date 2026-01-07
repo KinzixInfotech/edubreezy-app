@@ -1,20 +1,31 @@
 import { View, Text, StyleSheet, RefreshControl, TextInput, ActivityIndicator, FlatList, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Stack, router, useLocalSearchParams } from 'expo-router';
+import { Stack, router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { Users, Search, ChevronLeft, GraduationCap, Briefcase } from 'lucide-react-native';
+import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
 
 export default function TeachersScreen() {
-    const { schoolId } = useLocalSearchParams();
-
     const [searchQuery, setSearchQuery] = useState('');
     const [debouncedSearch, setDebouncedSearch] = useState('');
     const [refreshing, setRefreshing] = useState(false);
     const [filter, setFilter] = useState('all');
     const [statusFilter, setStatusFilter] = useState('all'); // all, active, on-leave
+
+    // Get user data from SecureStore
+    const { data: userData } = useQuery({
+        queryKey: ['user-data'],
+        queryFn: async () => {
+            const stored = await SecureStore.getItemAsync('user');
+            return stored ? JSON.parse(stored) : null;
+        },
+        staleTime: Infinity,
+    });
+
+    const schoolId = userData?.schoolId;
 
     // Debounce search input
     useEffect(() => {

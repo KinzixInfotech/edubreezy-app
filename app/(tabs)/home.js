@@ -6,7 +6,8 @@ import {
     ChevronLeft, ChevronRight, GraduationCap, BookMarked, ClipboardCheck,
     Calendar, Bell, X, CheckCircle, AlertCircle, Building, MapPin,
     RefreshCcw,
-    Settings
+    Settings,
+    CheckCircle2
 } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
@@ -2769,6 +2770,30 @@ export default function HomeScreen() {
                         )}
                     </View>
                 </View>
+
+                {/* Quick Actions */}
+                <View style={styles.dashboardSection}>
+                    <Text style={styles.dashboardSectionTitle}>Quick Actions</Text>
+                    <View style={styles.actionsGrid}>
+                        {[
+                            { icon: Calendar, label: 'Leave Mgmt', color: '#8B5CF6', bgColor: '#F5F3FF', href: '/(screens)/director/leave-management' },
+                            { icon: Users, label: 'Manage Staff', color: '#10B981', bgColor: '#D1FAE5', href: '/(screens)/director/teachers' },
+                            { icon: GraduationCap, label: 'Students', color: '#0EA5E9', bgColor: '#F0F9FF', href: '/(screens)/director/students' },
+                            { icon: Bell, label: 'Broadcast', color: '#F59E0B', bgColor: '#FFFBEB', href: '/(screens)/director/broadcast' },
+                            { icon: CheckCircle2, label: 'Approvals', color: '#EC4899', bgColor: '#FDF2F8', href: '/(screens)/principal/approvals' },
+                            { icon: Settings, label: 'Settings', color: '#64748B', bgColor: '#F1F5F9', href: '/profile' },
+                        ].map((action, index) => (
+                            <HapticTouchable key={action.label} onPress={() => action.href && router.push(action.href)} disabled={!action.href}>
+                                <View style={[styles.actionButton, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5 }]}>
+                                    <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
+                                        <action.icon size={22} color={action.color} />
+                                    </View>
+                                    <Text style={styles.actionLabel} numberOfLines={1}>{action.label}</Text>
+                                </View>
+                            </HapticTouchable>
+                        ))}
+                    </View>
+                </View>
             </ScrollView>
         );
     };
@@ -2970,6 +2995,30 @@ export default function HomeScreen() {
                                 <Text style={{ color: '#9CA3AF' }}>No data available</Text>
                             </View>
                         )}
+                    </View>
+                </View>
+
+                {/* Quick Actions */}
+                <View style={styles.dashboardSection}>
+                    <Text style={styles.dashboardSectionTitle}>Quick Actions</Text>
+                    <View style={styles.actionsGrid}>
+                        {[
+                            { icon: Calendar, label: 'Leave Mgmt', color: '#8B5CF6', bgColor: '#F5F3FF', href: '/(screens)/principal/leave-management' },
+                            { icon: CheckCircle2, label: 'Approvals', color: '#10B981', bgColor: '#D1FAE5', href: '/(screens)/principal/approvals' },
+                            { icon: Users, label: 'Staff', color: '#0EA5E9', bgColor: '#F0F9FF', href: '/(screens)/director/teachers' },
+                            { icon: GraduationCap, label: 'Students', color: '#F59E0B', bgColor: '#FFFBEB', href: '/(screens)/director/students' },
+                            { icon: Bell, label: 'Broadcast', color: '#EC4899', bgColor: '#FDF2F8', href: '/(screens)/director/broadcast' },
+                            { icon: Settings, label: 'Settings', color: '#64748B', bgColor: '#F1F5F9', href: '/profile' },
+                        ].map((action, index) => (
+                            <HapticTouchable key={action.label} onPress={() => action.href && router.push(action.href)} disabled={!action.href}>
+                                <View style={[styles.actionButton, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5 }]}>
+                                    <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
+                                        <action.icon size={22} color={action.color} />
+                                    </View>
+                                    <Text style={styles.actionLabel} numberOfLines={1}>{action.label}</Text>
+                                </View>
+                            </HapticTouchable>
+                        ))}
                     </View>
                 </View>
             </ScrollView>

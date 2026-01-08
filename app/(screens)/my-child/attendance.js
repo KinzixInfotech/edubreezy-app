@@ -1,4 +1,5 @@
 // Parent view for child's attendance with Monthly Trend Graph
+// Optimized: Single API call for full year, client-side filtering
 import React, { useState, useMemo, useCallback } from 'react';
 import {
     View,
@@ -77,7 +78,7 @@ export default function ParentAttendanceView() {
 
     const queryClient = useQueryClient();
     const [refreshing, setRefreshing] = useState(false);
-    const [graphPeriod, setGraphPeriod] = useState('30d'); // '7d', '30d', '90d'
+    const [graphPeriod, setGraphPeriod] = useState('30d');
     const [currentMonth, setCurrentMonth] = useState(() => {
         const now = new Date();
         const offset = 5.5 * 60 * 60 * 1000;
@@ -97,28 +98,64 @@ export default function ParentAttendanceView() {
     const schoolId = userData?.schoolId;
     const studentId = childData?.studentId;
 
-    const { data: statsData, isLoading } = useQuery({
-        queryKey: ['child-attendance-stats', studentId, currentMonth],
+    // Single API call for entire academic year - no refetch on month change!
+    const { data: fullYearData, isLoading } = useQuery({
+        queryKey: ['child-attendance-full', studentId, schoolId],
         queryFn: async () => {
-            if (!studentId) return null;
-            const month = currentMonth.getMonth() + 1;
-            const year = currentMonth.getFullYear();
+            if (!studentId || !schoolId) return null;
             const res = await api.get(
-                `/schools/${schoolId}/attendance/stats?userId=${studentId}&month=${month}&year=${year}`
+                `/schools/${schoolId}/attendance/stats?userId=${studentId}&fullYear=true`
             );
             return res.data;
         },
         enabled: !!studentId && !!schoolId,
-        staleTime: 1000 * 60 * 2,
+        staleTime: 1000 * 60 * 10, // 10 minutes - data stays fresh
+        cacheTime: 1000 * 60 * 30, // 30 minutes in cache
     });
 
-    const stats = statsData?.monthlyStats;
-    const recentAttendance = statsData?.recentAttendance || [];
-    const streak = statsData?.streak;
+    // Use overall stats from API (full academic year)
+    const overallStats = fullYearData?.overallStats;
+    const allAttendance = fullYearData?.allAttendance || [];
+    const streak = fullYearData?.streak;
 
-    // Generate graph data
+    // Filter attendance for current month view (client-side filtering)
+    const monthlyAttendance = useMemo(() => {
+        if (!allAttendance.length) return [];
+
+        const year = currentMonth.getFullYear();
+        const month = currentMonth.getMonth();
+        const monthStart = new Date(year, month, 1);
+        const monthEnd = new Date(year, month + 1, 0);
+
+        return allAttendance.filter(record => {
+            const recordDate = new Date(record.date);
+            return recordDate >= monthStart && recordDate <= monthEnd;
+        });
+    }, [allAttendance, currentMonth]);
+
+    // Get monthly stats from API data (no recalculation needed)
+    const currentMonthStats = useMemo(() => {
+        if (!fullYearData?.monthlyStats) return null;
+
+        const year = currentMonth.getFullYear();
+        const month = currentMonth.getMonth() + 1;
+
+        return fullYearData.monthlyStats.find(
+            stat => stat.month === month && stat.year === year
+        ) || {
+            totalPresent: 0,
+            totalAbsent: 0,
+            totalHalfDay: 0,
+            totalLate: 0,
+            totalLeaves: 0,
+            attendancePercentage: 0,
+            totalWorkingDays: 0
+        };
+    }, [fullYearData?.monthlyStats, currentMonth]);
+
+    // Graph data from all attendance
     const graphData = useMemo(() => {
-        if (!recentAttendance || recentAttendance.length === 0) return null;
+        if (!allAttendance.length) return null;
 
         const days = graphPeriod === '7d' ? 7 : graphPeriod === '30d' ? 30 : 90;
         const today = new Date();
@@ -133,7 +170,7 @@ export default function ParentAttendanceView() {
             dateMap.set(dateStr, { present: 0, absent: 0 });
         }
 
-        recentAttendance.forEach(record => {
+        allAttendance.forEach(record => {
             const dateStr = getISTDateString(record.date);
             if (dateMap.has(dateStr)) {
                 const data = dateMap.get(dateStr);
@@ -148,7 +185,7 @@ export default function ParentAttendanceView() {
         const sortedDates = Array.from(dateMap.keys()).sort();
         const labels = sortedDates.map(date => {
             const d = new Date(date);
-            return graphPeriod === '7d' 
+            return graphPeriod === '7d'
                 ? d.toLocaleDateString('en-US', { weekday: 'short' })
                 : `${d.getDate()}`;
         });
@@ -172,15 +209,15 @@ export default function ParentAttendanceView() {
             ],
             legend: ['Present', 'Absent']
         };
-    }, [recentAttendance, graphPeriod]);
+    }, [allAttendance, graphPeriod]);
 
-    // Calendar days generation (keeping existing logic)
+    // Calendar days generation using filtered monthly data
     const calendarDays = useMemo(() => {
         const year = currentMonth.getFullYear();
         const month = currentMonth.getMonth();
         const days = [];
         const firstDay = new Date(year, month, 1);
-        
+
         for (let i = 0; i < firstDay.getDay(); i++) {
             days.push({ date: null, isOtherMonth: true });
         }
@@ -191,7 +228,7 @@ export default function ParentAttendanceView() {
             if (i > new Date(year, month + 1, 0).getDate()) break;
 
             const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
-            const dayData = recentAttendance.find(record => {
+            const dayData = monthlyAttendance.find(record => {
                 const serverDate = record.date;
                 if (!serverDate) return false;
                 if (serverDate === dateStr) return true;
@@ -214,13 +251,18 @@ export default function ParentAttendanceView() {
         }
 
         return days;
-    }, [currentMonth, recentAttendance]);
+    }, [currentMonth, monthlyAttendance]);
+
+    // Recent activity (last 7 records from all attendance)
+    const recentActivity = useMemo(() => {
+        return allAttendance.slice(0, 7);
+    }, [allAttendance]);
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
-        await queryClient.invalidateQueries(['child-attendance-stats']);
+        await queryClient.invalidateQueries(['child-attendance-full']);
         setRefreshing(false);
-    }, []);
+    }, [queryClient]);
 
     const getStatusColor = (status) => {
         switch (status) {
@@ -297,42 +339,44 @@ export default function ParentAttendanceView() {
                 {isLoading ? (
                     <View style={styles.loadingContainer}>
                         <ActivityIndicator size="large" color="#0469ff" />
+                        <Text style={styles.loadingText}>Loading attendance data...</Text>
                     </View>
-                ) : !stats ? (
+                ) : !overallStats ? (
                     <Animated.View entering={FadeInDown.delay(300)} style={styles.noDataCard}>
                         <AlertCircle size={48} color="#999" />
                         <Text style={styles.noDataText}>No attendance data available</Text>
                     </Animated.View>
                 ) : (
                     <>
-                        {/* Stats Cards */}
-                        <Animated.View entering={FadeInDown.delay(300).duration(500)}>
+                        {/* Overall Stats Cards - Academic Year Total */}
+                        <Animated.View entering={FadeInDown.delay(100).duration(500)}>
+                            <Text style={styles.statsLabel}>Overall (Academic Year)</Text>
                             <View style={styles.summaryGrid}>
                                 <LinearGradient colors={['#3B82F6', '#2563EB']} style={styles.summaryCard}>
                                     <TrendingUp size={24} color="#fff" />
-                                    <Text style={styles.summaryValue}>{Math.round(stats.attendancePercentage)}%</Text>
+                                    <Text style={styles.summaryValue}>
+                                        {Math.round(overallStats.attendancePercentage)}%
+                                    </Text>
                                     <Text style={styles.summaryLabel}>Attendance</Text>
                                 </LinearGradient>
 
                                 <LinearGradient colors={['#51CF66', '#37B24D']} style={styles.summaryCard}>
                                     <CheckCircle size={24} color="#fff" />
-                                    <Text style={styles.summaryValue}>{stats.totalPresent}</Text>
+                                    <Text style={styles.summaryValue}>{overallStats.totalPresent}</Text>
                                     <Text style={styles.summaryLabel}>Present</Text>
                                 </LinearGradient>
 
                                 <LinearGradient colors={['#FF6B6B', '#EE5A6F']} style={styles.summaryCard}>
                                     <XCircle size={24} color="#fff" />
-                                    <Text style={styles.summaryValue}>{stats.totalAbsent}</Text>
+                                    <Text style={styles.summaryValue}>{overallStats.totalAbsent}</Text>
                                     <Text style={styles.summaryLabel}>Absent</Text>
                                 </LinearGradient>
                             </View>
                         </Animated.View>
 
-            
-
                         {/* Streak Card */}
                         {streak && streak.current > 0 && (
-                            <Animated.View entering={FadeInDown.delay(400).duration(500)} style={styles.streakCard}>
+                            <Animated.View entering={FadeInDown.delay(200).duration(500)} style={styles.streakCard}>
                                 <LinearGradient colors={['#FFB020', '#FF8C42']} style={styles.streakGradient}>
                                     <Award size={32} color="#fff" />
                                     <View style={styles.streakInfo}>
@@ -348,15 +392,15 @@ export default function ParentAttendanceView() {
                         )}
 
                         {/* Low Attendance Warning */}
-                        {stats.attendancePercentage < 75 && (
-                            <Animated.View entering={FadeInDown.delay(500).duration(500)} style={styles.warningCard}>
+                        {overallStats.attendancePercentage < 75 && (
+                            <Animated.View entering={FadeInDown.delay(300).duration(500)} style={styles.warningCard}>
                                 <View style={styles.warningIconContainer}>
                                     <AlertCircle size={24} color="#FF6B6B" />
                                 </View>
                                 <View style={styles.warningContent}>
                                     <Text style={styles.warningTitle}>Low Attendance Alert</Text>
                                     <Text style={styles.warningMessage}>
-                                        Current attendance is {Math.round(stats.attendancePercentage)}%, below the required 75%
+                                        Overall attendance is {Math.round(overallStats.attendancePercentage)}%, below the required 75%
                                     </Text>
                                 </View>
                             </Animated.View>
@@ -365,9 +409,14 @@ export default function ParentAttendanceView() {
                         {/* Calendar Section */}
                         <View style={styles.sectionHeader}>
                             <Text style={styles.sectionTitle}>Monthly Overview</Text>
+                            {currentMonthStats && (
+                                <Text style={styles.monthStats}>
+                                    {currentMonthStats.totalPresent}P / {currentMonthStats.totalAbsent}A
+                                </Text>
+                            )}
                         </View>
 
-                        <Animated.View entering={FadeInDown.delay(600).duration(500)} style={styles.calendarCard}>
+                        <Animated.View entering={FadeInDown.delay(400).duration(500)} style={styles.calendarCard}>
                             <View style={styles.calendarHeader}>
                                 <Text style={styles.calendarTitle}>
                                     {currentMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
@@ -423,7 +472,7 @@ export default function ParentAttendanceView() {
                             {/* Calendar Grid */}
                             <View style={styles.calendarGrid}>
                                 {calendarDays.map((day, idx) => {
-                                    const isWeekend = new Date(day.fullDate).getDay() === 0 || new Date(day.fullDate).getDay() === 6;
+                                    const isWeekend = day.fullDate && (new Date(day.fullDate).getDay() === 0 || new Date(day.fullDate).getDay() === 6);
                                     const borderColor = day.isToday ? '#0469ff' : getDayBorderColor(day);
                                     const bgColor = day.isToday ? '#E3F2FD' : (isWeekend && !day.isOtherMonth ? '#f8f9fa' : '#fff');
 
@@ -486,15 +535,15 @@ export default function ParentAttendanceView() {
                         {/* Recent Activity */}
                         <View style={styles.sectionHeader}>
                             <Text style={styles.sectionTitle}>Recent Activity</Text>
-                            <Text style={styles.activityCount}>{recentAttendance.slice(0, 7).length} Records</Text>
+                            <Text style={styles.activityCount}>{recentActivity.length} Records</Text>
                         </View>
 
-                        {recentAttendance.slice(0, 7).map((record, idx) => {
+                        {recentActivity.map((record, idx) => {
                             const statusConfig = getStatusConfig(record.status);
                             const StatusIcon = statusConfig.icon;
 
                             return (
-                                <Animated.View key={record.id} entering={FadeInRight.delay(700 + idx * 50)}>
+                                <Animated.View key={record.id} entering={FadeInRight.delay(500 + idx * 50)}>
                                     <View style={styles.activityCard}>
                                         <View style={[styles.activityIcon, { backgroundColor: statusConfig.bg }]}>
                                             <StatusIcon size={20} color={statusConfig.color} />
@@ -521,8 +570,9 @@ export default function ParentAttendanceView() {
                                 </Animated.View>
                             );
                         })}
-            {/* Attendance Trend Graph */}
-                        <Animated.View entering={FadeInDown.delay(350).duration(500)}>
+
+                        {/* Attendance Trend Graph */}
+                        <Animated.View entering={FadeInDown.delay(600).duration(500)}>
                             <View style={styles.graphCard}>
                                 <View style={styles.graphHeader}>
                                     <View style={styles.graphHeaderLeft}>
@@ -531,8 +581,8 @@ export default function ParentAttendanceView() {
                                     </View>
                                     <View style={styles.periodSelector}>
                                         {['7d', '30d', '90d'].map(period => (
-                                            <HapticTouchable 
-                                                key={period} 
+                                            <HapticTouchable
+                                                key={period}
                                                 onPress={() => setGraphPeriod(period)}
                                             >
                                                 <View style={[
@@ -543,7 +593,7 @@ export default function ParentAttendanceView() {
                                                         styles.periodText,
                                                         graphPeriod === period && styles.periodTextActive
                                                     ]}>
-                                                        {period === '7d' ? '7d' : period === '30d' ? '30d' : '90d'}
+                                                        {period}
                                                     </Text>
                                                 </View>
                                             </HapticTouchable>
@@ -564,13 +614,8 @@ export default function ParentAttendanceView() {
                                                 decimalPlaces: 0,
                                                 color: (opacity = 1) => `rgba(59, 130, 246, ${opacity})`,
                                                 labelColor: (opacity = 1) => `rgba(102, 102, 102, ${opacity})`,
-                                                style: {
-                                                    borderRadius: 16,
-                                                },
-                                                propsForDots: {
-                                                    r: '4',
-                                                    strokeWidth: '2',
-                                                },
+                                                style: { borderRadius: 16 },
+                                                propsForDots: { r: '4', strokeWidth: '2' },
                                                 propsForBackgroundLines: {
                                                     strokeDasharray: '',
                                                     stroke: '#e5e7eb',
@@ -604,6 +649,7 @@ export default function ParentAttendanceView() {
                                 )}
                             </View>
                         </Animated.View>
+
                         <View style={{ height: 40 }} />
                     </>
                 )}
@@ -675,6 +721,11 @@ const styles = StyleSheet.create({
     loadingContainer: {
         padding: 40,
         alignItems: 'center',
+        gap: 12,
+    },
+    loadingText: {
+        fontSize: 14,
+        color: '#666',
     },
     noDataCard: {
         padding: 40,
@@ -687,6 +738,14 @@ const styles = StyleSheet.create({
     noDataText: {
         fontSize: 16,
         color: '#999',
+    },
+    statsLabel: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#666',
+        marginBottom: 8,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
     },
     summaryGrid: {
         flexDirection: 'row',
@@ -710,17 +769,11 @@ const styles = StyleSheet.create({
         color: 'rgba(255,255,255,0.9)',
         fontWeight: '600',
     },
-    // Graph Styles
     graphCard: {
         backgroundColor: '#fff',
         borderRadius: 16,
         padding: 16,
         marginBottom: 16,
-        // shadowColor: '#000',
-        // shadowOffset: { width: 0, height: 2 },
-        // shadowOpacity: 0.05,
-        // shadowRadius: 8,
-        // elevation: 2,
     },
     graphHeader: {
         flexDirection: 'row',
@@ -881,6 +934,15 @@ const styles = StyleSheet.create({
         fontSize: 17,
         fontWeight: '700',
         color: '#111',
+    },
+    monthStats: {
+        fontSize: 13,
+        color: '#0469ff',
+        backgroundColor: '#E3F2FD',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 12,
+        fontWeight: '600',
     },
     activityCount: {
         fontSize: 13,

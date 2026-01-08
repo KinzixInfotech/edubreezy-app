@@ -9,75 +9,103 @@ import {
     Modal,
     RefreshControl,
     Platform,
-    StatusBar,
-    SafeAreaView
+    Dimensions,
 } from 'react-native';
 import { router } from 'expo-router';
-import { ArrowLeft, CheckCheck, Trash2, X, Bell, BellOff, Calendar, AlertCircle } from 'lucide-react-native';
+import { ArrowLeft, CheckCheck, X, Bell, BellOff, Calendar, AlertCircle, Megaphone, CreditCard, GraduationCap } from 'lucide-react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as SecureStore from 'expo-secure-store';
 import api from '../../lib/api';
-import { BlurView } from 'expo-blur';
-import Animated, { FadeInDown, Layout } from 'react-native-reanimated';
-import { format } from 'date-fns';
+import Animated, { FadeIn } from 'react-native-reanimated';
+import { format, formatDistanceToNow } from 'date-fns';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 
-// Helper to get icon props based on type
-const getNotificationTypeStyles = (type) => {
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+// Helper to get icon based on type
+const getNotificationIcon = (type) => {
     switch (type) {
         case 'URGENT':
         case 'EMERGENCY':
-            return { color: '#EF4444', bg: '#FEE2E2', icon: AlertCircle };
+            return { icon: AlertCircle, color: '#EF4444', bg: '#FEF2F2' };
         case 'ACADEMIC':
-            return { color: '#3B82F6', bg: '#DBEAFE', icon: Calendar };
+            return { icon: GraduationCap, color: '#3B82F6', bg: '#EFF6FF' };
         case 'FEE':
-            return { color: '#10B981', bg: '#D1FAE5', icon: CheckCheck }; // Or Money icon
+            return { icon: CreditCard, color: '#10B981', bg: '#ECFDF5' };
+        case 'ANNOUNCEMENT':
+            return { icon: Megaphone, color: '#F59E0B', bg: '#FFFBEB' };
         default:
-            return { color: '#6366F1', bg: '#E0E7FF', icon: Bell };
+            return { icon: Bell, color: '#6366F1', bg: '#EEF2FF' };
     }
 };
 
-const NotificationCard = ({ item, onPress, index }) => {
-    const { color, bg, icon: Icon } = getNotificationTypeStyles(item.type || item.priority);
+// Format time like Instagram (e.g., "2h", "3d", "1w")
+const formatTimeAgo = (date) => {
+    if (!date) return '';
+    try {
+        const distance = formatDistanceToNow(new Date(date), { addSuffix: false });
+        // Shorten the format
+        return distance
+            .replace(' seconds', 's')
+            .replace(' second', 's')
+            .replace(' minutes', 'm')
+            .replace(' minute', 'm')
+            .replace(' hours', 'h')
+            .replace(' hour', 'h')
+            .replace(' days', 'd')
+            .replace(' day', 'd')
+            .replace(' weeks', 'w')
+            .replace(' week', 'w')
+            .replace(' months', 'mo')
+            .replace(' month', 'mo')
+            .replace('about ', '')
+            .replace('less than a', '1');
+    } catch {
+        return '';
+    }
+};
+
+const NotificationItem = ({ item, onPress, isLast }) => {
+    const { icon: Icon, color, bg } = getNotificationIcon(item.type || item.priority);
 
     return (
-        <Animated.View
-            entering={FadeInDown.delay(index * 50).springify()}
-            layout={Layout.springify()}
-            style={[styles.cardContainer, !item.isRead && styles.unreadCard]}
+        <TouchableOpacity
+            activeOpacity={0.6}
+            onPress={() => onPress(item)}
+            style={[
+                styles.notificationItem,
+                !item.isRead && styles.unreadItem,
+                !isLast && styles.itemBorder
+            ]}
         >
-            <TouchableOpacity
-                activeOpacity={0.7}
-                onPress={() => onPress(item)}
-                style={styles.cardContent}
-            >
-                <View style={[styles.iconContainer, { backgroundColor: bg }]}>
-                    <Icon size={20} color={color} strokeWidth={2} />
-                </View>
+            {/* Icon */}
+            <View style={[styles.iconWrapper, { backgroundColor: bg }]}>
+                <Icon size={20} color={color} strokeWidth={2} />
+            </View>
 
-                <View style={styles.textContainer}>
-                    <View style={styles.cardHeader}>
-                        <Text style={[styles.cardTitle, !item.isRead && styles.unreadText]} numberOfLines={1}>
-                            {item.title}
-                        </Text>
-                        <Text style={styles.timeText}>
-                            {item.createdAt ? format(new Date(item.createdAt), 'MMM d, h:mm a') : item.time}
-                        </Text>
-                    </View>
-
-                    <Text style={styles.cardMessage} numberOfLines={2}>
-                        {item.message}
+            {/* Content */}
+            <View style={styles.contentWrapper}>
+                <Text style={styles.notificationText} numberOfLines={2}>
+                    <Text style={[styles.titleText, !item.isRead && styles.unreadTitle]}>
+                        {item.title}
                     </Text>
+                    {item.message ? ` ${item.message}` : ''}
+                </Text>
 
-                    {item.sender && (
-                        <Text style={styles.senderText}>
-                            From: {item.sender.name} • {item.sender.role?.name || item.sender.role}
-                        </Text>
-                    )}
-                </View>
+                {item.sender && (
+                    <Text style={styles.senderText} numberOfLines={1}>
+                        {item.sender.name}
+                    </Text>
+                )}
+            </View>
 
+            {/* Time */}
+            <View style={styles.timeWrapper}>
+                <Text style={styles.timeText}>{formatTimeAgo(item.createdAt)}</Text>
                 {!item.isRead && <View style={styles.unreadDot} />}
-            </TouchableOpacity>
-        </Animated.View>
+            </View>
+        </TouchableOpacity>
     );
 };
 
@@ -121,13 +149,11 @@ export default function NotificationScreen() {
         onSuccess: () => queryClient.invalidateQueries(['notifications'])
     });
 
-    // Auto-mark all as read when screen opens and invalidate home badge
+    // Auto-mark all as read when screen opens
     useEffect(() => {
         if (userId && data?.unreadCount > 0) {
-            // Mark all as read
             api.put('/notifications', { markAllAsRead: true, userId })
                 .then(() => {
-                    // Invalidate queries to update badge on home screen
                     queryClient.invalidateQueries(['notifications']);
                 })
                 .catch(err => console.error('Failed to mark all as read:', err));
@@ -148,58 +174,55 @@ export default function NotificationScreen() {
         setRefreshing(false);
     }, [refetch]);
 
-    // Helper to filter out notifications sent by the current user
+    // Filter out notifications sent by the current user
     const filterSentByMe = (notifications) => {
         if (!notifications || !userId) return notifications || [];
         return notifications.filter(n => n.sender?.id !== userId);
     };
 
-    // Get filtered notifications for each section
     const todayFiltered = filterSentByMe(data?.notifications?.today);
     const yesterdayFiltered = filterSentByMe(data?.notifications?.yesterday);
     const earlierFiltered = filterSentByMe(data?.notifications?.earlier);
 
-    // Calculate filtered unread count (only from notifications not sent by us)
     const filteredUnreadCount = [
         ...todayFiltered,
         ...yesterdayFiltered,
         ...earlierFiltered
     ].filter(n => !n.isRead).length;
 
-    // Flatten data for FlatList (only add headers if section has items after filtering)
+    // Flatten data for FlatList
     const flatData = [
-        ...(todayFiltered.length ? [{ type: 'header', title: 'Today' }, ...todayFiltered] : []),
-        ...(yesterdayFiltered.length ? [{ type: 'header', title: 'Yesterday' }, ...yesterdayFiltered] : []),
-        ...(earlierFiltered.length ? [{ type: 'header', title: 'Earlier' }, ...earlierFiltered] : []),
+        ...(todayFiltered.length ? [{ type: 'header', title: 'Today' }, ...todayFiltered.map((n, i) => ({ ...n, isLastInSection: i === todayFiltered.length - 1 }))] : []),
+        ...(yesterdayFiltered.length ? [{ type: 'header', title: 'Yesterday' }, ...yesterdayFiltered.map((n, i) => ({ ...n, isLastInSection: i === yesterdayFiltered.length - 1 }))] : []),
+        ...(earlierFiltered.length ? [{ type: 'header', title: 'Earlier' }, ...earlierFiltered.map((n, i) => ({ ...n, isLastInSection: i === earlierFiltered.length - 1 }))] : []),
     ];
 
     if (isLoading && !refreshing) {
         return (
             <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#4F46E5" />
+                <ActivityIndicator size="large" color="#000" />
             </View>
         );
     }
 
     return (
-        <SafeAreaView style={styles.container}>
-            <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+        <SafeAreaView style={styles.container} edges={['top']}>
+            <StatusBar style="dark" />
 
-            {/* Header */}
+            {/* Header - Instagram style */}
             <View style={styles.header}>
-                <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                    <ArrowLeft size={24} color="#1F2937" />
+                <TouchableOpacity onPress={() => router.back()} style={styles.backButton} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+                    <ArrowLeft size={24} color="#000" />
                 </TouchableOpacity>
-                <View style={styles.headerTitleContainer}>
-                    <Text style={styles.headerTitle}>Notifications</Text>
-                    {filteredUnreadCount > 0 && (
-                        <View style={styles.badgeContainer}>
-                            <Text style={styles.badgeText}>{filteredUnreadCount} new</Text>
-                        </View>
-                    )}
-                </View>
-                <TouchableOpacity onPress={() => markAllReadMutation.mutate()} disabled={!filteredUnreadCount}>
-                    <CheckCheck size={24} color={filteredUnreadCount ? "#4F46E5" : "#D1D5DB"} />
+
+                <Text style={styles.headerTitle}>Notifications</Text>
+
+                <TouchableOpacity
+                    onPress={() => markAllReadMutation.mutate()}
+                    disabled={!filteredUnreadCount}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                    <CheckCheck size={24} color={filteredUnreadCount ? "#000" : "#C7C7CC"} />
                 </TouchableOpacity>
             </View>
 
@@ -209,13 +232,22 @@ export default function NotificationScreen() {
                 keyExtractor={(item, index) => item.id || `header-${index}`}
                 contentContainerStyle={styles.listContent}
                 refreshControl={
-                    <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} colors={["#4F46E5"]} />
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={handleRefresh}
+                        tintColor="#000"
+                    />
                 }
                 ListEmptyComponent={
-                    <View style={styles.emptyContainer}>
-                        <BellOff size={48} color="#9CA3AF" />
-                        <Text style={styles.emptyText}>No notifications yet</Text>
-                    </View>
+                    <Animated.View entering={FadeIn.delay(200)} style={styles.emptyContainer}>
+                        <View style={styles.emptyIconWrapper}>
+                            <BellOff size={32} color="#8E8E93" />
+                        </View>
+                        <Text style={styles.emptyTitle}>No Notifications</Text>
+                        <Text style={styles.emptySubtitle}>
+                            When you get notifications, they'll show up here
+                        </Text>
+                    </Animated.View>
                 }
                 renderItem={({ item, index }) => {
                     if (item.type === 'header') {
@@ -225,47 +257,98 @@ export default function NotificationScreen() {
                             </View>
                         );
                     }
-                    return <NotificationCard item={item} onPress={handlePress} index={index} />;
+                    return (
+                        <NotificationItem
+                            item={item}
+                            onPress={handlePress}
+                            isLast={item.isLastInSection}
+                        />
+                    );
                 }}
             />
 
-            {/* Modal */}
+            {/* Detail Modal - Bottom Sheet Style */}
             <Modal
                 animationType="slide"
                 transparent={true}
                 visible={modalVisible}
                 onRequestClose={() => setModalVisible(false)}
             >
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
+                <TouchableOpacity
+                    style={styles.modalOverlay}
+                    activeOpacity={1}
+                    onPress={() => setModalVisible(false)}
+                >
+                    <TouchableOpacity
+                        activeOpacity={1}
+                        style={styles.modalContent}
+                        onPress={(e) => e.stopPropagation()}
+                    >
+                        {/* Handle bar */}
+                        <View style={styles.modalHandle} />
+
+                        {/* Header */}
                         <View style={styles.modalHeader}>
-                            <Text style={styles.modalType}>{selectedNotification?.type || 'Notification'}</Text>
-                            <TouchableOpacity onPress={() => setModalVisible(false)}>
-                                <X size={24} color="#6B7280" />
+                            <View style={styles.modalTypeContainer}>
+                                {(() => {
+                                    const { icon: Icon, color, bg } = getNotificationIcon(selectedNotification?.type);
+                                    return (
+                                        <View style={[styles.modalIconWrapper, { backgroundColor: bg }]}>
+                                            <Icon size={18} color={color} />
+                                        </View>
+                                    );
+                                })()}
+                                <Text style={styles.modalType}>
+                                    {selectedNotification?.type || 'Notification'}
+                                </Text>
+                            </View>
+                            <TouchableOpacity
+                                onPress={() => setModalVisible(false)}
+                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            >
+                                <X size={24} color="#8E8E93" />
                             </TouchableOpacity>
                         </View>
 
+                        {/* Title */}
                         <Text style={styles.modalTitle}>{selectedNotification?.title}</Text>
 
-                        <View style={styles.modalMeta}>
-                            <Calendar size={14} color="#6B7280" />
-                            <Text style={styles.modalTime}>
-                                {selectedNotification?.createdAt ? format(new Date(selectedNotification.createdAt), 'PPP p') : ''}
-                            </Text>
-                        </View>
+                        {/* Time */}
+                        <Text style={styles.modalTime}>
+                            {selectedNotification?.createdAt
+                                ? format(new Date(selectedNotification.createdAt), 'MMMM d, yyyy • h:mm a')
+                                : ''
+                            }
+                        </Text>
 
-                        <View style={styles.divider} />
-
+                        {/* Message */}
                         <Text style={styles.modalMessage}>{selectedNotification?.message}</Text>
 
+                        {/* Sender */}
+                        {selectedNotification?.sender && (
+                            <View style={styles.modalSender}>
+                                <Text style={styles.modalSenderLabel}>From</Text>
+                                <Text style={styles.modalSenderName}>
+                                    {selectedNotification.sender.name}
+                                    {selectedNotification.sender.role?.name && (
+                                        <Text style={styles.modalSenderRole}>
+                                            {' '}• {selectedNotification.sender.role.name}
+                                        </Text>
+                                    )}
+                                </Text>
+                            </View>
+                        )}
+
+                        {/* Close Button */}
                         <TouchableOpacity
                             style={styles.closeButton}
                             onPress={() => setModalVisible(false)}
+                            activeOpacity={0.7}
                         >
-                            <Text style={styles.closeButtonText}>Close</Text>
+                            <Text style={styles.closeButtonText}>Done</Text>
                         </TouchableOpacity>
-                    </View>
-                </View>
+                    </TouchableOpacity>
+                </TouchableOpacity>
             </Modal>
         </SafeAreaView>
     );
@@ -274,159 +357,164 @@ export default function NotificationScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#F9FAFB', // Light gray background for professional look
+        backgroundColor: '#fff',
     },
     loadingContainer: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
+        backgroundColor: '#fff',
     },
+
+    // Header - Clean Instagram style
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 20,
-        paddingVertical: 16,
+        paddingHorizontal: 16,
+        paddingVertical: 12,
         backgroundColor: '#fff',
-        borderBottomWidth: 1,
-        borderBottomColor: '#E5E7EB',
-        marginTop: Platform.OS === 'android' ? 30 : 0,
+        borderBottomWidth: 0.5,
+        borderBottomColor: '#E5E5EA',
     },
-    headerTitleContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
+    backButton: {
+        padding: 4,
     },
     headerTitle: {
-        fontSize: 20,
-        fontWeight: '700',
-        color: '#111827',
-    },
-    badgeContainer: {
-        backgroundColor: '#EEF2FF',
-        paddingHorizontal: 8,
-        paddingVertical: 2,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: '#C7D2FE',
-    },
-    badgeText: {
-        color: '#4F46E5',
-        fontSize: 12,
+        fontSize: 17,
         fontWeight: '600',
+        color: '#000',
+        letterSpacing: -0.4,
     },
+
+    // List
     listContent: {
-        paddingHorizontal: 16,
         paddingBottom: 40,
     },
+
+    // Section Header
     sectionHeader: {
-        marginTop: 24,
-        marginBottom: 12,
+        paddingHorizontal: 16,
+        paddingTop: 24,
+        paddingBottom: 8,
+        backgroundColor: '#fff',
     },
     sectionHeaderText: {
-        fontSize: 14,
+        fontSize: 15,
         fontWeight: '600',
-        color: '#6B7280',
-        textTransform: 'uppercase',
-        letterSpacing: 0.5,
+        color: '#000',
     },
-    cardContainer: {
-        backgroundColor: '#fff',
-        borderRadius: 16,
-        marginBottom: 12,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-        elevation: 2,
-        borderWidth: 1,
-        borderColor: '#F3F4F6',
-        overflow: 'hidden',
-    },
-    unreadCard: {
-        backgroundColor: '#fff',
-        borderColor: '#E0E7FF',
-        borderLeftWidth: 4,
-        borderLeftColor: '#4F46E5',
-    },
-    cardContent: {
-        padding: 16,
+
+    // Notification Item - Instagram style
+    notificationItem: {
         flexDirection: 'row',
-        gap: 16,
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        backgroundColor: '#fff',
     },
-    iconContainer: {
-        width: 48,
-        height: 48,
-        borderRadius: 12,
+    unreadItem: {
+        backgroundColor: '#F2F8FF',
+    },
+    itemBorder: {
+        borderBottomWidth: 0.5,
+        borderBottomColor: '#E5E5EA',
+    },
+    iconWrapper: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
         justifyContent: 'center',
         alignItems: 'center',
+        marginRight: 12,
     },
-    textContainer: {
-        flex: 1,
-        gap: 4,
-    },
-    cardHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-    },
-    cardTitle: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: '#1F2937',
+    contentWrapper: {
         flex: 1,
         marginRight: 8,
     },
-    unreadText: {
-        color: '#111827',
-        fontWeight: '700',
-    },
-    timeText: {
-        fontSize: 12,
-        color: '#9CA3AF',
-    },
-    cardMessage: {
+    notificationText: {
         fontSize: 14,
-        color: '#6B7280',
-        lineHeight: 20,
+        color: '#3C3C43',
+        lineHeight: 18,
+    },
+    titleText: {
+        fontWeight: '400',
+        color: '#000',
+    },
+    unreadTitle: {
+        fontWeight: '600',
     },
     senderText: {
-        fontSize: 12,
-        color: '#4F46E5',
-        fontWeight: '500',
-        marginTop: 4,
+        fontSize: 13,
+        color: '#8E8E93',
+        marginTop: 2,
+    },
+    timeWrapper: {
+        alignItems: 'flex-end',
+        gap: 4,
+    },
+    timeText: {
+        fontSize: 13,
+        color: '#8E8E93',
     },
     unreadDot: {
-        position: 'absolute',
-        top: 16,
-        right: 16,
         width: 8,
         height: 8,
         borderRadius: 4,
-        backgroundColor: '#4F46E5',
+        backgroundColor: '#007AFF',
     },
+
+    // Empty State
     emptyContainer: {
         alignItems: 'center',
         justifyContent: 'center',
-        paddingTop: 100,
-        gap: 12,
+        paddingTop: 120,
+        paddingHorizontal: 40,
     },
-    emptyText: {
-        fontSize: 16,
-        color: '#9CA3AF',
-        fontWeight: '500',
+    emptyIconWrapper: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        backgroundColor: '#F2F2F7',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 16,
     },
+    emptyTitle: {
+        fontSize: 20,
+        fontWeight: '600',
+        color: '#000',
+        marginBottom: 8,
+    },
+    emptySubtitle: {
+        fontSize: 15,
+        color: '#8E8E93',
+        textAlign: 'center',
+        lineHeight: 20,
+    },
+
+    // Modal - Bottom Sheet
     modalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.5)',
+        backgroundColor: 'rgba(0,0,0,0.4)',
         justifyContent: 'flex-end',
     },
     modalContent: {
         backgroundColor: '#fff',
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-        padding: 24,
-        minHeight: '40%',
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+        paddingHorizontal: 20,
+        paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+        minHeight: 300,
+    },
+    modalHandle: {
+        width: 36,
+        height: 5,
+        borderRadius: 3,
+        backgroundColor: '#E5E5EA',
+        alignSelf: 'center',
+        marginTop: 8,
+        marginBottom: 20,
     },
     modalHeader: {
         flexDirection: 'row',
@@ -434,52 +522,74 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: 16,
     },
-    modalType: {
-        fontSize: 12,
-        fontWeight: '700',
-        color: '#4F46E5',
-        backgroundColor: '#EEF2FF',
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 6,
-        overflow: 'hidden',
-    },
-    modalTitle: {
-        fontSize: 20,
-        fontWeight: '700',
-        color: '#111827',
-        marginBottom: 8,
-    },
-    modalMeta: {
+    modalTypeContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 6,
-        marginBottom: 20,
+        gap: 8,
+    },
+    modalIconWrapper: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    modalType: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#8E8E93',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    modalTitle: {
+        fontSize: 22,
+        fontWeight: '700',
+        color: '#000',
+        marginBottom: 4,
+        letterSpacing: -0.4,
     },
     modalTime: {
-        fontSize: 14,
-        color: '#6B7280',
-    },
-    divider: {
-        height: 1,
-        backgroundColor: '#E5E7EB',
+        fontSize: 13,
+        color: '#8E8E93',
         marginBottom: 20,
     },
     modalMessage: {
         fontSize: 16,
-        color: '#374151',
+        color: '#3C3C43',
         lineHeight: 24,
-        marginBottom: 32,
+        marginBottom: 24,
+    },
+    modalSender: {
+        paddingTop: 16,
+        borderTopWidth: 0.5,
+        borderTopColor: '#E5E5EA',
+        marginBottom: 24,
+    },
+    modalSenderLabel: {
+        fontSize: 12,
+        color: '#8E8E93',
+        marginBottom: 4,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    modalSenderName: {
+        fontSize: 15,
+        color: '#000',
+        fontWeight: '500',
+    },
+    modalSenderRole: {
+        color: '#8E8E93',
+        fontWeight: '400',
     },
     closeButton: {
-        backgroundColor: '#F3F4F6',
-        paddingVertical: 16,
-        borderRadius: 16,
+        backgroundColor: '#F2F2F7',
+        paddingVertical: 14,
+        borderRadius: 12,
         alignItems: 'center',
     },
     closeButtonText: {
         fontSize: 16,
         fontWeight: '600',
-        color: '#1F2937',
+        color: '#007AFF',
     },
 });

@@ -2800,7 +2800,7 @@ export default function HomeScreen() {
                 {/* Quick Actions */}
                 <View style={styles.dashboardSection}>
                     <Text style={styles.dashboardSectionTitle}>Quick Actions</Text>
-                    <View style={styles.actionsGrid}>
+                    <View style={styles.actionsGrid3x3}>
                         {[
                             { icon: Calendar, label: 'Leave Mgmt', color: '#8B5CF6', bgColor: '#F5F3FF', href: '/(screens)/director/leave-management' },
                             { icon: Users, label: 'Manage Staff', color: '#10B981', bgColor: '#D1FAE5', href: '/(screens)/director/teachers' },
@@ -2810,7 +2810,7 @@ export default function HomeScreen() {
                             { icon: Settings, label: 'Settings', color: '#64748B', bgColor: '#F1F5F9', href: '/profile' },
                         ].map((action, index) => (
                             <HapticTouchable key={action.label} onPress={() => action.href && router.push(action.href)} disabled={!action.href}>
-                                <View style={[styles.actionButton, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5 }]}>
+                                <View style={[styles.actionButton3x3, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5 }]}>
                                     <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
                                         <action.icon size={22} color={action.color} />
                                     </View>
@@ -3028,7 +3028,7 @@ export default function HomeScreen() {
                 {/* Quick Actions */}
                 <View style={styles.dashboardSection}>
                     <Text style={styles.dashboardSectionTitle}>Quick Actions</Text>
-                    <View style={styles.actionsGrid}>
+                    <View style={styles.actionsGrid3x3}>
                         {[
                             { icon: Calendar, label: 'Leave Mgmt', color: '#8B5CF6', bgColor: '#F5F3FF', href: '/(screens)/principal/leave-management' },
                             { icon: CheckCircle2, label: 'Approvals', color: '#10B981', bgColor: '#D1FAE5', href: '/(screens)/principal/approvals' },
@@ -3038,7 +3038,7 @@ export default function HomeScreen() {
                             { icon: Settings, label: 'Settings', color: '#64748B', bgColor: '#F1F5F9', href: '/profile' },
                         ].map((action, index) => (
                             <HapticTouchable key={action.label} onPress={() => action.href && router.push(action.href)} disabled={!action.href}>
-                                <View style={[styles.actionButton, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5 }]}>
+                                <View style={[styles.actionButton3x3, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5 }]}>
                                     <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
                                         <action.icon size={22} color={action.color} />
                                     </View>
@@ -3744,14 +3744,31 @@ const styles = StyleSheet.create({
         color: 'rgba(255,255,255,0.9)',
         fontWeight: '600',
     },
+    // Default 2x2 grid for most roles
     actionsGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 12,
+        marginTop: 12,
+    },
+    actionButton: {
+        // 2 columns: screen - section padding (12 or 16 on each side) - gap / 2
+        width: (SCREEN_WIDTH - (isSmallDevice ? 24 : 32) - 12) / 2,
+        padding: 16,
+        borderRadius: 16,
+        alignItems: 'center',
+        justifyContent: 'center',
+        minHeight: 100,
+    },
+    // 3x3 grid for Director/Principal
+    actionsGrid3x3: {
         flexDirection: 'row',
         flexWrap: 'wrap',
         gap: 10,
         marginTop: 12,
     },
-    actionButton: {
-        width: (SCREEN_WIDTH - 40 - 20) / 3,
+    actionButton3x3: {
+        width: (SCREEN_WIDTH - 40 - 20) / 3, // 3 columns
         padding: 16,
         borderRadius: 16,
         alignItems: 'center',
@@ -3763,9 +3780,10 @@ const styles = StyleSheet.create({
         borderRadius: 24,
         justifyContent: 'center',
         alignItems: 'center',
+        marginBottom: 8,
     },
     actionLabel: {
-        fontSize: 12,
+        fontSize: 13,
         fontWeight: '600',
         color: '#333',
         textAlign: 'center',

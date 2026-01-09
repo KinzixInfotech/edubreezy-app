@@ -29,7 +29,7 @@ import {
     Moon,
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE, AnimatedRegion, Animated as AnimatedMarker } from 'react-native-maps';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
 
@@ -53,6 +53,14 @@ export default function BusTrackingScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const mapRef = useRef(null);
     const markerRef = useRef(null);
+
+    // Animated coordinate for smooth bus marker movement
+    const animatedCoordinate = useRef(new AnimatedRegion({
+        latitude: 20.5937,
+        longitude: 78.9629,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+    })).current;
 
     // Parse child data from params
     const childData = params.childData ? JSON.parse(params.childData) : null;
@@ -109,18 +117,57 @@ export default function BusTrackingScreen() {
     // Edge Case #19: Detect stale data despite "MOVING" status
     const isStale = secondsAgo > 60 && status === 'MOVING';
 
-    // Animate map to bus location when it updates
+    // Haversine formula to calculate distance in km
+    const getDistanceKm = (lat1, lon1, lat2, lon2) => {
+        const R = 6371; // Earth radius in km
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) ** 2 +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon / 2) ** 2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    };
+
+    // Calculate ETA to child's stop
+    const childStop = assignment?.stop;
+    const distanceToStop = (location?.latitude && childStop?.latitude)
+        ? getDistanceKm(location.latitude, location.longitude, childStop.latitude, childStop.longitude)
+        : null;
+
+    // Estimate arrival time (assume avg speed 25 km/h in city, use actual if available)
+    const speedKmh = location?.speed ? location.speed * 3.6 : 25; // Convert m/s to km/h or default
+    const etaMinutes = (distanceToStop && speedKmh > 0)
+        ? Math.round((distanceToStop / speedKmh) * 60)
+        : null;
+
+    // Calculate arrival time
+    const arrivalTime = etaMinutes
+        ? new Date(Date.now() + etaMinutes * 60 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : null;
+
+    // Animate map and marker to bus location when it updates
     useEffect(() => {
-        if (location?.latitude && location?.longitude && mapRef.current) {
-            // Only maximize zoom if it's the first load or user hasn't moved map much
-            // For now, just animate smoothly
-            mapRef.current.animateCamera({
-                center: {
-                    latitude: location.latitude,
-                    longitude: location.longitude,
-                },
-                zoom: 15,
-            }, { duration: 1000 }); // Slower duration for smoother feel
+        if (location?.latitude && location?.longitude) {
+            // Animate marker smoothly to new position
+            animatedCoordinate.timing({
+                latitude: location.latitude,
+                longitude: location.longitude,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
+                duration: 800,
+                useNativeDriver: false,
+            }).start();
+
+            // Also move the map camera
+            if (mapRef.current) {
+                mapRef.current.animateCamera({
+                    center: {
+                        latitude: location.latitude,
+                        longitude: location.longitude,
+                    },
+                    zoom: 17,
+                }, { duration: 800 });
+            }
         }
     }, [location?.latitude, location?.longitude]);
 
@@ -200,7 +247,7 @@ export default function BusTrackingScreen() {
                         <ArrowLeft size={24} color="#111" />
                     </View>
                 </HapticTouchable>
-                <View>
+                <View style={styles.headerCenter}>
                     <Text style={styles.headerTitle}>{childData.name}'s Bus</Text>
                     {vehicle && <Text style={styles.headerSubtitle}>{vehicle.licensePlate}</Text>}
                 </View>
@@ -245,11 +292,14 @@ export default function BusTrackingScreen() {
                                 ref={mapRef}
                                 provider={PROVIDER_GOOGLE}
                                 style={styles.map}
+                                mapType="standard"
+                                showsPointsOfInterest={true}
+                                showsBuildings={true}
                                 initialRegion={{
                                     latitude: location.latitude,
                                     longitude: location.longitude,
-                                    latitudeDelta: 0.015,
-                                    longitudeDelta: 0.015,
+                                    latitudeDelta: 0.008,
+                                    longitudeDelta: 0.008,
                                 }}
                                 showsUserLocation={true}
                                 showsMyLocationButton={true}
@@ -359,6 +409,33 @@ export default function BusTrackingScreen() {
                             </View>
                         )}
 
+                        {/* ETA Card - Show when bus is moving and we have ETA data */}
+                        {status === 'MOVING' && etaMinutes !== null && (
+                            <View style={styles.etaCard}>
+                                <View style={styles.etaHeader}>
+                                    <Clock size={20} color="#2563EB" />
+                                    <Text style={styles.etaTitle}>Arriving Soon!</Text>
+                                </View>
+                                <View style={styles.etaContent}>
+                                    <View style={styles.etaItem}>
+                                        <Text style={styles.etaValue}>{distanceToStop?.toFixed(1)} km</Text>
+                                        <Text style={styles.etaLabel}>Distance</Text>
+                                    </View>
+                                    <View style={styles.etaDivider} />
+                                    <View style={styles.etaItem}>
+                                        <Text style={styles.etaValue}>{etaMinutes} min</Text>
+                                        <Text style={styles.etaLabel}>ETA</Text>
+                                    </View>
+                                    <View style={styles.etaDivider} />
+                                    <View style={styles.etaItem}>
+                                        <Text style={styles.etaValue}>{arrivalTime}</Text>
+                                        <Text style={styles.etaLabel}>Arrives</Text>
+                                    </View>
+                                </View>
+                                <Text style={styles.etaNote}>📍 To: {childStop?.name || 'Your Stop'}</Text>
+                            </View>
+                        )}
+
                         {!driver && (
                             <View style={[styles.card, styles.warningCard]}>
                                 <View style={styles.cardHeader}>
@@ -447,6 +524,85 @@ export default function BusTrackingScreen() {
                                 </View>
                             </View>
                         )}
+
+                        {/* Vehicle Info Card */}
+                        {vehicle && (
+                            <View style={styles.card}>
+                                <View style={styles.cardHeader}>
+                                    <Bus size={16} color="#64748B" />
+                                    <Text style={styles.cardTitle}>Vehicle Info</Text>
+                                </View>
+                                <View style={styles.vehicleInfoGrid}>
+                                    <View style={styles.vehicleInfoItem}>
+                                        <Text style={styles.vehicleInfoLabel}>Model</Text>
+                                        <Text style={styles.vehicleInfoValue}>{vehicle.model || 'N/A'}</Text>
+                                    </View>
+                                    <View style={styles.vehicleInfoItem}>
+                                        <Text style={styles.vehicleInfoLabel}>Capacity</Text>
+                                        <Text style={styles.vehicleInfoValue}>{vehicle.capacity ? `${vehicle.capacity} seats` : 'N/A'}</Text>
+                                    </View>
+                                    <View style={styles.vehicleInfoItem}>
+                                        <Text style={styles.vehicleInfoLabel}>License</Text>
+                                        <Text style={styles.vehicleInfoValue}>{vehicle.licensePlate || 'N/A'}</Text>
+                                    </View>
+                                    <View style={styles.vehicleInfoItem}>
+                                        <Text style={styles.vehicleInfoLabel}>Status</Text>
+                                        <View style={[styles.tripBadge,
+                                        status === 'MOVING' ? { backgroundColor: '#DCFCE7' } :
+                                            status === 'IDLE' ? { backgroundColor: '#FEF9C3' } :
+                                                { backgroundColor: '#FEE2E2' }
+                                        ]}>
+                                            <Text style={[styles.tripBadgeText,
+                                            status === 'MOVING' ? { color: '#16A34A' } :
+                                                status === 'IDLE' ? { color: '#CA8A04' } :
+                                                    { color: '#DC2626' }
+                                            ]}>{status}</Text>
+                                        </View>
+                                    </View>
+                                </View>
+                            </View>
+                        )}
+
+                        {/* Route Summary Card - show even without active trip */}
+                        {assignment && (
+                            <View style={styles.card}>
+                                <View style={styles.cardHeader}>
+                                    <Navigation size={16} color="#64748B" />
+                                    <Text style={styles.cardTitle}>Route Information</Text>
+                                </View>
+                                <View style={styles.routeSummary}>
+                                    <View style={styles.routeSummaryItem}>
+                                        <MapPin size={18} color="#3B82F6" />
+                                        <View style={styles.routeSummaryText}>
+                                            <Text style={styles.routeSummaryLabel}>Stop</Text>
+                                            <Text style={styles.routeSummaryValue}>{assignment.stop?.name || 'Not Assigned'}</Text>
+                                        </View>
+                                    </View>
+                                    <View style={styles.routeSummaryItem}>
+                                        <Clock size={18} color="#10B981" />
+                                        <View style={styles.routeSummaryText}>
+                                            <Text style={styles.routeSummaryLabel}>Pickup Time</Text>
+                                            <Text style={styles.routeSummaryValue}>{assignment.stop?.pickupTime || 'N/A'}</Text>
+                                        </View>
+                                    </View>
+                                    <View style={styles.routeSummaryItem}>
+                                        <Clock size={18} color="#EF4444" />
+                                        <View style={styles.routeSummaryText}>
+                                            <Text style={styles.routeSummaryLabel}>Drop Time</Text>
+                                            <Text style={styles.routeSummaryValue}>{assignment.stop?.dropTime || 'N/A'}</Text>
+                                        </View>
+                                    </View>
+                                </View>
+                            </View>
+                        )}
+
+                        {/* Helpful Tips */}
+                        <View style={styles.tipsCard}>
+                            <Text style={styles.tipsTitle}>💡 Tracking Tips</Text>
+                            <Text style={styles.tipsText}>• Location updates every 10 seconds when bus is moving</Text>
+                            <Text style={styles.tipsText}>• Tap the call button to contact driver directly</Text>
+                            <Text style={styles.tipsText}>• Pull down to refresh for latest location</Text>
+                        </View>
                     </ScrollView>
                 </View>
             )}
@@ -462,6 +618,7 @@ const styles = StyleSheet.create({
     header: {
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'space-between',
         paddingTop: Platform.OS === 'ios' ? 60 : 40,
         paddingBottom: 16,
         paddingHorizontal: 20,
@@ -471,9 +628,12 @@ const styles = StyleSheet.create({
     },
     backButton: {
         padding: 8,
-        marginRight: 12,
         borderRadius: 20,
         backgroundColor: '#F1F5F9',
+    },
+    headerCenter: {
+        flex: 1,
+        marginLeft: 12,
     },
     headerTitle: {
         fontSize: 18,
@@ -485,7 +645,6 @@ const styles = StyleSheet.create({
         color: '#64748B',
     },
     refreshButton: {
-        marginLeft: 'auto',
         padding: 8,
         borderRadius: 20,
         backgroundColor: '#EFF6FF',
@@ -529,6 +688,7 @@ const styles = StyleSheet.create({
         height: height * 0.45,
         width: '100%',
         position: 'relative',
+        paddingBottom: 30, // Space for Google logo
     },
     map: {
         ...StyleSheet.absoluteFillObject,
@@ -618,16 +778,17 @@ const styles = StyleSheet.create({
     },
     detailsContainer: {
         flex: 1,
-        backgroundColor: '#fff',
+        backgroundColor: '#F8FAFC',
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
-        marginTop: -20,
-        padding: 20,
+        marginTop: -20, // Overlap for rounded corner effect
+        paddingTop: 20,
+        paddingHorizontal: 16,
         paddingBottom: 40,
     },
     card: {
         backgroundColor: '#fff',
-        borderRadius: 12,
+        borderRadius: 16,
         borderWidth: 1,
         borderColor: '#E2E8F0',
         padding: 16,
@@ -781,4 +942,129 @@ const styles = StyleSheet.create({
     busMarkerIdle: { backgroundColor: '#EAB308' },
     busMarkerOffline: { backgroundColor: '#EF4444' },
     busMarkerStale: { backgroundColor: '#F97316' }, // Orange for stale data
+
+    // Vehicle Info Grid
+    vehicleInfoGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+    },
+    vehicleInfoItem: {
+        width: '50%',
+        paddingVertical: 8,
+    },
+    vehicleInfoLabel: {
+        fontSize: 11,
+        color: '#64748B',
+        marginBottom: 2,
+    },
+    vehicleInfoValue: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#0F172A',
+    },
+
+    // Route Summary
+    routeSummary: {
+        gap: 12,
+    },
+    routeSummaryItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        backgroundColor: '#F8FAFC',
+        borderRadius: 10,
+    },
+    routeSummaryText: {
+        marginLeft: 12,
+    },
+    routeSummaryLabel: {
+        fontSize: 11,
+        color: '#64748B',
+    },
+    routeSummaryValue: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#0F172A',
+    },
+
+    // Tips Card
+    tipsCard: {
+        backgroundColor: '#EFF6FF',
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: '#DBEAFE',
+    },
+    tipsTitle: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#1E40AF',
+        marginBottom: 8,
+    },
+    tipsText: {
+        fontSize: 12,
+        color: '#3B82F6',
+        lineHeight: 20,
+    },
+
+    // ETA Card Styles
+    etaCard: {
+        backgroundColor: '#F5F5F5',
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    etaHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 12,
+    },
+    etaTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#1E40AF',
+        marginLeft: 8,
+    },
+    etaContent: {
+        flexDirection: 'row',
+        justifyContent: 'space-around',
+        alignItems: 'center',
+        backgroundColor: '#fff',
+        borderRadius: 12,
+        paddingVertical: 16,
+        paddingHorizontal: 8,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    etaItem: {
+        alignItems: 'center',
+        flex: 1,
+    },
+    etaValue: {
+        fontSize: 24,
+        fontWeight: '900',
+        color: '#1E40AF',
+    },
+    etaLabel: {
+        fontSize: 11,
+        color: '#6B7280',
+        marginTop: 4,
+        fontWeight: '500',
+    },
+    etaDivider: {
+        width: 1,
+        height: 30,
+        backgroundColor: '#E5E7EB',
+    },
+    etaNote: {
+        fontSize: 12,
+        color: '#374151',
+        marginTop: 12,
+        textAlign: 'center',
+        fontWeight: '500',
+    },
 });

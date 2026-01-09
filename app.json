@@ -14,6 +14,9 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
+      "config": {
+        "googleMapsApiKey": "AIzaSyC9uUUe_WgeFn_n-1S6p1ZU1UkNlPSannI"
+      },
       "supportsTablet": true,
       "infoPlist": {
         "UIBackgroundModes": [
@@ -32,6 +35,11 @@
       "notification": {
         "icon": "./assets/icon.png",
         "color": "#ffffff"
+      },
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyC9uUUe_WgeFn_n-1S6p1ZU1UkNlPSannI"
+        }
       },
       "googleServicesFile": "./google-services.json",
       "plugins": [

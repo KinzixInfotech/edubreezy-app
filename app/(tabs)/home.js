@@ -16,7 +16,11 @@ import {
     TimerIcon,
     Plus,
     ArrowRight,
-    PartyPopperIcon
+    PartyPopperIcon,
+    ChartPie,
+    Clock,
+    CalendarDays,
+    Umbrella
 } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
@@ -4162,12 +4166,12 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
     });
 
     // Extract data
-    const delegationCheck = apiStats?.delegations;
+    const delegationCheck = dashboardData?.delegations;
     // Get events and notices from dashboard data
-    // const upcomingEvents = apiStats?.events || [];
-    const recentNotices = apiStats?.notices || [];
-    const attendanceStats = apiStats?.attendance;
-    const leaveData = apiStats?.leaves;
+    // const upcomingEvents = dashboardData?.events || [];
+    const recentNotices = dashboardData?.notices || [];
+    const attendanceStats = dashboardData?.attendance;
+    const leaveData = dashboardData?.leaves;
 
     const notices = recentNotices?.notices?.map((n) => ({
         id: n.id,
@@ -4245,6 +4249,7 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
                 { icon: Clock, label: 'My Timetable', color: '#8B5CF6', bgColor: '#EDE9FE', href: "/teachers/timetable" },
             ],
         },
+
     ];
 
     // MAIN LOADER - Shows until EVERYTHING is ready

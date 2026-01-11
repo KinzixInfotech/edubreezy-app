@@ -149,19 +149,15 @@ export default function ProfileSelectorScreen() {
 
                     if (setError) {
                         console.error('❌ Session restore failed:', setError.message);
-                        // Continue anyway but warn user
-                        Alert.alert(
-                            'Session Issue',
-                            'Please re-login to enable full features. For now, you can browse the app.',
-                            [{ text: 'Continue Anyway' }, {
-                                text: 'Re-Login', onPress: () => {
-                                    router.push({
-                                        pathname: '/(auth)/login',
-                                        params: { schoolConfig: params.schoolData },
-                                    });
-                                }
-                            }]
-                        );
+                        // User requested seamless re-login flow
+                        router.replace({
+                            pathname: '/(auth)/login',
+                            params: {
+                                schoolConfig: JSON.stringify(schoolData),
+                                prefillEmail: profile.email
+                            },
+                        });
+                        return;
                     } else {
                         sessionRestored = true;
                         console.log('✅ Session restored via setSession');

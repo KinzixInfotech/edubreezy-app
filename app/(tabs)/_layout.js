@@ -29,7 +29,7 @@ export default function TabsLayout() {
           showProfile: true,
           showNoticeBoard: true,
           showMarkAttendance: false,
-          showSettings: true,
+
         };
       case 'TEACHING_STAFF':
         return {
@@ -38,7 +38,7 @@ export default function TabsLayout() {
           markSelf: false,
           showNoticeBoard: true,
           showMarkAttendance: true,
-          showSettings: true,
+
         };
       case 'ADMIN':
         return {
@@ -46,7 +46,7 @@ export default function TabsLayout() {
           showProfile: true,
           showNoticeBoard: true,
           showMarkAttendance: false,
-          showSettings: true,
+
         };
       case 'PARENT':
         return {
@@ -55,7 +55,7 @@ export default function TabsLayout() {
           markSelf: false,
           showNoticeBoard: true,
           showMarkAttendance: false,
-          showSettings: true,
+
         };
       case 'DIRECTOR':
         return {
@@ -64,7 +64,6 @@ export default function TabsLayout() {
           markSelf: false,
           showNoticeBoard: true,
           showMarkAttendance: false,
-          showSettings: false,
         };
       case 'PRINCIPAL':
         return {
@@ -73,7 +72,6 @@ export default function TabsLayout() {
           markSelf: false,
           showNoticeBoard: true,
           showMarkAttendance: false,
-          showSettings: false,
         };
       default:
         return {
@@ -82,7 +80,7 @@ export default function TabsLayout() {
           showNoticeBoard: false,
           markSelf: false,
           showMarkAttendance: false,
-          showSettings: true,
+
         };
     }
   };
@@ -171,23 +169,6 @@ export default function TabsLayout() {
             tabBarIcon: ({ focused, color, size }) => (
               <Ionicons
                 name={focused ? 'book' : 'book-outline'}
-                size={size}
-                color={color}
-              />
-            ),
-          }}
-        />
-
-
-        <Tabs.Screen
-          name="settings"
-          options={{
-            title: 'Settings',
-            href: tabConfig.showSettings ? undefined : null,
-            tabBarItemStyle: tabConfig.showSettings ? undefined : { display: 'none' },
-            tabBarIcon: ({ focused, color, size }) => (
-              <Ionicons
-                name={focused ? 'settings' : 'settings-outline'}
                 size={size}
                 color={color}
               />

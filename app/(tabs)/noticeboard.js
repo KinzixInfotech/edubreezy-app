@@ -47,8 +47,43 @@ const EmptyState = React.memo(({ isSentTab }) => (
   </View>
 ));
 
+// Helper to get initials from name
+const getInitials = (name) => {
+  if (!name) return '?';
+  const words = name.trim().split(' ').filter(Boolean);
+  if (words.length === 1) return words[0].charAt(0).toUpperCase();
+  return (words[0].charAt(0) + words[words.length - 1].charAt(0)).toUpperCase();
+};
+
+// Author Avatar Component
+const AuthorAvatar = React.memo(({ profilePic, name, size = 40, isSent = false }) => {
+  const initials = getInitials(name);
+  const containerSize = size;
+  const fontSize = size * 0.4;
+
+  if (profilePic) {
+    return (
+      <Image
+        source={{ uri: profilePic }}
+        style={[styles.authorAvatar, { width: containerSize, height: containerSize, borderRadius: containerSize / 2 }]}
+        contentFit="cover"
+      />
+    );
+  }
+
+  return (
+    <View style={[
+      styles.authorAvatarFallback,
+      { width: containerSize, height: containerSize, borderRadius: containerSize / 2 },
+      isSent && styles.sentAvatarFallback
+    ]}>
+      <Text style={[styles.authorAvatarInitials, { fontSize }]}>{initials}</Text>
+    </View>
+  );
+});
+
 const NoticeBoardScreen = () => {
-  // User state
+  // User state (forcing refresh)
   const [schoolId, setSchoolId] = useState(null);
   const [userId, setUserId] = useState(null);
   const [userRole, setUserRole] = useState(null);
@@ -109,11 +144,17 @@ const NoticeBoardScreen = () => {
         }));
       }
 
-      const cat = selectedCategory === 'All' ? '' : `&category=${selectedCategory}`;
-      const unread = selectedCategory === 'Unread' ? '&unread=true' : '';
-      const res = await api.get(
-        `/notices/${schoolId}?userId=${userId}${cat}${unread}&limit=50`
-      );
+      // Build query params based on selected filter
+      // 'All' = no filters, 'Unread' = unread only, others = category filter
+      let queryParams = `userId=${userId}&limit=50`;
+
+      if (selectedCategory === 'Unread') {
+        queryParams += '&unread=true';
+      } else if (selectedCategory !== 'All') {
+        queryParams += `&category=${selectedCategory}`;
+      }
+
+      const res = await api.get(`/notices/${schoolId}?${queryParams}`);
       return res.data.notices || [];
     },
     enabled: isUserLoaded && !!schoolId && !!userId,
@@ -164,6 +205,8 @@ const NoticeBoardScreen = () => {
       : '';
 
     const hasImage = !!item.fileUrl;
+    const authorName = item.authorName || item.issuedBy || 'Unknown';
+    const authorPic = item.authorProfilePic;
 
     return (
       <HapticTouchable onPress={() => openNoticeDetail(item)}>
@@ -334,13 +377,24 @@ const NoticeBoardScreen = () => {
                     </View>
                   )}
 
-                  {/* Issued By */}
+                  {/* Issued By with Avatar */}
                   <View style={styles.issuedBySection}>
-                    <Text style={styles.issuedByLabel}>
-                      {selectedNotice.isSent ? 'Sent by: ' : 'Issued by: '}
-                      {selectedNotice.issuedBy || 'You'}
-                    </Text>
-                    <Text style={styles.issuedByRole}>{selectedNotice.issuerRole}</Text>
+                    <View style={styles.issuedByRow}>
+                      <AuthorAvatar
+                        profilePic={selectedNotice.authorProfilePic}
+                        name={selectedNotice.authorName || selectedNotice.issuedBy}
+                        size={48}
+                        isSent={selectedNotice.isSent}
+                      />
+                      <View style={styles.issuedByInfo}>
+                        <Text style={styles.issuedByName}>
+                          {selectedNotice.authorName || selectedNotice.issuedBy || 'You'}
+                        </Text>
+                        <Text style={styles.issuedByRole}>
+                          {selectedNotice.issuerRole || 'Administration'}
+                        </Text>
+                      </View>
+                    </View>
                   </View>
 
                   {/* Content */}
@@ -724,6 +778,66 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '500',
     color: '#4B5563',
+  },
+  // Author Avatar styles
+  authorAvatar: {
+    backgroundColor: '#E5E7EB',
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+  },
+  authorAvatarFallback: {
+    backgroundColor: '#0469ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sentAvatarFallback: {
+    backgroundColor: '#10B981',
+  },
+  authorAvatarInitials: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+  noticeAuthorName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#111',
+    flex: 1,
+    marginRight: 8,
+  },
+  noticeMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 2,
+  },
+  hasImageBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 6,
+    gap: 4,
+    marginTop: 4,
+    alignSelf: 'flex-start',
+  },
+  hasImageText: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: '#6B7280',
+  },
+  issuedByRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  issuedByInfo: {
+    flex: 1,
+  },
+  issuedByName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#111',
   },
 });
 

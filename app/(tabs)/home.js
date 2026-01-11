@@ -431,14 +431,16 @@ export default function HomeScreen() {
         const title = replaceDynamic(config.title, roleKey);
         const subtitle = config.subtitle.map((item, i) => {
             const text = replaceDynamic(item.text, roleKey);
-            const style =
+            const baseStyle =
                 item.type === 'role' ? styles.role :
                     item.type === 'separator' ? styles.separator :
                         item.type === 'school' ? styles.school :
                             item.type === 'department' ? styles.school :
                                 item.type === 'childClass' ? styles.school :
                                     item.type === 'static' ? styles.role : styles.role;
-            return <Text key={i} style={style} numberOfLines={1}>{text}</Text>;
+
+            // Override color for white background
+            return <Text key={i} style={[baseStyle, { color: 'rgba(255,255,255,0.9)' }]} numberOfLines={1}>{text}</Text>;
         });
 
         const icons = config.icons.map((key, i) => {
@@ -457,12 +459,12 @@ export default function HomeScreen() {
                                 undefined
                     }
                 >
-                    <View style={styles.iconButton}>
-                        <Icon size={isSmallDevice ? 18 : 20} color="#0469ff" />
+                    <View style={[styles.iconButton, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
+                        <Icon size={isSmallDevice ? 18 : 20} color="#fff" />
 
                         {isBell && unreadCount > 0 && (
-                            <View style={styles.badge}>
-                                <Text style={styles.badgeText}>
+                            <View style={[styles.badge, { backgroundColor: '#fff', borderWidth: 1, borderColor: '#0469ff' }]}>
+                                <Text style={[styles.badgeText, { color: '#0469ff' }]}>
                                     {unreadCount > 99 ? '99+' : unreadCount}
                                 </Text>
                             </View>
@@ -471,6 +473,7 @@ export default function HomeScreen() {
                 </HapticTouchable>
             );
         });
+
         function getGreeting() {
             // Get current time in IST
             const now = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
@@ -487,49 +490,70 @@ export default function HomeScreen() {
 
 
         return (
-            <View style={styles.header}>
+            <LinearGradient
+                colors={['#0469ff', '#0256d0']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.header, {
+                    borderBottomWidth: 0,
+                    paddingBottom: 25,
+                    // marginTop: 10,
+                    paddingTop: isSmallDevice ? 10 : 15,
+                    borderBottomLeftRadius: 32,
+                    borderBottomRightRadius: 32,
+                    marginBottom: 10,
+                }]}
+            >
+                {/* Background Pattern */}
+                <View style={{ position: 'absolute', top: -50, right: -50, width: 200, height: 200, borderRadius: 100, backgroundColor: 'rgba(255,255,255,0.05)' }} />
+                <View style={{ position: 'absolute', top: 50, left: -60, width: 140, height: 140, borderRadius: 70, backgroundColor: 'rgba(255,255,255,0.05)' }} />
+                <View style={{ position: 'absolute', top: 20, right: 60, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.05)' }} />
+
                 <View style={styles.headerLeft}>
                     <HapticTouchable onPress={() => router.push('(tabs)/profile')}>
                         {user_acc?.profilePicture && user_acc.profilePicture !== 'default.png' ? (
-                            <View style={styles.avatarContainer}>
+                            <View style={[styles.avatarContainer, { borderColor: 'rgba(255,255,255,0.3)', borderWidth: 2 }]}>
                                 <Image source={{ uri: user_acc.profilePicture }} style={styles.avatar} />
                             </View>
                         ) : (
-                            <View style={[styles.avatar, styles.parentAvatar]}>
-                                <Text style={styles.fallbackText}>
+                            <View style={[styles.avatar, styles.parentAvatar, { backgroundColor: 'rgba(255,255,255,0.2)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' }]}>
+                                <Text style={[styles.fallbackText, { color: '#fff' }]}>
                                     {user_acc?.parentData?.name ? getInitials(user_acc.parentData.name) : (user_acc?.name ? getInitials(user_acc.name) : 'U')}
                                 </Text>
                             </View>
                         )}
                     </HapticTouchable>
                     <View style={styles.headerInfo}>
-                        <Text style={styles.welcomeText}>{getGreeting()},</Text>
-                        <Text style={styles.name} numberOfLines={1}>{title}</Text>
+                        <Text style={[styles.welcomeText, { color: 'rgba(255,255,255,0.8)' }]}>{getGreeting()},</Text>
+                        <Text style={[styles.name, { color: '#fff' }]} numberOfLines={1}>{title}</Text>
                         <View style={styles.parentEmail}>{subtitle}</View>
                     </View>
                 </View>
                 <View style={styles.iconRow}>{icons}</View>
-            </View>
+            </LinearGradient>
         );
     });
 
     // === ROLE-BASED CONTENT ===
+    const headerComponent = <Header />;
+
     const renderContent = () => {
         const role = user_acc?.role?.name ? user_acc.role.name.toLowerCase() : '';
         // console.log(role);
         switch (role) {
             case 'student':
-                return <StudentView refreshing={refreshing} onRefresh={onRefresh} />;
+                return <StudentView refreshing={refreshing} onRefresh={onRefresh} header={headerComponent} />;
             case 'teaching_staff':
-                return <TeacherView refreshing={refreshing} schoolId={schoolId} userId={userId} onRefresh={onRefresh} upcomingEvents={upcomingEvents} todaysEvents={todaysEvents} />;
+                return <TeacherView refreshing={refreshing} schoolId={schoolId} userId={userId} onRefresh={onRefresh} upcomingEvents={upcomingEvents} todaysEvents={todaysEvents} header={headerComponent} />;
             case 'admin':
-                return <AdminView refreshing={refreshing} onRefresh={onRefresh} />;
+                return <AdminView refreshing={refreshing} onRefresh={onRefresh} header={headerComponent} />;
             case 'parent':
                 return <ParentView
                     schoolId={user_acc?.schoolId}
                     parentId={user_acc?.parentData.id}
                     refreshing={refreshing}
                     onRefresh={onRefresh}
+                    header={headerComponent}
                 />;
             case 'driver':
                 return <DriverView
@@ -539,6 +563,7 @@ export default function HomeScreen() {
                     userId={userId}
                     prefetchedStaffData={transportStaff}
                     prefetchedTripsData={transportTripsData}
+                    header={headerComponent}
                 />;
             case 'conductor':
                 return <ConductorView
@@ -548,6 +573,7 @@ export default function HomeScreen() {
                     userId={userId}
                     prefetchedStaffData={transportStaff}
                     prefetchedTripsData={transportTripsData}
+                    header={headerComponent}
                 />;
             case 'director':
                 return <DirectorView
@@ -555,6 +581,7 @@ export default function HomeScreen() {
                     onRefresh={onRefresh}
                     schoolId={schoolId}
                     userId={userId}
+                    header={headerComponent}
                 />;
             case 'principal':
                 return <PrincipalView
@@ -562,9 +589,10 @@ export default function HomeScreen() {
                     onRefresh={onRefresh}
                     schoolId={schoolId}
                     userId={userId}
+                    header={headerComponent}
                 />;
             default:
-                return <StudentView refreshing={refreshing} onRefresh={onRefresh} />;
+                return <StudentView refreshing={refreshing} onRefresh={onRefresh} header={headerComponent} />;
         }
     };
 
@@ -744,6 +772,7 @@ export default function HomeScreen() {
                     />
                 }
             >
+                {header}
                 {/* Today's Events */}
                 {todaysEvents.length > 0 && (
                     <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.section}>
@@ -3058,7 +3087,6 @@ export default function HomeScreen() {
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
-            {!loading && <Header />}
             <StatusBar style='dark' />
 
             {/* Notification Permission Banner */}
@@ -4102,7 +4130,8 @@ const styles = StyleSheet.create({
 });
 
 // === TEACHER VIEW (MOVED) ===
-const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEvents, todaysEvents }) => {
+// === TEACHING STAFF VIEW ===
+const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEvents, todaysEvents, header }) => {
     const [showDelegationModal, setShowDelegationModal] = useState(false);
     const [activeDelegations, setActiveDelegations] = useState([]);
     const [shownDelegations, setShownDelegations] = useState({});
@@ -4278,6 +4307,7 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
                 />
             }
         >
+            {header}
             {/* Delegation Banner */}
             {activeDelegations.length > 0 && (
                 <Animated.View entering={FadeInDown.duration(400)} style={styles.delegationBannerContainer}>
@@ -4301,7 +4331,6 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
                     ))}
                 </Animated.View>
             )}
-
             {/* Today's Events */}
             {todaysEvents && todaysEvents.length > 0 && (
                 <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
@@ -4376,25 +4405,36 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
                 </Animated.View>
             )}
 
-            {/* Quick Stats */}
+            {/* Quick Stats - Enhanced */}
             <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.section}>
                 <View style={styles.statsGrid}>
                     <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/teachers/stats-calendar')}>
-                        <LinearGradient colors={['#4ECDC4', '#44A08D']} style={styles.statCard}>
+                        <LinearGradient colors={['#0EA5E9', '#0284C7']} style={[styles.statCard, { overflow: 'hidden' }]}>
+                            {/* Pattern */}
+                            <View style={{ position: 'absolute', top: -10, right: -10, width: 50, height: 50, borderRadius: 25, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                            <View style={{ position: 'absolute', bottom: -10, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+
                             <View style={styles.statIcon}><CalendarDays size={24} color="#fff" /></View>
                             <Text style={styles.statValue}>{totalDaysWorked}</Text>
                             <Text style={styles.statLabel}>Days Present</Text>
                         </LinearGradient>
                     </HapticTouchable>
+
                     <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/teachers/stats-calendar')}>
-                        <LinearGradient colors={['#FFD93D', '#F6C90E']} style={styles.statCard}>
+                        <LinearGradient colors={['#F59E0B', '#D97706']} style={[styles.statCard, { overflow: 'hidden' }]}>
+                            <View style={{ position: 'absolute', top: -20, left: -10, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.15)' }} />
+
                             <View style={styles.statIcon}><Award size={24} color="#fff" /></View>
                             <Text style={styles.statValue}>{Math.round(attendancePercent)}%</Text>
                             <Text style={styles.statLabel}>Attendance</Text>
                         </LinearGradient>
                     </HapticTouchable>
+
                     <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/teachers/stats-calendar')}>
-                        <LinearGradient colors={['#FF6B6B', '#EE5A6F']} style={styles.statCard}>
+                        <LinearGradient colors={['#EF4444', '#DC2626']} style={[styles.statCard, { overflow: 'hidden' }]}>
+                            <View style={{ position: 'absolute', bottom: -15, right: -15, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                            <View style={{ position: 'absolute', top: 10, left: -10, width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+
                             <View style={styles.statIcon}><Umbrella size={24} color="#fff" /></View>
                             <Text style={styles.statValue}>{totalLeavesTaken}</Text>
                             <Text style={styles.statLabel}>Leaves Taken</Text>

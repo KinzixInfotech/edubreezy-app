@@ -192,13 +192,13 @@ const FeatureItem = ({ icon, text, delay }) => (
 export default function LoginScreen() {
     const insets = useSafeAreaInsets();
     const passwordRef = useRef(null);
-    const [email, setEmail] = useState('');
+    const { schoolConfig: schoolConfigParam, prefillEmail } = useLocalSearchParams();
+    const [schoolConfig, setSchoolConfig] = useState(null);
+    const [email, setEmail] = useState(prefillEmail || '');
     const [password, setPassword] = useState('');
     const [errors, setErrors] = useState({});
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
-    const { schoolConfig: schoolConfigParam } = useLocalSearchParams();
-    const [schoolConfig, setSchoolConfig] = useState(null);
 
     const buttonScale = useSharedValue(1);
 

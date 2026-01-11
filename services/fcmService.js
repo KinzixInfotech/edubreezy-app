@@ -236,6 +236,9 @@ class FCMService {
         const unsubscribeForeground = messaging().onMessage(async remoteMessage => {
             // console.log('📲 FCM foreground message received:', remoteMessage);
 
+            // Increment badge for foreground notifications too
+            await this.incrementBadgeInStorage();
+
             if (onNotificationReceived) onNotificationReceived(remoteMessage);
 
             handleEventReminder(remoteMessage);
@@ -245,7 +248,10 @@ class FCMService {
         const unsubscribeBackground = messaging().onNotificationOpenedApp(async remoteMessage => {
             // console.log('📬 Notification opened from background:', remoteMessage);
 
-            await this.incrementBadgeInStorage();
+            // Badge increment is handled by background handler usually, but effectively handled here if not
+            // We don't want to double count if background handler ran, but safe to ensure storage is up to date
+            // Usually background handler runs separately. 
+            // However, onNotificationOpenedApp happens when user taps it.
 
             const noticeId = remoteMessage?.data?.noticeId;
             if (noticeId) {
@@ -262,6 +268,7 @@ class FCMService {
             if (remoteMessage) {
                 // console.log('📭 Notification opened from quit state:', remoteMessage);
 
+                // Consistency check
                 await this.incrementBadgeInStorage();
 
                 const noticeId = remoteMessage?.data?.noticeId;
@@ -281,6 +288,31 @@ class FCMService {
             unsubscribeForeground();
             unsubscribeBackground();
         };
+    }
+
+    // Helper to reset badge count
+    async resetBadgeCount() {
+        try {
+            await SecureStore.setItemAsync(BADGE_KEY, '0');
+            // console.log('🔔 Badge count reset to 0');
+        } catch (error) {
+            console.error('Error resetting badge count:', error);
+        }
+    }
+
+    // Helper to decrement badge count
+    async decrementBadgeCount() {
+        try {
+            const saved = await SecureStore.getItemAsync(BADGE_KEY);
+            const current = saved ? parseInt(saved, 10) : 0;
+            const newCount = Math.max(0, current - 1);
+            await SecureStore.setItemAsync(BADGE_KEY, newCount.toString());
+            // console.log('🔔 Badge decremented to:', newCount);
+            return newCount;
+        } catch (error) {
+            console.error('Error decrementing badge count:', error);
+            return 0;
+        }
     }
 
     // This must be called at the TOP LEVEL of your index.js (not inside a component)

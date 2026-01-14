@@ -92,8 +92,17 @@ export default function TabsLayout() {
       <Tabs
         screenOptions={{
           headerShown: false,
-          tabBarActiveTintColor: '#007AFF',
+          tabBarActiveTintColor: '#0469ff',
           tabBarInactiveTintColor: '#8e8e93',
+          tabBarStyle: {
+            backgroundColor: '#ffffff',
+            borderTopWidth: 0,
+            elevation: 8,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: -2 },
+            shadowOpacity: 0.05,
+            shadowRadius: 8,
+          },
         }}
       >
         <Tabs.Screen

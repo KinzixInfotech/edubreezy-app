@@ -82,19 +82,20 @@ function RootLayoutContent() {
 
     // ========================================================================
     // KEEP AUTH TOKEN SYNCED WITH SUPABASE SESSION
-    // This runs on every app launch to ensure fresh tokens for API calls
+    // Uses centralized token manager for automatic refresh and sync
     // ========================================================================
     useEffect(() => {
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-            console.log('🔑 Auth state changed:', event);
-            if (session?.access_token) {
-                await SecureStore.setItemAsync('token', session.access_token);
-                console.log('✅ Token synced to SecureStore');
-            }
-        });
+        // Import dynamically to avoid circular dependency
+        const { initTokenSync, refreshSessionIfNeeded, cleanupTokenSync } = require('../lib/tokenManager');
+
+        // Initialize token sync listener
+        initTokenSync();
+
+        // Proactively refresh session if needed on app start
+        refreshSessionIfNeeded();
 
         return () => {
-            subscription?.unsubscribe();
+            cleanupTokenSync();
         };
     }, []);
 

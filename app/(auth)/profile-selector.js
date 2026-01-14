@@ -16,7 +16,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown, FadeIn } from 'react-native-reanimated';
 import { Plus, LogOut, ChevronRight, Building2 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
-import { getProfilesForSchool, removeProfile, updateLastUsed, clearSchoolProfiles, updateProfileSession, getCurrentSchool, clearCurrentSchool } from '../../lib/profileManager';
+import { getProfilesForSchool, removeProfile, updateLastUsed, clearSchoolProfiles, updateProfileSession, clearProfileSession, getCurrentSchool, clearCurrentSchool } from '../../lib/profileManager';
+import { tryRestoreSession, initTokenSync } from '../../lib/tokenManager';
 import HapticTouchable from '../components/HapticTouch';
 import { supabase } from '../../lib/supabase';
 
@@ -127,94 +128,56 @@ export default function ProfileSelectorScreen() {
             // Update last used timestamp
             await updateLastUsed(schoolCode, profile.id);
 
-            let sessionRestored = false;
+            // Try to restore session using token manager
+            const result = await tryRestoreSession(schoolCode, profile);
 
-            // Check if we have session tokens to restore
-            if (profile.sessionTokens?.refresh_token) {
-                console.log('🔄 Restoring Supabase session for', profile.email);
-
-                // Try to refresh the session using the refresh token
-                const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession({
-                    refresh_token: profile.sessionTokens.refresh_token,
+            if (!result.success) {
+                console.log('➡️ Session restore failed, redirecting to login');
+                router.replace({
+                    pathname: '/(auth)/login',
+                    params: {
+                        schoolConfig: JSON.stringify(schoolData),
+                        prefillEmail: result.email || profile.email
+                    },
                 });
-
-                if (refreshError) {
-                    console.warn('⚠️ Refresh failed, trying setSession:', refreshError.message);
-
-                    // Try setSession as fallback
-                    const { error: setError } = await supabase.auth.setSession({
-                        access_token: profile.sessionTokens.access_token,
-                        refresh_token: profile.sessionTokens.refresh_token,
-                    });
-
-                    if (setError) {
-                        console.error('❌ Session restore failed:', setError.message);
-                        // User requested seamless re-login flow
-                        router.replace({
-                            pathname: '/(auth)/login',
-                            params: {
-                                schoolConfig: JSON.stringify(schoolData),
-                                prefillEmail: profile.email
-                            },
-                        });
-                        return;
-                    } else {
-                        sessionRestored = true;
-                        console.log('✅ Session restored via setSession');
-                    }
-                } else {
-                    sessionRestored = true;
-                    console.log('✅ Session refreshed successfully');
-
-                    // Update stored tokens with new ones
-                    if (refreshData?.session) {
-                        await updateProfileSession(schoolCode, profile.userId, {
-                            access_token: refreshData.session.access_token,
-                            refresh_token: refreshData.session.refresh_token,
-                        });
-                        console.log('✅ Updated stored tokens for future use');
-                    }
-                }
-            } else {
-                console.warn('⚠️ No session tokens found - profile was saved before token storage was added');
-                console.log('ℹ️ User should re-login to save session tokens');
+                return;
             }
+
+            // Session restored successfully
+            console.log('✅ Session restored, setting up user data...');
 
             // Save user data as current user
             await SecureStore.setItemAsync('user', JSON.stringify(profile.userData));
             await SecureStore.setItemAsync('userRole', JSON.stringify(profile.role));
 
-            // CRITICAL: Always store access token for API calls
-            // If we have a current session (freshly restored), use that token
-            // Otherwise, fallback to the profile's stored token (may be stale but better than nothing)
-            let tokenToStore = null;
-
-            if (sessionRestored) {
-                const { data: { session: currentSession } } = await supabase.auth.getSession();
-                if (currentSession?.access_token) {
-                    tokenToStore = currentSession.access_token;
-                    console.log('✅ Storing fresh token from restored session');
-                }
-            }
-
-            // Fallback: if no fresh token, use the stored one (might be expired but API will handle retry)
-            if (!tokenToStore && profile.sessionTokens?.access_token) {
-                tokenToStore = profile.sessionTokens.access_token;
-                console.log('⚠️ Storing old token as fallback (may need refresh)');
-            }
-
-            if (tokenToStore) {
-                await SecureStore.setItemAsync('token', tokenToStore);
-                console.log('✅ Token stored in SecureStore for API calls');
-            } else {
-                console.error('❌ No token available to store - API calls may fail');
+            // Token is already saved by tryRestoreSession, but verify
+            if (result.session?.access_token) {
+                await SecureStore.setItemAsync('token', result.session.access_token);
+                console.log('✅ Token stored for API calls');
             }
 
             // Navigate to home
             router.replace('/(tabs)/home');
         } catch (error) {
             console.error('Error selecting profile:', error);
-            Alert.alert('Error', 'Failed to load profile. Please try again.');
+            // Clear potentially corrupted tokens
+            await clearProfileSession(schoolCode, profile.userId);
+            Alert.alert(
+                'Session Expired',
+                'Please log in again to continue.',
+                [
+                    {
+                        text: 'Login',
+                        onPress: () => router.replace({
+                            pathname: '/(auth)/login',
+                            params: {
+                                schoolConfig: JSON.stringify(schoolData),
+                                prefillEmail: profile.email
+                            },
+                        })
+                    }
+                ]
+            );
         } finally {
             setSelectingProfile(null);
         }

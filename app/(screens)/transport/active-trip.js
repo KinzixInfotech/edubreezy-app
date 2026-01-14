@@ -142,7 +142,7 @@ export default function ActiveTripScreen() {
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
-            <StatusBar style="dark" />
+            {/* StatusBar removed - using global */}
 
             {/* Header */}
             <View style={styles.header}>

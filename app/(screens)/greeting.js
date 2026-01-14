@@ -194,7 +194,7 @@ export default function GreetingScreen() {
 
     return (
         <View style={styles.container}>
-            <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+            {/* StatusBar removed - using global */}
 
             {/* Background Patterns */}
             <View style={styles.patternContainer}>

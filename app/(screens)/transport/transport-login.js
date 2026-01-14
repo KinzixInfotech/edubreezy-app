@@ -111,7 +111,7 @@ export default function TransportLoginScreen() {
 
     return (
         <SafeAreaView style={styles.safeArea}>
-            <StatusBar style="light" />
+            {/* StatusBar removed - using global */}
             <LinearGradient colors={['#1e3a5f', '#0f172a']} style={styles.container}>
                 <KeyboardAvoidingView
                     behavior={Platform.OS === 'ios' ? 'padding' : 'height'}

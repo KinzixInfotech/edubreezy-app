@@ -160,7 +160,7 @@ export default function DriverDashboard() {
 
     return (
         <SafeAreaView style={styles.safeArea}>
-            <StatusBar style="light" />
+            {/* StatusBar removed - using global */}
             <LinearGradient colors={['#1e3a5f', '#0f172a']} style={styles.headerGradient}>
                 <View style={styles.header}>
                     <View>

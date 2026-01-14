@@ -207,7 +207,7 @@ export default function NotificationScreen() {
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
-            <StatusBar style="dark" />
+            {/* StatusBar removed - using global */}
 
             {/* Header - Instagram style */}
             <View style={styles.header}>

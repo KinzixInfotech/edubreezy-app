@@ -393,7 +393,7 @@ export default function LoginScreen() {
 
     return (
         <View style={styles.container}>
-            <StatusBar style="light" />
+            {/* <StatusBar style="light" /> */}
 
             {/* Blue Header Background - Extends to safe area */}
             <View style={[styles.headerBackground, { paddingTop: insets.top + 24 }]}>

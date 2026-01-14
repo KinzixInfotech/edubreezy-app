@@ -29,7 +29,7 @@ import * as Notifications from 'expo-notifications';
 import * as Location from 'expo-location';
 import HapticTouchable from '../components/HapticTouch';
 import { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
-import Animated, { FadeInDown, FadeInRight, FadeInUp } from 'react-native-reanimated';
+import Animated, { FadeInDown, FadeInRight, FadeInUp, useSharedValue, useAnimatedScrollHandler, useAnimatedStyle, interpolate, Extrapolation } from 'react-native-reanimated';
 import { dataUi } from '../data/_uidata';
 
 import { StatusBar } from 'expo-status-bar';
@@ -71,8 +71,62 @@ export default function HomeScreen() {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
-    const [notificationPermission, setNotificationPermission] = useState('undetermined');
+    const [notificationPermission, setNotificationPermission] = useState(false);
+
+    // Collapsible Header Logic (Must be top level to avoid rules of hooks error)
+    const HEADER_MAX_HEIGHT = 160;
+    const HEADER_MIN_HEIGHT = isSmallDevice ? 85 : 95;
+    const scrollY = useSharedValue(0);
+
+    const scrollHandler = useAnimatedScrollHandler((event) => {
+        scrollY.value = event.contentOffset.y;
+    });
+
+    const headerAnimatedStyle = useAnimatedStyle(() => {
+        const height = interpolate(
+            scrollY.value,
+            [0, 100],
+            [HEADER_MAX_HEIGHT, HEADER_MIN_HEIGHT],
+            Extrapolation.CLAMP
+        );
+        return { height };
+    });
+
+    const headerContentOpacity = useAnimatedStyle(() => {
+        const opacity = interpolate(
+            scrollY.value,
+            [0, 60],
+            [1, 0],
+            Extrapolation.CLAMP
+        );
+        return { opacity, transform: [{ translateY: interpolate(scrollY.value, [0, 60], [0, -20], Extrapolation.CLAMP) }] };
+    });
+
+    const headerIconsTranslate = useAnimatedStyle(() => {
+        const translateY = interpolate(
+            scrollY.value,
+            [0, 100],
+            [0, 15],
+            Extrapolation.CLAMP
+        );
+        return { transform: [{ translateY }] };
+    });
     const [showPermissionBanner, setShowPermissionBanner] = useState(false);
+
+    function getGreeting() {
+        // Get current time in IST
+        const now = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
+        const hour = new Date(now).getHours();
+
+        if (hour < 12) {
+            return "Good Morning";
+        } else if (hour < 18) {
+            return "Good Afternoon";
+        } else {
+            return "Good Evening";
+        }
+    }
+
     const queryClient = useQueryClient();
     const uiData = dataUi;
     const user_acc = useMemo(() => user, [user]);
@@ -460,12 +514,19 @@ export default function HomeScreen() {
                                 undefined
                     }
                 >
-                    <View style={[styles.iconButton, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
-                        <Icon size={isSmallDevice ? 18 : 20} color="#fff" />
+                    <View style={[styles.iconButton, {
+                        backgroundColor: '#fff',
+                        shadowColor: '#000',
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: 0.1,
+                        shadowRadius: 4,
+                        elevation: 3
+                    }]}>
+                        <Icon size={isSmallDevice ? 18 : 20} color="#0469ff" />
 
                         {isBell && unreadCount > 0 && (
-                            <View style={[styles.badge, { backgroundColor: '#fff', borderWidth: 1, borderColor: '#0469ff' }]}>
-                                <Text style={[styles.badgeText, { color: '#0469ff' }]}>
+                            <View style={[styles.badge, { backgroundColor: '#FF6B6B', borderWidth: 2, borderColor: '#fff' }]}>
+                                <Text style={[styles.badgeText, { color: '#fff', fontSize: 10 }]}>
                                     {unreadCount > 99 ? '99+' : unreadCount}
                                 </Text>
                             </View>
@@ -475,19 +536,6 @@ export default function HomeScreen() {
             );
         });
 
-        function getGreeting() {
-            // Get current time in IST
-            const now = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
-            const hour = new Date(now).getHours();
-
-            if (hour < 12) {
-                return "Good Morning";
-            } else if (hour < 18) {
-                return "Good Afternoon";
-            } else {
-                return "Good Evening";
-            }
-        }
 
 
         return (
@@ -496,38 +544,60 @@ export default function HomeScreen() {
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={[styles.header, {
+                    width: '100%',
                     borderBottomWidth: 0,
-                    paddingBottom: 25,
-                    // marginTop: 10,
-                    paddingTop: isSmallDevice ? 10 : 15,
+                    paddingBottom: 30,
+                    marginBottom: 10,
+                    // Ensure content starts below status bar transparently
+                    paddingTop: (isSmallDevice ? 40 : 50),
                     borderBottomLeftRadius: 32,
                     borderBottomRightRadius: 32,
-                    marginBottom: 10,
+                    alignSelf: 'stretch',
                 }]}
             >
-                {/* Background Pattern */}
-                <View style={{ position: 'absolute', top: -50, right: -50, width: 200, height: 200, borderRadius: 100, backgroundColor: 'rgba(255,255,255,0.05)' }} />
-                <View style={{ position: 'absolute', top: 50, left: -60, width: 140, height: 140, borderRadius: 70, backgroundColor: 'rgba(255,255,255,0.05)' }} />
-                <View style={{ position: 'absolute', top: 20, right: 60, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.05)' }} />
+                {/* Background Pattern - Shaded Look */}
+                <Text style={{ position: 'absolute', top: -10, right: 80, fontSize: 40, color: 'rgba(255,255,255,0.1)', fontWeight: 'bold' }}>+</Text>
+                <Text style={{ position: 'absolute', top: 50, right: 30, fontSize: 24, color: 'rgba(255,255,255,0.08)', fontWeight: 'bold' }}>×</Text>
+                <Text style={{ position: 'absolute', bottom: 20, right: 100, fontSize: 32, color: 'rgba(255,255,255,0.08)', fontWeight: 'bold' }}>÷</Text>
+                <Text style={{ position: 'absolute', top: 20, left: '25%', fontSize: 22, color: 'rgba(255,255,255,0.08)', fontWeight: 'bold' }}>△</Text>
+                <Text style={{ position: 'absolute', bottom: 15, left: '60%', fontSize: 28, color: 'rgba(255,255,255,0.1)', fontWeight: 'bold' }}>○</Text>
+                <View style={{ position: 'absolute', top: -50, right: -50, width: 220, height: 220, borderRadius: 110, backgroundColor: 'rgba(255,255,255,0.05)' }} />
+                <View style={{ position: 'absolute', bottom: -60, left: -40, width: 180, height: 180, borderRadius: 90, backgroundColor: 'rgba(255,255,255,0.05)' }} />
 
                 <View style={styles.headerLeft}>
                     <HapticTouchable onPress={() => router.push('(tabs)/profile')}>
                         {user_acc?.profilePicture && user_acc.profilePicture !== 'default.png' ? (
-                            <View style={[styles.avatarContainer, { borderColor: 'rgba(255,255,255,0.3)', borderWidth: 2 }]}>
-                                <Image source={{ uri: user_acc.profilePicture }} style={styles.avatar} />
+                            <View style={[styles.avatarContainer, { borderColor: '#fff', borderWidth: 2, overflow: 'hidden', borderRadius: 999 }]}>
+                                <Image source={{ uri: user_acc.profilePicture }} style={[styles.avatar, { borderRadius: 999 }]} />
                             </View>
                         ) : (
-                            <View style={[styles.avatar, styles.parentAvatar, { backgroundColor: 'rgba(255,255,255,0.2)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' }]}>
-                                <Text style={[styles.fallbackText, { color: '#fff' }]}>
-                                    {user_acc?.parentData?.name ? getInitials(user_acc.parentData.name) : (user_acc?.name ? getInitials(user_acc.name) : 'U')}
+                            <View style={{
+                                width: isSmallDevice ? 44 : 50,
+                                height: isSmallDevice ? 44 : 50,
+                                borderRadius: 999,
+                                backgroundColor: '#ffffff33', // White with 20% opacity
+                                borderWidth: 2,
+                                borderColor: '#ffffff',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                overflow: 'hidden'
+                            }}>
+                                <Text style={{ color: '#ffffff', fontSize: 18, fontWeight: '700', textAlign: 'center' }}>
+                                    {(() => {
+                                        const nameToUse = user_acc?.parentData?.name || user_acc?.name || 'User';
+                                        console.log('DEBUG: Name for initials:', nameToUse);
+                                        const initials = getInitials(nameToUse);
+                                        console.log('DEBUG: Generated Initials:', initials);
+                                        return initials || 'U';
+                                    })()}
                                 </Text>
                             </View>
                         )}
                     </HapticTouchable>
                     <View style={styles.headerInfo}>
-                        <Text style={[styles.welcomeText, { color: 'rgba(255,255,255,0.8)' }]}>{getGreeting()},</Text>
-                        <Text style={[styles.name, { color: '#fff' }]} numberOfLines={1}>{title}</Text>
-                        <View style={styles.parentEmail}>{subtitle}</View>
+                        <Text style={[styles.welcomeText, { color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: '500' }]}>{getGreeting()},</Text>
+                        <Text style={[styles.name, { color: '#fff', fontSize: 18, marginTop: 2 }]} numberOfLines={1}>{title}</Text>
+                        <View style={[styles.parentEmail, { marginTop: 4 }]}>{subtitle}</View>
                     </View>
                 </View>
                 <View style={styles.iconRow}>{icons}</View>
@@ -554,7 +624,8 @@ export default function HomeScreen() {
                     parentId={user_acc?.parentData.id}
                     refreshing={refreshing}
                     onRefresh={onRefresh}
-                    header={headerComponent}
+                    onScroll={scrollHandler}
+                    paddingTop={HEADER_MAX_HEIGHT + 20}
                 />;
             case 'driver':
                 return <DriverView
@@ -598,7 +669,7 @@ export default function HomeScreen() {
     };
 
     // === STUDENT VIEW ===
-    const StudentView = ({ refreshing, onRefresh }) => {
+    const StudentView = ({ refreshing, onRefresh, header }) => {
         // Fetch notices for student
         const { data: recentNotices } = useQuery({
             queryKey: ['student-notices', schoolId, userId],
@@ -1007,7 +1078,7 @@ export default function HomeScreen() {
     };
 
     // === ADMIN VIEW ===
-    const AdminView = ({ refreshing, onRefresh }) => (
+    const AdminView = ({ refreshing, onRefresh, header }) => (
         <ScrollView
             style={styles.content}
             showsVerticalScrollIndicator={false}
@@ -1020,6 +1091,7 @@ export default function HomeScreen() {
                 />
             }
         >
+            {header}
             {todaysEvents.length > 0 && (
                 <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
                     <View style={styles.sectionHeader}>
@@ -1063,7 +1135,7 @@ export default function HomeScreen() {
 
 
     // / Complete ParentView Component
-    const ParentView = ({ schoolId, parentId, refreshing, onRefresh }) => {
+    const ParentView = ({ schoolId, parentId, refreshing, onRefresh, onScroll, paddingTop }) => {
         const [showAddChildModal, setShowAddChildModal] = useState(false);
         const [selectedChild, setSelectedChild] = useState(null);
         const queryClient = useQueryClient();
@@ -1161,9 +1233,9 @@ export default function HomeScreen() {
         // });
 
         // Calculate dashboard card values
-        const childAttendance = attendanceStats?.monthlyStats?.attendancePercentage ?? '--';
+        const childAttendance = attendanceStats?.monthlyStats?.attendancePercentage ?? 0;
         // Fee status: Disabled due to API 404s
-        const childFeeStatus = 'N/A';
+        const childFeeStatus = '—';
         const childFeePending = 0;
 
         // Fetch upcoming events for parent
@@ -1240,7 +1312,7 @@ export default function HomeScreen() {
             if (weight > 0) {
                 return `${Math.round(score / weight)}%`;
             }
-            return '--';
+            return '0';
         })();
 
         // qucik access for parent
@@ -1416,6 +1488,7 @@ export default function HomeScreen() {
             })) || [],
             [data]);
 
+        const icon = require("../../assets/icon.png");
         const parentData = useMemo(() => ({
             name: "Sarah Johnson",
             email: "sarah.johnson@email.com",
@@ -1556,20 +1629,26 @@ export default function HomeScreen() {
             );
         }
 
+
         // Main content - child selected
         return (
-            <ScrollView
+            <Animated.ScrollView
                 style={styles.container}
                 showsVerticalScrollIndicator={false}
+                onScroll={onScroll}
+                scrollEventThrottle={16}
+                contentContainerStyle={{ paddingTop: paddingTop }}
                 refreshControl={
                     <RefreshControl
                         refreshing={refreshing}
                         onRefresh={onRefresh}
                         tintColor="#0469ff"
                         colors={['#0469ff']}
+                        progressViewOffset={paddingTop + 10}
                     />
                 }
             >
+
                 {todaysEvents.length > 0 && (
                     <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
                         <View style={styles.sectionHeader}>
@@ -1645,8 +1724,26 @@ export default function HomeScreen() {
                                                     elevation: 8,
                                                 }
                                             ]}
-                                        >
-                                            <Image source={{ uri: uiChildren[0].avatar }} style={styles.childAvatar} />
+                                        >{/* Decorative Education Pattern */}
+                                            <Text style={{ position: 'absolute', top: 5, right: 50, fontSize: 24, color: 'rgba(255,255,255,0.25)', fontWeight: '300' }}>+</Text>
+                                            <Text style={{ position: 'absolute', top: 40, right: 15, fontSize: 18, color: 'rgba(255,255,255,0.2)', fontWeight: '300' }}>×</Text>
+                                            <Text style={{ position: 'absolute', bottom: 8, right: 80, fontSize: 20, color: 'rgba(255,255,255,0.18)', fontWeight: '300' }}>÷</Text>
+                                            <Text style={{ position: 'absolute', top: 10, left: '45%', fontSize: 16, color: 'rgba(255,255,255,0.2)', fontWeight: '300' }}>△</Text>
+                                            <Text style={{ position: 'absolute', bottom: 5, left: '55%', fontSize: 14, color: 'rgba(255,255,255,0.18)', fontWeight: '300' }}>○</Text>
+                                            <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+                                            <View style={{ position: 'absolute', bottom: -25, left: '25%', width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.06)' }} />
+
+                                            <Image
+                                                source={
+                                                    uiChildren[0]?.avatar &&
+                                                        !uiChildren[0].avatar.includes('default.png')
+                                                        ? { uri: uiChildren[0].avatar }
+                                                        : icon
+                                                }
+                                                style={styles.childAvatar}
+                                            />
+
+
                                             <View style={styles.childInfo}>
                                                 <Text style={[styles.childName, styles.selectedText]} numberOfLines={1}>
                                                     {uiChildren[0].name}
@@ -1717,6 +1814,15 @@ export default function HomeScreen() {
                                                         }
                                                     ]}
                                                 >
+                                                    {/* Decorative Education Pattern (only on selected) */}
+                                                    {isSelected && (
+                                                        <>
+                                                            <Text style={{ position: 'absolute', top: 8, right: 45, fontSize: 14, color: 'rgba(255,255,255,0.15)', fontWeight: '300' }}>+</Text>
+                                                            <Text style={{ position: 'absolute', top: 35, right: 20, fontSize: 10, color: 'rgba(255,255,255,0.12)', fontWeight: '300' }}>×</Text>
+                                                            <Text style={{ position: 'absolute', bottom: 12, right: 70, fontSize: 16, color: 'rgba(255,255,255,0.1)', fontWeight: '300' }}>÷</Text>
+                                                            <View style={{ position: 'absolute', top: -15, right: -15, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.05)' }} />
+                                                        </>
+                                                    )}
                                                     <Image source={{ uri: child.avatar }} style={styles.childAvatar} />
                                                     <View style={styles.childInfo}>
                                                         <Text style={[styles.childName, isSelected && styles.selectedText]} numberOfLines={1}>
@@ -1828,34 +1934,49 @@ export default function HomeScreen() {
                     ) : (
                         <View style={styles.statsGrid}>
                             <HapticTouchable style={{ flex: 1 }} onPress={() => router.push({ pathname: '/my-child/attendance', params: { childData: JSON.stringify(selectedChild) } })}>
-                                <LinearGradient colors={['#4ECDC4', '#2FB8A8']} style={styles.statCard}>
-                                    <View style={styles.statIconBg}>
-                                        <CheckCircle2 size={20} color="#fff" />
+                                <LinearGradient
+                                    colors={['#4ECDC4', '#26A69A']}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 1 }}
+                                    style={[styles.statCard, { shadowColor: '#4ECDC4', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 8 }]}
+                                >
+                                    <View style={[styles.statIcon, { backgroundColor: 'rgba(255,255,255,0.25)' }]}>
+                                        <CheckCircle2 size={24} color="#fff" />
                                     </View>
-                                    <Text style={styles.statValue}>
-                                        {typeof childAttendance === 'number' ? `${Math.round(childAttendance)}%` : childAttendance}
+                                    <Text style={[styles.statValue, { fontSize: 22 }]}>
+                                        {childAttendance === 0 ? '0' : `${Math.round(childAttendance)}%`}
                                     </Text>
-                                    <Text style={styles.statLabel}>Attendance</Text>
+                                    <Text style={[styles.statLabel, { fontSize: 12, opacity: 0.9 }]}>Attendance</Text>
                                 </LinearGradient>
                             </HapticTouchable>
 
                             <HapticTouchable style={{ flex: 1 }} onPress={() => router.push({ pathname: '/my-child/parent-exams', params: { childData: JSON.stringify(selectedChild) } })}>
-                                <LinearGradient colors={['#FFB020', '#F59E0B']} style={styles.statCard}>
-                                    <View style={styles.statIconBg}>
-                                        <TrendingUp size={20} color="#fff" />
+                                <LinearGradient
+                                    colors={['#FF9F43', '#F59E0B']}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 1 }}
+                                    style={[styles.statCard, { shadowColor: '#FF9F43', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 8 }]}
+                                >
+                                    <View style={[styles.statIcon, { backgroundColor: 'rgba(255,255,255,0.25)' }]}>
+                                        <TrendingUp size={24} color="#fff" />
                                     </View>
-                                    <Text style={styles.statValue}>{childPerformance}</Text>
-                                    <Text style={styles.statLabel}>Performance</Text>
+                                    <Text style={[styles.statValue, { fontSize: 22 }]}>{childPerformance}</Text>
+                                    <Text style={[styles.statLabel, { fontSize: 12, opacity: 0.9 }]}>Performance</Text>
                                 </LinearGradient>
                             </HapticTouchable>
 
                             <HapticTouchable style={{ flex: 1 }} onPress={() => router.push({ pathname: '/(screens)/payfees', params: { childData: JSON.stringify(selectedChild) } })}>
-                                <LinearGradient colors={childFeePending > 0 ? ['#FF6B6B', '#EE5A6F'] : ['#51CF66', '#37B24D']} style={styles.statCard}>
-                                    <View style={styles.statIconBg}>
-                                        <DollarSign size={20} color="#fff" />
+                                <LinearGradient
+                                    colors={childFeePending > 0 ? ['#FF6B6B', '#EE5A5A'] : ['#10B981', '#059669']}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 1 }}
+                                    style={[styles.statCard, { shadowColor: childFeePending > 0 ? '#FF6B6B' : '#10B981', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 8 }]}
+                                >
+                                    <View style={[styles.statIcon, { backgroundColor: 'rgba(255,255,255,0.25)' }]}>
+                                        <DollarSign size={24} color="#fff" />
                                     </View>
-                                    <Text style={styles.statValue}>{childFeeStatus}</Text>
-                                    <Text style={styles.statLabel}>Fee Status</Text>
+                                    <Text style={[styles.statValue, { fontSize: 22 }]}>{childFeeStatus}</Text>
+                                    <Text style={[styles.statLabel, { fontSize: 12, opacity: 0.9 }]}>Fee Status</Text>
                                 </LinearGradient>
                             </HapticTouchable>
                         </View>
@@ -1998,13 +2119,13 @@ export default function HomeScreen() {
                     schoolId={schoolId}
                     onSuccess={handleAddChildSuccess}
                 />
-            </ScrollView>
+            </Animated.ScrollView>
         );
     };
 
 
     // === DRIVER VIEW ===
-    const DriverView = ({ refreshing, onRefresh, schoolId, userId, prefetchedStaffData, prefetchedTripsData }) => {
+    const DriverView = ({ refreshing, onRefresh, schoolId, userId, prefetchedStaffData, prefetchedTripsData, header }) => {
         console.log('🚀 DriverView - using prefetched data');
 
         // Location tracking state
@@ -2163,6 +2284,7 @@ export default function HomeScreen() {
 
         return (
             <ScrollView style={styles.container} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" colors={['#0469ff']} />}>
+                {header}
                 {/* Bus Assignment Card - Moved to Top */}
                 {vehicle && (
                     <Animated.View entering={FadeInDown.delay(50).duration(600)} style={styles.section}>
@@ -2461,7 +2583,7 @@ export default function HomeScreen() {
     };
 
     // === CONDUCTOR VIEW ===
-    const ConductorView = ({ refreshing, onRefresh, schoolId, userId, prefetchedStaffData, prefetchedTripsData }) => {
+    const ConductorView = ({ refreshing, onRefresh, schoolId, userId, prefetchedStaffData, prefetchedTripsData, header }) => {
         const queryClient = useQueryClient();
 
         // Use prefetched data directly
@@ -2496,6 +2618,7 @@ export default function HomeScreen() {
 
         return (
             <ScrollView style={styles.container} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" colors={['#0469ff']} />}>
+                {header}
                 {/* Bus Assignment Card for Conductor */}
                 {vehicle && (
                     <Animated.View entering={FadeInDown.delay(50).duration(600)} style={styles.section}>
@@ -2593,7 +2716,7 @@ export default function HomeScreen() {
     };
 
     // === DIRECTOR VIEW ===
-    const DirectorView = ({ refreshing, onRefresh, schoolId, userId }) => {
+    const DirectorView = ({ refreshing, onRefresh, schoolId, userId, header }) => {
         // Fetch academic years first (like admin web dashboard)
         const { data: academicYears, isLoading: isLoadingYears } = useQuery({
             queryKey: ['academic-years', schoolId],
@@ -2766,6 +2889,7 @@ export default function HomeScreen() {
                     />
                 }
             >
+                {header}
                 {/* School Card */}
                 <View style={styles.schoolCard}>
                     <View style={styles.schoolCardGradient}>
@@ -2861,7 +2985,7 @@ export default function HomeScreen() {
 
 
     // === PRINCIPAL VIEW ===
-    const PrincipalView = ({ refreshing, onRefresh, schoolId, userId }) => {
+    const PrincipalView = ({ refreshing, onRefresh, schoolId, userId, header, }) => {
         // Fetch academic years first (like admin web dashboard)
         const { data: academicYears, isLoading: isLoadingYears } = useQuery({
             queryKey: ['academic-years', schoolId],
@@ -2994,6 +3118,7 @@ export default function HomeScreen() {
                     />
                 }
             >
+                {header}
                 {/* School Card */}
                 <View style={styles.schoolCard}>
                     <View style={styles.schoolCardGradient}>
@@ -3087,10 +3212,67 @@ export default function HomeScreen() {
         );
     };
 
-    return (
-        <SafeAreaView style={styles.container} edges={['top']}>
-            <StatusBar style='dark' />
+    // Collapsible Header Logic
 
+
+    return (
+        <View style={styles.container} edges={['top']}>
+            <Animated.View style={[{ zIndex: 100, position: 'absolute', top: 0, left: 0, right: 0, height: HEADER_MAX_HEIGHT }, headerAnimatedStyle]}>
+                {/* Dynamically render header content with animations */}
+                {(() => {
+                    const roleKey = user_acc?.role?.name?.toLowerCase() ?? '';
+                    const config = uiData.header[roleKey] || uiData.header.student;
+                    const title = replaceDynamic(config.title, roleKey);
+                    const subtitle = config.subtitle.map((item, i) => replaceDynamic(item.text, roleKey)).join(' • '); // Simplification for demo
+
+                    const icons = config.icons.map((key, i) => {
+                        const Icon = IconMap[key];
+                        if (!Icon) return null;
+                        const isBell = key === 'bell';
+                        const isRefresh = key === 'refresh';
+                        return (
+                            <HapticTouchable key={i} onPress={isBell ? () => router.push('(screens)/notification') : isRefresh ? onRefresh : undefined}>
+                                <View style={[styles.iconButton, { backgroundColor: '#fff', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 }]}>
+                                    <Icon size={isSmallDevice ? 18 : 20} color="#0469ff" />
+                                    {isBell && unreadCount > 0 && (
+                                        <View style={[styles.badge, { backgroundColor: '#FF6B6B' }]}>
+                                            <Text style={[styles.badgeText, { color: '#fff', fontSize: 10 }]}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+                                        </View>
+                                    )}
+                                </View>
+                            </HapticTouchable>
+                        );
+                    });
+
+                    return (
+                        <LinearGradient colors={['#0469ff', '#0256d0']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.header, { width: '100%', borderBottomLeftRadius: 30, borderBottomRightRadius: 30, paddingTop: isSmallDevice ? 30 : 40, paddingBottom: 0, height: '100%' }]}>
+                            {/* Background Pattern */}
+                            <Text style={{ position: 'absolute', top: -10, right: 80, fontSize: 40, color: 'rgba(255,255,255,0.1)', fontWeight: 'bold' }}>+</Text>
+                            <Text style={{ position: 'absolute', top: 50, right: 30, fontSize: 24, color: 'rgba(255,255,255,0.08)', fontWeight: 'bold' }}>×</Text>
+                            <View style={{ position: 'absolute', top: -50, right: -50, width: 220, height: 220, borderRadius: 110, backgroundColor: 'rgba(255,255,255,0.05)' }} />
+
+                            <View style={[styles.headerLeft, { flexDirection: 'row', alignItems: 'center', width: '100%', paddingHorizontal: 20 }]}>
+                                <HapticTouchable onPress={() => router.push('(tabs)/profile')}>
+                                    <View style={[styles.avatarContainer, { borderColor: '#fff', borderWidth: 2, overflow: 'hidden', borderRadius: 25 }]}>
+                                        <Image source={{ uri: user_acc?.profilePicture || 'default.png' }} style={[styles.avatar, { borderRadius: 25 }]} />
+                                    </View>
+                                </HapticTouchable>
+
+                                <Animated.View style={[styles.headerInfo, { marginLeft: 12, flex: 1 }, headerContentOpacity]}>
+                                    <Text style={[styles.welcomeText, { color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: '500' }]}>{getGreeting()},</Text>
+                                    <Text style={[styles.name, { color: '#fff', fontSize: 18, marginTop: 2 }]} numberOfLines={1}>{title}</Text>
+                                    <Text style={[styles.parentEmail, { marginTop: 4, color: 'rgba(255,255,255,0.7)', fontSize: 12 }]} numberOfLines={1}>{subtitle}</Text>
+                                </Animated.View>
+
+                                <Animated.View style={[{ flexDirection: 'row', gap: 10 }, headerIconsTranslate]}>
+                                    {icons}
+                                </Animated.View>
+                            </View>
+                        </LinearGradient>
+                    );
+                })()}
+            </Animated.View>
+            <StatusBar style="light" translucent backgroundColor="transparent" />
             {/* Notification Permission Banner */}
             {showPermissionBanner && (
                 <Animated.View entering={FadeInDown.duration(400)} style={styles.permissionBanner}>
@@ -3117,7 +3299,7 @@ export default function HomeScreen() {
             )}
             {/* Today's Events (if any) */}
             {renderContent()}
-        </SafeAreaView>
+        </View>
     );
 }
 
@@ -3627,6 +3809,8 @@ const styles = StyleSheet.create({
     childAvatar: {
         width: 60,
         height: 60,
+        objectFit: 'center',
+        objectPosition: 'center',
         borderRadius: 30,
         backgroundColor: '#eee',
     },

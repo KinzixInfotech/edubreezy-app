@@ -117,7 +117,7 @@ export default function ConductorDashboard() {
 
     return (
         <SafeAreaView style={styles.safeArea}>
-            <StatusBar style="light" />
+            {/* StatusBar removed - using global */}
             <LinearGradient colors={['#6366f1', '#4f46e5']} style={styles.headerGradient}>
                 <View style={styles.header}>
                     <View>

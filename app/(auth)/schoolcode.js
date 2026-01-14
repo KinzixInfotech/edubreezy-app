@@ -270,7 +270,7 @@ export default function SchoolCodePage() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom', 'left', 'right']}>
-      <StatusBar style="dark" />
+      {/* StatusBar removed - using global */}
       <View style={styles.container}>
         <FloatingOrbs />
         <KeyboardAvoidingView

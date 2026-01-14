@@ -75,7 +75,7 @@ export default function HomeScreen() {
 
     // Collapsible Header Logic (Must be top level to avoid rules of hooks error)
     const HEADER_MAX_HEIGHT = 160;
-    const HEADER_MIN_HEIGHT = isSmallDevice ? 85 : 95;
+    const HEADER_MIN_HEIGHT = isSmallDevice ? 90 : 120; // Increased slightly to prevent crushing
     const scrollY = useSharedValue(0);
 
     const scrollHandler = useAnimatedScrollHandler((event) => {
@@ -106,7 +106,7 @@ export default function HomeScreen() {
         const translateY = interpolate(
             scrollY.value,
             [0, 100],
-            [0, 15],
+            [0, 0], // Kept at 0 to prevent misalignment in collapsed state
             Extrapolation.CLAMP
         );
         return { transform: [{ translateY }] };
@@ -535,9 +535,6 @@ export default function HomeScreen() {
                 </HapticTouchable>
             );
         });
-
-
-
         return (
             <LinearGradient
                 colors={['#0469ff', '#0256d0']}
@@ -567,33 +564,25 @@ export default function HomeScreen() {
                 <View style={styles.headerLeft}>
                     <HapticTouchable onPress={() => router.push('(tabs)/profile')}>
                         {user_acc?.profilePicture && user_acc.profilePicture !== 'default.png' ? (
-                            <View style={[styles.avatarContainer, { borderColor: '#fff', borderWidth: 2, overflow: 'hidden', borderRadius: 999 }]}>
-                                <Image source={{ uri: user_acc.profilePicture }} style={[styles.avatar, { borderRadius: 999 }]} />
+                            <View style={[styles.avatarContainer, { borderColor: '#fff', borderWidth: 2, overflow: 'hidden', borderRadius: 50 }]}>
+                                <Image source={{ uri: user_acc.profilePicture }} style={{ width: 40, height: 40, borderRadius: 20 }} />
                             </View>
                         ) : (
                             <View style={{
-                                width: isSmallDevice ? 44 : 50,
-                                height: isSmallDevice ? 44 : 50,
-                                borderRadius: 999,
-                                backgroundColor: '#ffffff33', // White with 20% opacity
+                                width: 40,
+                                height: 40,
+                                borderRadius: 20,
+                                backgroundColor: '#f0f0f0',
                                 borderWidth: 2,
-                                borderColor: '#ffffff',
+                                borderColor: '#fff',
                                 justifyContent: 'center',
                                 alignItems: 'center',
-                                overflow: 'hidden'
                             }}>
-                                <Text style={{ color: '#ffffff', fontSize: 18, fontWeight: '700', textAlign: 'center' }}>
-                                    {(() => {
-                                        const nameToUse = user_acc?.parentData?.name || user_acc?.name || 'User';
-                                        console.log('DEBUG: Name for initials:', nameToUse);
-                                        const initials = getInitials(nameToUse);
-                                        console.log('DEBUG: Generated Initials:', initials);
-                                        return initials || 'U';
-                                    })()}
+                                <Text style={{ color: '#0469ff', fontSize: 16, fontWeight: '700' }}>
+                                    {getInitials(user_acc?.parentData?.name || user_acc?.name || 'User') || 'U'}
                                 </Text>
                             </View>
-                        )}
-                    </HapticTouchable>
+                        )}           </HapticTouchable>
                     <View style={styles.headerInfo}>
                         <Text style={[styles.welcomeText, { color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: '500' }]}>{getGreeting()},</Text>
                         <Text style={[styles.name, { color: '#fff', fontSize: 18, marginTop: 2 }]} numberOfLines={1}>{title}</Text>
@@ -604,10 +593,8 @@ export default function HomeScreen() {
             </LinearGradient>
         );
     });
-
     // === ROLE-BASED CONTENT ===
     const headerComponent = <Header />;
-
     const renderContent = () => {
         const role = user_acc?.role?.name ? user_acc.role.name.toLowerCase() : '';
         // console.log(role);
@@ -717,7 +704,6 @@ export default function HomeScreen() {
             if (percentage >= 40) return 'D';
             return 'F';
         };
-
         // Extract stats
         const monthlyStats = studentStats?.attendance?.monthlyStats || {};
         const attendancePercentage = monthlyStats.attendancePercentage || 0;
@@ -3253,9 +3239,26 @@ export default function HomeScreen() {
 
                             <View style={[styles.headerLeft, { flexDirection: 'row', alignItems: 'center', width: '100%', paddingHorizontal: 20 }]}>
                                 <HapticTouchable onPress={() => router.push('(tabs)/profile')}>
-                                    <View style={[styles.avatarContainer, { borderColor: '#fff', borderWidth: 2, overflow: 'hidden', borderRadius: 25 }]}>
-                                        <Image source={{ uri: user_acc?.profilePicture || 'default.png' }} style={[styles.avatar, { borderRadius: 25 }]} />
-                                    </View>
+                                    {user_acc?.profilePicture && user_acc.profilePicture !== 'default.png' ? (
+                                        <View style={[styles.avatarContainer, { borderColor: '#fff', borderWidth: 2, overflow: 'hidden', borderRadius: 50 }]}>
+                                            <Image source={{ uri: user_acc.profilePicture }} style={{ width: 50, height: 50, borderRadius: 25 }} />
+                                        </View>
+                                    ) : (
+                                        <View style={{
+                                            width: 50,
+                                            height: 50,
+                                            borderRadius: 25,
+                                            backgroundColor: '#f0f0f0',
+                                            borderWidth: 2,
+                                            borderColor: '#fff',
+                                            justifyContent: 'center',
+                                            alignItems: 'center',
+                                        }}>
+                                            <Text style={{ color: '#0469ff', fontSize: 20, fontWeight: '700' }}>
+                                                {getInitials(user_acc?.parentData?.name || user_acc?.name || 'User') || 'U'}
+                                            </Text>
+                                        </View>
+                                    )}
                                 </HapticTouchable>
 
                                 <Animated.View style={[styles.headerInfo, { marginLeft: 12, flex: 1 }, headerContentOpacity]}>
@@ -3383,8 +3386,8 @@ const styles = StyleSheet.create({
         paddingHorizontal: isSmallDevice ? 12 : 16,
         paddingBottom: 8,
         paddingTop: 8,
-        borderBottomColor: '#f0f0f0',
-        borderBottomWidth: 1,
+        // borderBottomColor: '#f0f0f0',
+        // borderBottomWidth: 1,
         backgroundColor: '#fff',
     },
     // Notification Permission Banner Styles

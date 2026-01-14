@@ -23,10 +23,12 @@ export default {
             infoPlist: {
                 UIBackgroundModes: [
                     "fetch",
-                    "location"
+                    "location",
+                    "remote-notification"
                 ]
             },
-            bundleIdentifier: "com.kinzix.edubreezy"
+            bundleIdentifier: "com.kinzix.edubreezy",
+            googleServicesFile: "./GoogleService-Info.plist"
         },
         android: {
             package: "com.kinzix.edubreezy",
@@ -44,10 +46,6 @@ export default {
                 }
             },
             googleServicesFile: "./google-services.json",
-            plugins: [
-                "@react-native-firebase/app",
-                "@react-native-firebase/messaging"
-            ],
             edgeToEdgeEnabled: true,
             permissions: [
                 "RECEIVE_BOOT_COMPLETED",
@@ -60,6 +58,8 @@ export default {
             favicon: "./assets/favicon.png"
         },
         plugins: [
+            "@react-native-firebase/app",
+            "@react-native-firebase/messaging",
             "expo-notifications",
             "expo-background-fetch",
             "expo-location",

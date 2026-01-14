@@ -1,5 +1,5 @@
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Modal, Dimensions, TouchableWithoutFeedback, Animated as RNAnimated, RefreshControl, Linking, Alert, TextInput, Platform } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Modal, Dimensions, TouchableWithoutFeedback, Animated as RNAnimated, RefreshControl, Linking, Alert, TextInput, Platform, StatusBar } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Settings, Edit, LogOut, Mail, Phone, Calendar, MapPin, Award, BookOpen, School, X, Users, ClipboardList, FileText, Bell, Shield, Clock, Bus, Fuel, Gauge, UserCheck, ClipboardCheck, Megaphone } from 'lucide-react-native';
 import { Image } from 'expo-image';
@@ -8,6 +8,7 @@ import HapticTouchable from '../components/HapticTouch';
 import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import Animated, { FadeInDown, FadeInUp, FadeInRight } from 'react-native-reanimated';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../../lib/api';
@@ -21,7 +22,7 @@ const isTablet = SCREEN_WIDTH >= 768;
 const ROLE_COLORS = {
   STUDENT: '#10B981',
   PARENT: '#0469ff',
-  TEACHING_STAFF: '#8B5CF6',
+  TEACHING_STAFF: '#0469ff',
   ADMIN: '#EF4444',
   DRIVER: '#F59E0B',
   CONDUCTOR: '#06B6D4',
@@ -30,6 +31,21 @@ const ROLE_COLORS = {
   ACCOUNTANT: '#84CC16',
   DIRECTOR: '#7C3AED',
   PRINCIPAL: '#DC2626',
+};
+
+// User-friendly role display names
+const ROLE_DISPLAY_NAMES = {
+  STUDENT: 'Student',
+  PARENT: 'Parent',
+  TEACHING_STAFF: 'Teacher',
+  ADMIN: 'Admin',
+  DRIVER: 'Driver',
+  CONDUCTOR: 'Conductor',
+  NON_TEACHING_STAFF: 'Staff',
+  LIBRARIAN: 'Librarian',
+  ACCOUNTANT: 'Accountant',
+  DIRECTOR: 'Director',
+  PRINCIPAL: 'Principal',
 };
 
 // ==================== ROLE-BASED CONFIGURATION ====================
@@ -76,6 +92,12 @@ const PROFILE_CONFIG = {
   TEACHING_STAFF: {
     // Field mappings - customize these paths based on your API response structure
     fieldMappings: {
+      name: 'teacherData.name',
+      email: 'teacherData.email',
+      phone: 'teacherData.contactNumber',
+      role: 'role.name',
+      school: 'school.name',
+      profilePicture: 'profilePicture',
       employeeId: 'teacherData.employeeId',
       designation: 'teacherData.designation',
       gender: 'teacherData.gender',
@@ -159,7 +181,6 @@ const PROFILE_CONFIG = {
     menuItems: [
       { id: 1, label: 'View Children', icon: Users, route: '/(tabs)/home', color: '#ec4899' },
       { id: 2, label: 'School Profile', icon: School, action: 'viewSchoolProfile', color: '#8b5cf6' },
-      { id: 3, label: 'Notifications', icon: Bell, route: '/(tabs)/notifications', color: '#f59e0b' },
     ],
   },
 
@@ -255,7 +276,6 @@ const PROFILE_CONFIG = {
       { id: 1, label: 'Trip History', icon: Clock, route: '/(screens)/transport/driver-attendance-history', color: '#0469ff' },
       { id: 2, label: 'My Vehicle', icon: Bus, route: '/(screens)/transport/my-vehicle', color: '#10b981' },
       { id: 3, label: 'My Route', icon: MapPin, route: '/(screens)/transport/my-route', color: '#f59e0b' },
-      { id: 4, label: 'Notifications', icon: Bell, route: '/(tabs)/notifications', color: '#8b5cf6' },
     ],
   },
 
@@ -289,7 +309,6 @@ const PROFILE_CONFIG = {
       { id: 1, label: 'Trip History', icon: Clock, route: '/(screens)/transport/driver-attendance-history', color: '#0469ff' },
       { id: 2, label: 'My Vehicle', icon: Bus, route: '/(screens)/transport/my-vehicle', color: '#10b981' },
       { id: 3, label: 'My Route', icon: MapPin, route: '/(screens)/transport/my-route', color: '#f59e0b' },
-      { id: 4, label: 'Notifications', icon: Bell, route: '/(tabs)/notifications', color: '#8b5cf6' },
     ],
   },
 
@@ -318,7 +337,7 @@ const PROFILE_CONFIG = {
       { id: 4, label: 'Approvals', icon: ClipboardCheck, route: '/(screens)/principal/approvals', color: '#8B5CF6' },
       { id: 5, label: 'School Profile', icon: School, action: 'viewSchoolProfile', color: '#10B981' },
       { id: 6, label: 'Payroll', icon: FileText, route: '/(screens)/director/payroll', color: '#F59E0B' },
-      { id: 7, label: 'Notifications', icon: Bell, route: '/(tabs)/notifications', color: '#0EA5E9' },
+
     ],
   },
 
@@ -345,7 +364,6 @@ const PROFILE_CONFIG = {
       { id: 2, label: 'Approvals', icon: ClipboardCheck, route: '/(screens)/principal/approvals', color: '#8B5CF6' },
       { id: 3, label: 'Broadcast', icon: Megaphone, route: '/(screens)/director/broadcast', color: '#0469ff' },
       { id: 4, label: 'School Profile', icon: School, action: 'viewSchoolProfile', color: '#10B981' },
-      { id: 5, label: 'Notifications', icon: Bell, route: '/(tabs)/notifications', color: '#f59e0b' },
     ],
   },
 };
@@ -368,7 +386,19 @@ export default function ProfileScreen() {
   const [editNameModalVisible, setEditNameModalVisible] = useState(false);
   const [editNameValue, setEditNameValue] = useState('');
   const [savingName, setSavingName] = useState(false);
+  const [isScrolledPastHeader, setIsScrolledPastHeader] = useState(false);
   const queryClient = useQueryClient();
+  const insets = useSafeAreaInsets();
+
+  // Handle scroll to change status bar style
+  const handleScroll = (event) => {
+    const scrollY = event.nativeEvent.contentOffset.y;
+    // Change status bar style when scrolled past the header (approximately 200px)
+    const shouldBeDark = scrollY > 200;
+    if (shouldBeDark !== isScrolledPastHeader) {
+      setIsScrolledPastHeader(shouldBeDark);
+    }
+  };
 
   const getInitials = useCallback((name) => {
     if (!name) return '';
@@ -544,7 +574,7 @@ export default function ProfileScreen() {
 
   // Get mapped values
   const userName = getNestedValue(user, config.fieldMappings.name);
-  const userRole = getNestedValue(user, config.fieldMappings.role);
+  const userRole = ROLE_DISPLAY_NAMES[role] || getNestedValue(user, config.fieldMappings.role);
   const schoolName = getNestedValue(user, config.fieldMappings.school);
   const profilePicture = getNestedValue(user, config.fieldMappings.profilePicture, 'https://via.placeholder.com/150');
 
@@ -552,7 +582,26 @@ export default function ProfileScreen() {
   const roleColor = ROLE_COLORS[role] || '#0469ff';
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top']}>
+    <View style={styles.safeArea}>
+      <StatusBar
+        barStyle={isScrolledPastHeader ? "dark-content" : "light-content"}
+        backgroundColor={isScrolledPastHeader ? "#fff" : "#0469ff"}
+        translucent={false}
+      />
+      {/* Status bar background for iOS */}
+      {Platform.OS === 'ios' && (
+        <View
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            height: insets.top,
+            backgroundColor: isScrolledPastHeader ? '#fff' : '#0469ff',
+            zIndex: 100,
+          }}
+        />
+      )}
       <View style={styles.container}>
         <ScrollView
           style={{ flex: 1 }}
@@ -561,47 +610,72 @@ export default function ProfileScreen() {
             isTablet && styles.contentTablet
           ]}
           showsVerticalScrollIndicator={false}
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#0469ff" />
           }
         >
-          {/* Profile Header */}
-          <Animated.View entering={FadeInUp.duration(600)} style={[styles.profileHeader, isTablet && styles.profileHeaderTablet]}>
-            <HapticTouchable onPress={openImageViewer}>
-              {profilePicture && profilePicture !== 'default.png' && profilePicture !== 'N/A' ? (
-                <View style={[styles.avatarContainer, isTablet && styles.avatarContainerTablet]}>
-                  <Image source={{ uri: profilePicture }} style={[styles.avatar, isTablet && styles.avatarTablet]} />
-                  <View style={[styles.statusDot, isTablet && styles.statusDotTablet]} />
-                </View>
-              ) : (
-                <View style={[
-                  styles.avatarContainer,
-                  isTablet && styles.avatarContainerTablet
-                ]}>
-                  <View style={[
-                    styles.avatar,
-                    styles.avatarFallback,
-                    isTablet && styles.avatarTablet,
-                    { backgroundColor: roleColor }
-                  ]}>
-                    <Text style={[styles.fallbackText, isTablet && styles.fallbackTextTablet]}>
-                      {userName ? getInitials(userName) : 'U'}
-                    </Text>
+          {/* Profile Header with Gradient - Matching Homepage */}
+          <Animated.View entering={FadeInUp.duration(600)}>
+            <LinearGradient
+              colors={['#0469ff', '#0256d0']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={[styles.profileHeader, isTablet && styles.profileHeaderTablet, {
+                borderBottomLeftRadius: 32,
+                borderBottomRightRadius: 32,
+                marginHorizontal: -16,
+                paddingHorizontal: 16,
+                marginTop: -16,
+                paddingTop: insets.top + 16,
+                overflow: 'hidden',
+              }]}
+            >
+              {/* Background Pattern - Matching Homepage */}
+              <Text style={{ position: 'absolute', top: 10, right: 80, fontSize: 40, color: 'rgba(255,255,255,0.1)', fontWeight: 'bold' }}>+</Text>
+              <Text style={{ position: 'absolute', top: 60, right: 30, fontSize: 24, color: 'rgba(255,255,255,0.08)', fontWeight: 'bold' }}>×</Text>
+              <Text style={{ position: 'absolute', bottom: 40, right: 100, fontSize: 32, color: 'rgba(255,255,255,0.08)', fontWeight: 'bold' }}>÷</Text>
+              <Text style={{ position: 'absolute', top: 30, left: '25%', fontSize: 22, color: 'rgba(255,255,255,0.08)', fontWeight: 'bold' }}>△</Text>
+              <Text style={{ position: 'absolute', bottom: 30, left: '60%', fontSize: 28, color: 'rgba(255,255,255,0.1)', fontWeight: 'bold' }}>○</Text>
+              <View style={{ position: 'absolute', top: -50, right: -50, width: 220, height: 220, borderRadius: 110, backgroundColor: 'rgba(255,255,255,0.05)' }} />
+              <View style={{ position: 'absolute', bottom: -60, left: -40, width: 180, height: 180, borderRadius: 90, backgroundColor: 'rgba(255,255,255,0.05)' }} />
+              <HapticTouchable onPress={openImageViewer}>
+                {profilePicture && profilePicture !== 'default.png' && profilePicture !== 'N/A' ? (
+                  <View style={[styles.avatarContainer, isTablet && styles.avatarContainerTablet]}>
+                    <Image source={{ uri: profilePicture }} style={[styles.avatar, isTablet && styles.avatarTablet, { borderColor: '#fff' }]} />
+                    <View style={[styles.statusDot, isTablet && styles.statusDotTablet]} />
                   </View>
-                  <View style={[styles.statusDot, isTablet && styles.statusDotTablet]} />
-                </View>
-              )}
-            </HapticTouchable>
-            <Text style={[styles.userName, isSmallDevice && styles.userNameSmall, isTablet && styles.userNameTablet]}>{userName}</Text>
-            <View style={[styles.roleBadge, { backgroundColor: roleColor + '20' }]}>
-              <Text style={[styles.userRole, { color: roleColor }]}>{userRole}</Text>
-            </View>
-            <View style={[styles.schoolBadge, isTablet && styles.schoolBadgeTablet]}>
-              <School size={isTablet ? 18 : 14} color="#666" />
-              <Text style={[styles.schoolText, isTablet && styles.schoolTextTablet]}>
-                {schoolName.length > (isTablet ? 50 : 30) ? schoolName.slice(0, isTablet ? 50 : 30) + '...' : schoolName}
-              </Text>
-            </View>
+                ) : (
+                  <View style={[
+                    styles.avatarContainer,
+                    isTablet && styles.avatarContainerTablet
+                  ]}>
+                    <View style={[
+                      styles.avatar,
+                      styles.avatarFallback,
+                      isTablet && styles.avatarTablet,
+                      { backgroundColor: '#fff' }
+                    ]}>
+                      <Text style={[styles.fallbackText, isTablet && styles.fallbackTextTablet, { color: roleColor }]}>
+                        {userName ? getInitials(userName) : 'U'}
+                      </Text>
+                    </View>
+                    <View style={[styles.statusDot, isTablet && styles.statusDotTablet]} />
+                  </View>
+                )}
+              </HapticTouchable>
+              <Text style={[styles.userName, isSmallDevice && styles.userNameSmall, isTablet && styles.userNameTablet, { color: '#fff' }]}>{userName}</Text>
+              <View style={[styles.roleBadge, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
+                <Text style={[styles.userRole, { color: '#fff' }]}>{userRole}</Text>
+              </View>
+              <View style={[styles.schoolBadge, isTablet && styles.schoolBadgeTablet, { backgroundColor: 'rgba(255,255,255,0.15)' }]}>
+                <School size={isTablet ? 18 : 14} color="rgba(255,255,255,0.9)" />
+                <Text style={[styles.schoolText, isTablet && styles.schoolTextTablet, { color: 'rgba(255,255,255,0.9)' }]}>
+                  {schoolName.length > (isTablet ? 50 : 30) ? schoolName.slice(0, isTablet ? 50 : 30) + '...' : schoolName}
+                </Text>
+              </View>
+            </LinearGradient>
           </Animated.View>
 
           {/* Stats Cards - only show if stats exist */}
@@ -695,7 +769,9 @@ export default function ProfileScreen() {
             <Text style={styles.sectionTitle}>Contact Information</Text>
             <View style={styles.infoCard}>
               {config.contactInfo.map((info, index) => {
-                const value = getNestedValue(user, info.dataPath);
+                const rawValue = getNestedValue(user, info.dataPath, null);
+                const isEmpty = !rawValue || rawValue === 'N/A' || rawValue === '';
+                const displayValue = isEmpty ? 'Not Added' : rawValue;
                 return (
                   <View key={info.key}>
                     {index > 0 && <View style={styles.divider} />}
@@ -705,7 +781,7 @@ export default function ProfileScreen() {
                       </View>
                       <View style={styles.infoTextContainer}>
                         <Text style={styles.infoLabel}>{info.label}</Text>
-                        <Text style={styles.infoValue}>{value}</Text>
+                        <Text style={[styles.infoValue, isEmpty && { color: '#9CA3AF', fontStyle: 'italic' }]}>{displayValue}</Text>
                       </View>
                     </View>
                   </View>
@@ -716,10 +792,11 @@ export default function ProfileScreen() {
 
           {/* Additional Info Section */}
           {config.additionalInfo && config.additionalInfo.length > 0 && (() => {
-            // Filter to only show items with actual values
+            // Filter to only show items with actual values (exclude null, N/A, empty, and 0)
             const validItems = config.additionalInfo.filter((info) => {
               const value = getNestedValue(user, info.dataPath, null);
-              return value !== null && value !== 'N/A' && value !== '';
+              // Exclude null, N/A, empty string, and 0 (which is often a placeholder)
+              return value !== null && value !== 'N/A' && value !== '' && value !== 0;
             });
 
             if (validItems.length === 0) return null;
@@ -807,33 +884,35 @@ export default function ProfileScreen() {
             </Animated.View>
           )}
 
-          {/* Menu Items */}
-          <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
-            <Text style={styles.sectionTitle}>Quick Actions</Text>
-            <View style={styles.menuContainer}>
-              {config.menuItems.map((item, index) => (
-                <Animated.View
-                  key={item.id}
-                  entering={FadeInRight.delay(600 + index * 80).duration(500)}
-                >
-                  <HapticTouchable onPress={() => handleMenuPress(item)}>
-                    <View style={[
-                      styles.menuItem,
-                      index === config.menuItems.length - 1 && styles.lastMenuItem
-                    ]}>
-                      <View style={[styles.menuIconContainer, { backgroundColor: item.color + '15' }]}>
-                        <item.icon size={20} color={item.color} />
+          {/* Menu Items - Only for DIRECTOR and PRINCIPAL */}
+          {(role === 'DIRECTOR' || role === 'PRINCIPAL') && (
+            <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
+              <Text style={styles.sectionTitle}>Quick Actions</Text>
+              <View style={styles.menuContainer}>
+                {config.menuItems.map((item, index) => (
+                  <Animated.View
+                    key={item.id}
+                    entering={FadeInRight.delay(600 + index * 80).duration(500)}
+                  >
+                    <HapticTouchable onPress={() => handleMenuPress(item)}>
+                      <View style={[
+                        styles.menuItem,
+                        index === config.menuItems.length - 1 && styles.lastMenuItem
+                      ]}>
+                        <View style={[styles.menuIconContainer, { backgroundColor: item.color + '15' }]}>
+                          <item.icon size={20} color={item.color} />
+                        </View>
+                        <Text style={styles.menuText}>{item.label}</Text>
+                        <View style={styles.menuArrow}>
+                          <Text style={styles.arrowText}>›</Text>
+                        </View>
                       </View>
-                      <Text style={styles.menuText}>{item.label}</Text>
-                      <View style={styles.menuArrow}>
-                        <Text style={styles.arrowText}>›</Text>
-                      </View>
-                    </View>
-                  </HapticTouchable>
-                </Animated.View>
-              ))}
-            </View>
-          </Animated.View>
+                    </HapticTouchable>
+                  </Animated.View>
+                ))}
+              </View>
+            </Animated.View>
+          )}
 
           {/* Logout Section */}
           <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
@@ -851,9 +930,6 @@ export default function ProfileScreen() {
               </HapticTouchable>
             </View>
           </Animated.View>
-
-          {/* Bottom Spacing */}
-          <View style={{ height: 80 }} />
         </ScrollView>
 
         {/* Image Viewer Modal */}
@@ -983,7 +1059,7 @@ export default function ProfileScreen() {
           </View>
         </Modal>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -1004,7 +1080,7 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 16,
-    paddingBottom: 100,
+    paddingBottom: 16,
   },
   profileHeader: {
     alignItems: 'center',

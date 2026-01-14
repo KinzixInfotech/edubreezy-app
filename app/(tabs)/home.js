@@ -102,6 +102,24 @@ export default function HomeScreen() {
         return { opacity, transform: [{ translateY: interpolate(scrollY.value, [0, 60], [0, -20], Extrapolation.CLAMP) }] };
     });
 
+    // Name stays visible when collapsed (doesn't fade out)
+    // Also shifts left slightly when collapsed
+    const headerNameStyle = useAnimatedStyle(() => {
+        const translateY = interpolate(
+            scrollY.value,
+            [0, 100],
+            [0, -8],
+            Extrapolation.CLAMP
+        );
+        const translateX = interpolate(
+            scrollY.value,
+            [0, 100],
+            [0, -10], // Negative = move left, positive = move right
+            Extrapolation.CLAMP
+        );
+        return { transform: [{ translateY }, { translateX }] };
+    });
+
     const headerIconsTranslate = useAnimatedStyle(() => {
         const translateY = interpolate(
             scrollY.value,
@@ -544,7 +562,7 @@ export default function HomeScreen() {
                     width: '100%',
                     borderBottomWidth: 0,
                     paddingBottom: 30,
-                    marginBottom: 10,
+                    marginBottom: 16,
                     // Ensure content starts below status bar transparently
                     paddingTop: (isSmallDevice ? 40 : 50),
                     borderBottomLeftRadius: 32,
@@ -582,7 +600,7 @@ export default function HomeScreen() {
                                     {getInitials(user_acc?.parentData?.name || user_acc?.name || 'User') || 'U'}
                                 </Text>
                             </View>
-                        )}           </HapticTouchable>
+                        )}</HapticTouchable>
                     <View style={styles.headerInfo}>
                         <Text style={[styles.welcomeText, { color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: '500' }]}>{getGreeting()},</Text>
                         <Text style={[styles.name, { color: '#fff', fontSize: 18, marginTop: 2 }]} numberOfLines={1}>{title}</Text>
@@ -1066,7 +1084,7 @@ export default function HomeScreen() {
     // === ADMIN VIEW ===
     const AdminView = ({ refreshing, onRefresh, header }) => (
         <ScrollView
-            style={styles.content}
+            style={styles.container}
             showsVerticalScrollIndicator={false}
             refreshControl={
                 <RefreshControl
@@ -3261,11 +3279,17 @@ export default function HomeScreen() {
                                     )}
                                 </HapticTouchable>
 
-                                <Animated.View style={[styles.headerInfo, { marginLeft: 12, flex: 1 }, headerContentOpacity]}>
-                                    <Text style={[styles.welcomeText, { color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: '500' }]}>{getGreeting()},</Text>
-                                    <Text style={[styles.name, { color: '#fff', fontSize: 18, marginTop: 2 }]} numberOfLines={1}>{title}</Text>
-                                    <Text style={[styles.parentEmail, { marginTop: 4, color: 'rgba(255,255,255,0.7)', fontSize: 12 }]} numberOfLines={1}>{subtitle}</Text>
-                                </Animated.View>
+                                <View style={[styles.headerInfo, { marginLeft: 12, flex: 1, justifyContent: 'center' }]}>
+                                    <Animated.View style={headerContentOpacity}>
+                                        <Text style={[styles.welcomeText, { color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: '500' }]}>{getGreeting()},</Text>
+                                    </Animated.View>
+                                    <Animated.View style={headerNameStyle}>
+                                        <Text style={[styles.name, { color: '#fff', fontSize: 18, marginTop: 2 }]} numberOfLines={1}>{title}</Text>
+                                        <Text style={[styles.parentEmail, { marginTop: 4, color: 'rgba(255,255,255,0.7)', fontSize: 12 }]} numberOfLines={1}>
+                                            {user_acc?.email || user_acc?.parentData?.email || 'test@email.com'}
+                                        </Text>
+                                    </Animated.View>
+                                </View>
 
                                 <Animated.View style={[{ flexDirection: 'row', gap: 10 }, headerIconsTranslate]}>
                                     {icons}

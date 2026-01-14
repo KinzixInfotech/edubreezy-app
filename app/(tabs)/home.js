@@ -20,7 +20,8 @@ import {
     ChartPie,
     Clock,
     CalendarDays,
-    Umbrella
+    Umbrella,
+    BellOff
 } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
@@ -944,6 +945,7 @@ export default function HomeScreen() {
                             </Animated.View>
                         )}
                     </View>
+
                 </Animated.View>
                 {/* Recent Notices */}
                 <Animated.View entering={FadeInDown.delay(800).duration(600)} style={[styles.section, { marginBottom: 30 }]}>

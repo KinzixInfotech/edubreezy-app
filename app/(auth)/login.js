@@ -194,7 +194,7 @@ export default function LoginScreen() {
     const passwordRef = useRef(null);
     const { schoolConfig: schoolConfigParam, prefillEmail } = useLocalSearchParams();
     const [schoolConfig, setSchoolConfig] = useState(null);
-    const [email, setEmail] = useState(prefillEmail || '');
+    const [credential, setCredential] = useState(prefillEmail || '');
     const [password, setPassword] = useState('');
     const [errors, setErrors] = useState({});
     const [loading, setLoading] = useState(false);
@@ -252,16 +252,25 @@ export default function LoginScreen() {
         return emailRegex.test(emailValue);
     };
 
+    const validatePhone = (phoneValue) => {
+        const phoneRegex = /^[6-9]\d{9}$/; // Basic India mobile validation
+        return phoneRegex.test(phoneValue);
+    };
+
     const handleLogin = async () => {
         setErrors({});
 
         // Custom validation for better UX
         const newErrors = {};
+        const isEmail = validateEmail(credential.trim());
+        const isPhone = /^\d+$/.test(credential.trim());
 
-        if (!email.trim()) {
-            newErrors.email = 'Email is required';
-        } else if (!validateEmail(email.trim())) {
-            newErrors.email = 'Please enter a valid email address';
+        if (!credential.trim()) {
+            newErrors.credential = 'Email or Phone Number is required';
+        } else if (!isEmail && !isPhone) {
+            newErrors.credential = 'Please enter a valid email or phone number';
+        } else if (isPhone && !validatePhone(credential.trim())) {
+            newErrors.credential = 'Please enter a valid 10-digit mobile number';
         }
 
         if (!password) {
@@ -295,14 +304,46 @@ export default function LoginScreen() {
                 withTiming(1, { duration: 100 })
             );
 
+            let loginEmail = credential.trim();
+
+            // If phone number, lookup email first
+            if (isPhone) {
+                console.log('📱 Phone number detected, looking up email for:', loginEmail);
+
+                // Lookup in profiles table
+                const { data: profileData, error: profileError } = await supabase
+                    .from('profiles')
+                    .select('email')
+                    .eq('phone_number', loginEmail)
+                    .maybeSingle();
+
+                if (profileError) {
+                    console.error('Error looking up phone:', profileError);
+                    // Fallback to error
+                    setErrors({ general: 'Error verifying phone number. Please try email.' });
+                    setLoading(false);
+                    return;
+                }
+
+                if (!profileData || !profileData.email) {
+                    console.log('❌ Phone number not found in profiles');
+                    setErrors({ general: 'Phone number not registered with the school.' });
+                    setLoading(false);
+                    return;
+                }
+
+                console.log('✅ Email found for phone:', profileData.email);
+                loginEmail = profileData.email;
+            }
+
             const { data, error } = await supabase.auth.signInWithPassword({
-                email: email.trim(),
+                email: loginEmail,
                 password,
             });
 
             if (error || !data.user) {
                 if (error?.message?.includes('Invalid login credentials')) {
-                    setErrors({ general: 'Invalid email or password. Please try again.' });
+                    setErrors({ general: 'Invalid credentials. Please checking your password.' });
                 } else {
                     setErrors({ general: error?.message || 'Authorization Failed' });
                 }
@@ -377,7 +418,7 @@ export default function LoginScreen() {
                     <Text style={styles.headerTitle}>Sign in to your</Text>
                     <Text style={styles.headerTitle}>Account</Text>
                     <Text style={styles.headerSubtitle}>
-                        Enter your email and password to log in
+                        Enter your email/phone and password to log in
                     </Text>
                 </Animated.View>
             </View>
@@ -417,30 +458,30 @@ export default function LoginScreen() {
                             </Animated.View>
                         )}
 
-                        {/* Email Input */}
+                        {/* Credential (Email/Phone) Input */}
                         <View style={styles.inputGroup}>
-                            <Text style={styles.inputLabel}>Email Address</Text>
+                            <Text style={styles.inputLabel}>Email or Phone Number</Text>
                             <View
                                 style={[
                                     styles.inputWrapper,
-                                    errors.email && styles.inputWrapperError,
+                                    (errors.credential || errors.email) && styles.inputWrapperError,
                                 ]}
                             >
                                 <Ionicons
-                                    name="mail-outline"
+                                    name="person-outline"
                                     size={20}
-                                    color={errors.email ? '#DC2626' : '#9CA3AF'}
+                                    color={(errors.credential || errors.email) ? '#DC2626' : '#9CA3AF'}
                                     style={styles.inputIcon}
                                 />
                                 <TextInput
                                     style={styles.input}
-                                    placeholder="name@example.com"
+                                    placeholder="Enter email or 10-digit mobile number"
                                     placeholderTextColor="#9CA3AF"
-                                    value={email}
+                                    value={credential}
                                     onChangeText={(text) => {
-                                        setEmail(text);
-                                        if (errors.email) {
-                                            setErrors({ ...errors, email: null, general: null });
+                                        setCredential(text);
+                                        if (errors.credential || errors.email) {
+                                            setErrors({ ...errors, credential: null, email: null, general: null });
                                         }
                                     }}
                                     keyboardType="email-address"
@@ -450,16 +491,16 @@ export default function LoginScreen() {
                                     onSubmitEditing={() => passwordRef.current?.focus()}
                                     blurOnSubmit={false}
                                 />
-                                {email.length > 0 && validateEmail(email) && (
+                                {credential.length > 0 && (validateEmail(credential) || validatePhone(credential)) && (
                                     <Ionicons name="checkmark-circle" size={20} color="#22C55E" />
                                 )}
                             </View>
-                            {errors.email && (
+                            {(errors.credential || errors.email) && (
                                 <Animated.Text
                                     entering={FadeIn.duration(200)}
                                     style={styles.errorText}
                                 >
-                                    {errors.email}
+                                    {errors.credential || errors.email}
                                 </Animated.Text>
                             )}
                         </View>

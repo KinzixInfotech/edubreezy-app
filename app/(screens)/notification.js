@@ -208,7 +208,7 @@ export default function NotificationScreen() {
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
             {/* StatusBar removed - using global */}
-
+            <StatusBar style='dark' />
             {/* Header - Instagram style */}
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => router.back()} style={styles.backButton} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>

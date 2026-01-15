@@ -227,8 +227,8 @@ function RootLayoutContent() {
 
     return (
         <>
-            <StatusBar style="dark" />
             <View onLayout={onLayoutRootView} style={{ flex: 1 }}>
+                <StatusBar style='dark' />
                 <Stack screenOptions={{ headerShown: false }}>
                     <Stack.Screen name="index" />
                     <Stack.Screen name="(auth)" options={{ headerShown: false }} />

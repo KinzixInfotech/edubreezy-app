@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
     View, Text, StyleSheet, Pressable, ScrollView, RefreshControl,
     Alert, ActivityIndicator, AppState, Platform, Modal, TextInput
@@ -7,15 +7,32 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Location from 'expo-location';
 import * as Device from 'expo-device';
 import * as SecureStore from 'expo-secure-store';
+import * as Notifications from 'expo-notifications';
 import Animated, { FadeInDown, FadeInUp, useSharedValue, useAnimatedStyle, withTiming, withRepeat } from 'react-native-reanimated';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { z } from 'zod';
 import {
     Calendar, Clock, MapPin, CheckCircle, XCircle, Clock4, AlertCircle,
     TrendingUp, Timer, Zap, FileText, Send, X as CloseIcon, AlertTriangle,
-    Info, ChevronRight, Umbrella
+    Info, ChevronRight, Umbrella, Bell, LogOut
 } from 'lucide-react-native';
 import api from '../../../lib/api';
+import { StatusBar } from 'expo-status-bar';
+
+// Configure notification handler
+Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+    }),
+});
+
+// Storage keys for background persistence
+const STORAGE_KEYS = {
+    CHECK_IN_TIME: 'attendance_check_in_time',
+    NOTIFICATION_IDS: 'attendance_notification_ids',
+};
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -244,6 +261,175 @@ export default function SelfAttendance() {
         transform: [{ scale: pulseAnim.value }],
     }));
 
+    // ========== NOTIFICATION HELPERS ==========
+
+    // Request notification permissions
+    const requestNotificationPermission = async () => {
+        const { status: existingStatus } = await Notifications.getPermissionsAsync();
+        let finalStatus = existingStatus;
+
+        if (existingStatus !== 'granted') {
+            const { status } = await Notifications.requestPermissionsAsync();
+            finalStatus = status;
+        }
+
+        return finalStatus === 'granted';
+    };
+
+    // Schedule check-out reminder notifications
+    const scheduleCheckOutReminders = async (checkOutWindowStart, checkOutWindowEnd) => {
+        try {
+            const hasPermission = await requestNotificationPermission();
+            if (!hasPermission) return;
+
+            // Cancel any existing attendance notifications
+            await cancelAttendanceNotifications();
+
+            const notificationIds = [];
+            const now = new Date();
+            const windowStart = new Date(checkOutWindowStart);
+            const windowEnd = new Date(checkOutWindowEnd);
+
+            // 1. Notification when check-out window opens
+            if (windowStart > now) {
+                const id = await Notifications.scheduleNotificationAsync({
+                    content: {
+                        title: '🔔 Check-out is now available!',
+                        body: `You can now check out. Don't forget to mark your attendance before ${windowEnd.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`,
+                        sound: true,
+                    },
+                    trigger: { date: windowStart },
+                });
+                notificationIds.push(id);
+            }
+
+            // 2. Reminder 15 minutes before window closes
+            const reminderTime = new Date(windowEnd.getTime() - 15 * 60 * 1000);
+            if (reminderTime > now) {
+                const id = await Notifications.scheduleNotificationAsync({
+                    content: {
+                        title: '⏰ Check-out window closing soon!',
+                        body: 'Only 15 minutes left to check out. Open the app now.',
+                        sound: true,
+                    },
+                    trigger: { date: reminderTime },
+                });
+                notificationIds.push(id);
+            }
+
+            // Store notification IDs for later cancellation
+            await SecureStore.setItemAsync(
+                STORAGE_KEYS.NOTIFICATION_IDS,
+                JSON.stringify(notificationIds)
+            );
+
+            console.log('[Notifications] Scheduled', notificationIds.length, 'reminders');
+        } catch (error) {
+            console.error('[Notifications] Failed to schedule:', error);
+        }
+    };
+
+    // Cancel scheduled attendance notifications
+    const cancelAttendanceNotifications = async () => {
+        try {
+            const storedIds = await SecureStore.getItemAsync(STORAGE_KEYS.NOTIFICATION_IDS);
+            if (storedIds) {
+                const ids = JSON.parse(storedIds);
+                for (const id of ids) {
+                    await Notifications.cancelScheduledNotificationAsync(id);
+                }
+                await SecureStore.deleteItemAsync(STORAGE_KEYS.NOTIFICATION_IDS);
+            }
+        } catch (error) {
+            console.error('[Notifications] Failed to cancel:', error);
+        }
+    };
+
+    // Save check-in time for background persistence
+    const saveCheckInState = async (checkInTime) => {
+        try {
+            await SecureStore.setItemAsync(
+                STORAGE_KEYS.CHECK_IN_TIME,
+                checkInTime.toISOString()
+            );
+        } catch (error) {
+            console.error('[Storage] Failed to save check-in state:', error);
+        }
+    };
+
+    // Clear check-in state after check-out
+    const clearCheckInState = async () => {
+        try {
+            await SecureStore.deleteItemAsync(STORAGE_KEYS.CHECK_IN_TIME);
+        } catch (error) {
+            console.error('[Storage] Failed to clear check-in state:', error);
+        }
+    };
+
+    // ========== UX MESSAGE HELPERS ==========
+
+    // Get contextual message for check-in window status
+    const getCheckInStatusMessage = () => {
+        if (!windows?.checkIn) return '';
+
+        const now = new Date();
+        const start = new Date(windows.checkIn.start);
+        const end = new Date(windows.checkIn.end);
+
+        if (windows.checkIn.isOpen) {
+            const remaining = getTimeRemaining(windows.checkIn.end);
+            return attendance?.checkInTime
+                ? `Checked in at ${new Date(attendance.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                : `Window open • ${remaining}`;
+        } else if (now < start) {
+            return `Opens at ${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        } else {
+            // Closed - show when it opens tomorrow
+            const tomorrow = new Date(start);
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            return `Closed • Opens tomorrow at ${start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        }
+    };
+
+    // Get contextual message for check-out window status
+    const getCheckOutStatusMessage = () => {
+        if (!windows?.checkOut || !attendance?.checkInTime) return '';
+
+        const now = new Date();
+        const start = new Date(windows.checkOut.start);
+        const end = new Date(windows.checkOut.end);
+
+        if (windows.checkOut.isOpen) {
+            const remaining = getTimeRemaining(windows.checkOut.end);
+            return `Ready to check out • ${remaining}`;
+        } else if (now < start) {
+            const timeUntil = Math.round((start - now) / (1000 * 60));
+            if (timeUntil > 60) {
+                return `Opens in ${Math.floor(timeUntil / 60)}h ${timeUntil % 60}m`;
+            }
+            return `Opens in ${timeUntil} minutes`;
+        } else {
+            return `Window closed • Request regularization if needed`;
+        }
+    };
+
+    // Get work progress message
+    const getWorkProgressMessage = () => {
+        if (!attendance?.checkInTime || attendance?.checkOutTime) return '';
+
+        const minHours = config?.halfDayHours || 4;
+        const fullHours = config?.fullDayHours || 8;
+
+        if (liveHours >= fullHours) {
+            return `✨ Full day completed! You can check out now.`;
+        } else if (liveHours >= minHours) {
+            return `✓ Minimum ${minHours}h completed • Full day at ${fullHours}h`;
+        } else {
+            const remaining = (minHours - liveHours).toFixed(1);
+            return `${remaining}h more for minimum ${minHours}h requirement`;
+        }
+    };
+
     // Check-in mutation
     const checkInMutation = useMutation({
         mutationFn: async () => {
@@ -255,15 +441,26 @@ export default function SelfAttendance() {
                 deviceInfo
             });
         },
-        onSuccess: (res) => {
+        onSuccess: async (res) => {
             queryClient.invalidateQueries({ queryKey: ['self-attendance-status'] });
             if (!res.data.success) {
                 Alert.alert('Cannot Check In', res.data.message);
                 return;
             }
+
+            // Save check-in state for background persistence
+            await saveCheckInState(new Date());
+
+            // Schedule check-out reminder notifications
+            if (windows?.checkOut) {
+                await scheduleCheckOutReminders(windows.checkOut.start, windows.checkOut.end);
+            }
+
             Alert.alert(
-                res.data.isLate ? 'Checked In (Late)' : 'Checked In',
-                res.data.message
+                res.data.isLate ? '⏰ Checked In (Late)' : '✅ Checked In Successfully',
+                res.data.isLate
+                    ? `You're ${res.data.lateByMinutes} minutes late. Your attendance has been marked.`
+                    : 'Your attendance has been marked. Check-out reminders scheduled!'
             );
         },
         onError: (err) => {
@@ -282,13 +479,21 @@ export default function SelfAttendance() {
                 deviceInfo
             });
         },
-        onSuccess: (res) => {
+        onSuccess: async (res) => {
             queryClient.invalidateQueries({ queryKey: ['self-attendance-status'] });
             if (!res.data.success) {
                 Alert.alert('Cannot Check Out', res.data.message);
                 return;
             }
-            Alert.alert('Checked Out', res.data.message);
+
+            // Cancel scheduled notifications and clear state
+            await cancelAttendanceNotifications();
+            await clearCheckInState();
+
+            Alert.alert(
+                '✅ Checked Out Successfully',
+                `Total working hours: ${res.data.workingHours?.toFixed(2) || liveHours.toFixed(2)}h. See you tomorrow!`
+            );
         },
         onError: (err) => {
             Alert.alert('Check-Out Failed', err.response?.data?.error || err.message);
@@ -464,6 +669,7 @@ export default function SelfAttendance() {
             style={styles.container}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" />}
         >
+            <StatusBar style='dark' />
             {/* Header */}
             <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
                 <View style={styles.headerTop}>
@@ -521,7 +727,7 @@ export default function SelfAttendance() {
                 </Animated.View>
             )}
 
-            {/* Live Timer */}
+            {/* Live Timer - Enhanced with work progress */}
             {!onLeave && attendance?.checkInTime && !attendance?.checkOutTime && (
                 <Animated.View entering={FadeInDown.delay(350)} style={styles.timerCard}>
                     <Animated.View style={[styles.pulseCircle, animatedPulse]} />
@@ -532,50 +738,104 @@ export default function SelfAttendance() {
                         <Text style={styles.timerSub}>
                             Since {new Date(attendance.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </Text>
+                        {/* Work Progress Indicator */}
+                        <View style={styles.progressHint}>
+                            <Text style={styles.progressText}>{getWorkProgressMessage()}</Text>
+                        </View>
                     </View>
                 </Animated.View>
             )}
 
-            {/* Status Card */}
+            {/* Status Card - Enhanced with contextual guidance */}
             {!onLeave && (
                 <Animated.View entering={FadeInDown.delay(400)} style={styles.statusCard}>
-                    {!attendance ? (
+                    {/* No attendance OR attendance with no checkInTime = Not Marked */}
+                    {(!attendance || !attendance.checkInTime) && attendance?.status !== 'ABSENT' ? (
                         <>
-                            <View style={styles.statusIcon}>
+                            <View style={[styles.statusIcon, { backgroundColor: '#F1F5F9' }]}>
                                 <Clock size={48} color="#94A3B8" />
                             </View>
-                            <Text style={styles.statusTitle}>Not Marked</Text>
-                            <Text style={styles.statusSubtitle}>Ready to check in</Text>
+                            <Text style={styles.statusTitle}>Not Marked Yet</Text>
+                            <Text style={styles.statusSubtitle}>
+                                {windows?.checkIn?.isOpen
+                                    ? `Window open until ${new Date(windows.checkIn.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                                    : getCheckInStatusMessage() || 'Check-in window not available'}
+                            </Text>
+                            {canCheckIn && location && (
+                                <View style={styles.statusHintBox}>
+                                    <CheckCircle size={16} color="#10B981" />
+                                    <Text style={styles.statusHintText}>Ready to check in! Tap the button below.</Text>
+                                </View>
+                            )}
+                            {!location && locationError && (
+                                <View style={[styles.statusHintBox, { backgroundColor: '#FEF2F2' }]}>
+                                    <AlertCircle size={16} color="#EF4444" />
+                                    <Text style={[styles.statusHintText, { color: '#991B1B' }]}>Enable location to check in</Text>
+                                </View>
+                            )}
+                            {!windows?.checkIn?.isOpen && !canCheckIn && (
+                                <View style={[styles.statusHintBox, { backgroundColor: '#FEF3C7' }]}>
+                                    <AlertTriangle size={16} color="#D97706" />
+                                    <Text style={[styles.statusHintText, { color: '#92400E' }]}>
+                                        Check-in window is closed. Apply for regularization if needed.
+                                    </Text>
+                                </View>
+                            )}
                         </>
-                    ) : (
+                    ) : attendance?.status === 'ABSENT' ? (
+                        <>
+                            <View style={[styles.statusIcon, { backgroundColor: '#FEE2E2' }]}>
+                                <XCircle size={48} color="#EF4444" />
+                            </View>
+                            <Text style={styles.statusTitle}>Marked Absent</Text>
+                            <Text style={styles.statusSubtitle}>
+                                {attendance.remarks || 'You missed the check-in window today'}
+                            </Text>
+                            <View style={[styles.statusHintBox, { backgroundColor: '#FEF3C7' }]}>
+                                <AlertTriangle size={16} color="#D97706" />
+                                <Text style={[styles.statusHintText, { color: '#92400E' }]}>
+                                    Think this is a mistake? Apply for regularization below.
+                                </Text>
+                            </View>
+                        </>
+                    ) : attendance?.checkOutTime ? (
+                        <>
+                            <View style={[styles.statusIcon, { backgroundColor: '#DCFCE7' }]}>
+                                <CheckCircle size={48} color="#10B981" />
+                            </View>
+                            <Text style={styles.statusTitle}>Day Complete ✨</Text>
+                            <Text style={styles.statusSubtitle}>
+                                {attendance.workingHours?.toFixed(1) || '0'}h worked today
+                            </Text>
+                            <View style={styles.timeRangeRow}>
+                                <Text style={styles.timeRangeText}>
+                                    {new Date(attendance.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    {' → '}
+                                    {new Date(attendance.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </Text>
+                            </View>
+                        </>
+                    ) : attendance?.checkInTime ? (
                         <>
                             <View style={[
                                 styles.statusIcon,
-                                {
-                                    backgroundColor:
-                                        attendance.status === 'PRESENT' ? '#DCFCE7' :
-                                            attendance.status === 'LATE' ? '#FEF3C7' :
-                                                attendance.status === 'ABSENT' ? '#FEE2E2' : '#E0E7FF'
-                                }
+                                { backgroundColor: attendance.status === 'LATE' ? '#FEF3C7' : '#DCFCE7' }
                             ]}>
-                                {attendance.status === 'PRESENT' ? <CheckCircle size={48} color="#10B981" /> :
-                                    attendance.status === 'LATE' ? <Clock4 size={48} color="#F59E0B" /> :
-                                        <XCircle size={48} color="#EF4444" />}
+                                {attendance.status === 'LATE' ? (
+                                    <Clock4 size={48} color="#F59E0B" />
+                                ) : (
+                                    <CheckCircle size={48} color="#10B981" />
+                                )}
                             </View>
                             <Text style={styles.statusTitle}>
-                                {attendance.status === 'PRESENT' ? 'Checked In' :
-                                    attendance.status === 'LATE' ? 'Late Check-In' :
-                                        attendance.status?.replaceAll('_', ' ')
-                                }
+                                {attendance.status === 'LATE' ? 'Checked In (Late)' : 'Checked In'}
                             </Text>
-                            {attendance.checkInTime && (
-                                <Text style={styles.statusSubtitle}>
-                                    {new Date(attendance.checkInTime).toLocaleTimeString('en-US', {
-                                        hour: '2-digit',
-                                        minute: '2-digit'
-                                    })}
-                                </Text>
-                            )}
+                            <Text style={styles.statusSubtitle}>
+                                at {new Date(attendance.checkInTime).toLocaleTimeString('en-US', {
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                })}
+                            </Text>
                             {attendance.lateByMinutes > 0 && (
                                 <View style={styles.lateBadge}>
                                     <Text style={styles.lateBadgeText}>
@@ -583,8 +843,17 @@ export default function SelfAttendance() {
                                     </Text>
                                 </View>
                             )}
+                            {/* Check-out hint */}
+                            {!canCheckOut && windows?.checkOut && (
+                                <View style={[styles.statusHintBox, { backgroundColor: '#EEF2FF' }]}>
+                                    <Info size={16} color="#4F46E5" />
+                                    <Text style={[styles.statusHintText, { color: '#3730A3' }]}>
+                                        {getCheckOutStatusMessage()}
+                                    </Text>
+                                </View>
+                            )}
                         </>
-                    )}
+                    ) : null}
                 </Animated.View>
             )}
 
@@ -640,7 +909,7 @@ export default function SelfAttendance() {
                 </Pressable>
             </Animated.View>
 
-            {/* Windows Info - Only show if working day and not on leave */}
+            {/* Windows Info - Enhanced with contextual messages */}
             {isWorkingDay && !onLeave && windows?.checkIn && (
                 <Animated.View entering={FadeInDown.delay(250)} style={styles.windowCard}>
                     <View style={styles.windowHeader}>
@@ -656,14 +925,14 @@ export default function SelfAttendance() {
                         <View style={[styles.windowStatus, { backgroundColor: '#DCFCE7' }]}>
                             <CheckCircle size={14} color="#10B981" />
                             <Text style={[styles.windowStatusText, { color: '#10B981' }]}>
-                                Open • {getTimeRemaining(windows.checkIn.end)}
+                                {getCheckInStatusMessage()}
                             </Text>
                         </View>
                     ) : (
                         <View style={[styles.windowStatus, { backgroundColor: '#FEE2E2' }]}>
                             <XCircle size={14} color="#EF4444" />
                             <Text style={[styles.windowStatusText, { color: '#EF4444' }]}>
-                                Closed
+                                {getCheckInStatusMessage()}
                             </Text>
                         </View>
                     )}
@@ -673,7 +942,7 @@ export default function SelfAttendance() {
             {isWorkingDay && !onLeave && windows?.checkOut && attendance?.checkInTime && (
                 <Animated.View entering={FadeInDown.delay(300)} style={styles.checkOutCard}>
                     <View style={styles.windowHeader}>
-                        <Timer size={18} color="#10B981" />
+                        <LogOut size={18} color="#10B981" />
                         <Text style={styles.windowTitle}>Check-Out Window</Text>
                     </View>
                     <Text style={styles.windowTime}>
@@ -681,11 +950,11 @@ export default function SelfAttendance() {
                         {' - '}
                         {new Date(windows.checkOut.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </Text>
-                    {windows.checkOut.minTime && (
+                    {windows.checkOut.minTime && !windows.checkOut.isOpen && (
                         <View style={styles.minTimeHint}>
                             <Info size={14} color="#F59E0B" />
                             <Text style={styles.minTimeText}>
-                                Minimum {config?.halfDayHours || 4}h • Available after{' '}
+                                Minimum {config?.halfDayHours || 4}h required • Available after{' '}
                                 {new Date(windows.checkOut.minTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </Text>
                         </View>
@@ -694,14 +963,18 @@ export default function SelfAttendance() {
                         <View style={[styles.windowStatus, { backgroundColor: '#DCFCE7' }]}>
                             <CheckCircle size={14} color="#10B981" />
                             <Text style={[styles.windowStatusText, { color: '#10B981' }]}>
-                                Open • {getTimeRemaining(windows.checkOut.end)}
+                                {getCheckOutStatusMessage()}
                             </Text>
                         </View>
                     ) : (
-                        <View style={[styles.windowStatus, { backgroundColor: '#FEE2E2' }]}>
-                            <XCircle size={14} color="#EF4444" />
-                            <Text style={[styles.windowStatusText, { color: '#EF4444' }]}>
-                                {new Date() < new Date(windows.checkOut.start) ? 'Opens soon' : 'Closed'}
+                        <View style={[styles.windowStatus, { backgroundColor: new Date() < new Date(windows.checkOut.start) ? '#FEF3C7' : '#FEE2E2' }]}>
+                            {new Date() < new Date(windows.checkOut.start) ? (
+                                <Clock4 size={14} color="#F59E0B" />
+                            ) : (
+                                <XCircle size={14} color="#EF4444" />
+                            )}
+                            <Text style={[styles.windowStatusText, { color: new Date() < new Date(windows.checkOut.start) ? '#92400E' : '#EF4444' }]}>
+                                {getCheckOutStatusMessage()}
                             </Text>
                         </View>
                     )}
@@ -952,10 +1225,16 @@ const styles = StyleSheet.create({
 
     statusCard: { margin: 20, padding: 32, backgroundColor: '#fff', borderRadius: 24, alignItems: 'center' },
     statusIcon: { width: 96, height: 96, borderRadius: 48, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
-    statusTitle: { fontSize: 24, fontWeight: '700', color: '#111', marginBottom: 4 },
-    statusSubtitle: { fontSize: 16, color: '#666' },
+    statusTitle: { fontSize: 24, fontWeight: '700', color: '#111', marginBottom: 4, textAlign: 'center' },
+    statusSubtitle: { fontSize: 16, color: '#666', textAlign: 'center', lineHeight: 22 },
     lateBadge: { marginTop: 12, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#FEF3C7', borderRadius: 12 },
     lateBadgeText: { fontSize: 14, fontWeight: '600', color: '#92400E' },
+
+    // Enhanced status card hint styles
+    statusHintBox: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 16, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#DCFCE7', borderRadius: 12, maxWidth: '100%' },
+    statusHintText: { flex: 1, fontSize: 13, color: '#166534', lineHeight: 18 },
+    timeRangeRow: { marginTop: 12, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: '#F1F5F9', borderRadius: 10 },
+    timeRangeText: { fontSize: 14, color: '#475569', fontWeight: '500' },
 
     actionContainer: { paddingHorizontal: 20, gap: 12 },
     actionButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, paddingVertical: 18, borderRadius: 16 },
@@ -1015,6 +1294,10 @@ const styles = StyleSheet.create({
     windowStatusText: { fontSize: 13, fontWeight: '600' },
     minTimeHint: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8, padding: 8, backgroundColor: '#FFFBEB', borderRadius: 8 },
     minTimeText: { flex: 1, fontSize: 12, color: '#92400E' },
+
+    // Work progress styles for timer card
+    progressHint: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#FED7AA' },
+    progressText: { fontSize: 13, color: '#92400E', fontWeight: '500', textAlign: 'center' },
 
     infoBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, padding: 12, backgroundColor: '#EEF2FF', borderRadius: 12, marginBottom: 16 },
     infoBoxText: { flex: 1, fontSize: 13, color: '#1E40AF', lineHeight: 18 },

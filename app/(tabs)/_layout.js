@@ -23,9 +23,10 @@ function TabsLayout() {
     };
     loadRole();
 
-    // Set Android navigation bar color to match tabs
+    // Set Android navigation bar to be transparent and absolute for edge-to-edge look
     if (Platform.OS === 'android') {
-      NavigationBar.setBackgroundColorAsync('#0256d0');
+      NavigationBar.setPositionAsync('absolute');
+      NavigationBar.setBackgroundColorAsync('transparent');
       NavigationBar.setButtonStyleAsync('light');
     }
   }, []);
@@ -116,10 +117,10 @@ function TabsLayout() {
           borderTopLeftRadius: 32,
           borderTopRightRadius: 32,
           overflow: 'hidden',
-          height: 70,
+          height: Platform.OS === 'ios' ? 90 : 70 + insets.bottom,
           paddingTop: 8,
-          paddingBottom: 8,
-          bottom: Platform.OS === 'android' ? insets.bottom : 0,
+          paddingBottom: Platform.OS === 'ios' ? 25 : Math.max(insets.bottom, 8) + 5,
+          bottom: 0,
         },
         tabBarBackground: () => (
           <LinearGradient

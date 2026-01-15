@@ -41,6 +41,7 @@ import { updateProfileSession } from '../../lib/profileManager';
 import GlowingStatusBar from '../components/GlowingStatusBar';
 import AddChildModal from '../components/AddChildModal';
 import DelegationCheckModal from '../components/DelegationCheckModal';
+import BannerCarousel from '../components/BannerCarousel';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const isSmallDevice = SCREEN_WIDTH < 375;
@@ -620,7 +621,7 @@ export default function HomeScreen() {
             case 'student':
                 return <StudentView refreshing={refreshing} onRefresh={onRefresh} header={headerComponent} />;
             case 'teaching_staff':
-                return <TeacherView refreshing={refreshing} schoolId={schoolId} userId={userId} onRefresh={onRefresh} upcomingEvents={upcomingEvents} todaysEvents={todaysEvents} header={headerComponent} />;
+                return <TeacherView refreshing={refreshing} schoolId={schoolId} userId={userId} onRefresh={onRefresh} upcomingEvents={upcomingEvents} todaysEvents={todaysEvents} header={headerComponent} onScroll={scrollHandler} />;
             case 'admin':
                 return <AdminView refreshing={refreshing} onRefresh={onRefresh} header={headerComponent} />;
             case 'parent':
@@ -944,35 +945,42 @@ export default function HomeScreen() {
                     </View>
                 </Animated.View>
 
+
+
+                {/* School Banner Carousel */}
+                <BannerCarousel schoolId={schoolId} role={user_acc?.role?.name} />
+
                 {/* Quick Actions - Grid like Teacher */}
-                {actionGroups.map((group, groupIndex) => (
-                    <Animated.View
-                        key={group.title}
-                        entering={FadeInDown.delay(400 + groupIndex * 100).duration(600)}
-                        style={styles.section}
-                    >
-                        <Text style={styles.sectionTitle}>{group.title}</Text>
-                        <View style={styles.actionsGrid}>
-                            {group.actions.map((action, index) => (
-                                <Animated.View
-                                    key={action.label}
-                                    entering={FadeInDown.delay(500 + index * 50).duration(400)}
-                                >
-                                    <HapticTouchable onPress={() => router.push(action.href || '')}>
-                                        <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}>
-                                            <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
-                                                <action.icon size={22} color={action.color} />
+                {
+                    actionGroups.map((group, groupIndex) => (
+                        <Animated.View
+                            key={group.title}
+                            entering={FadeInDown.delay(400 + groupIndex * 100).duration(600)}
+                            style={styles.section}
+                        >
+                            <Text style={styles.sectionTitle}>{group.title}</Text>
+                            <View style={styles.actionsGrid}>
+                                {group.actions.map((action, index) => (
+                                    <Animated.View
+                                        key={action.label}
+                                        entering={FadeInDown.delay(500 + index * 50).duration(400)}
+                                    >
+                                        <HapticTouchable onPress={() => router.push(action.href || '')}>
+                                            <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}>
+                                                <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
+                                                    <action.icon size={22} color={action.color} />
+                                                </View>
+                                                <Text style={styles.actionLabel} numberOfLines={1}>
+                                                    {action.label}
+                                                </Text>
                                             </View>
-                                            <Text style={styles.actionLabel} numberOfLines={1}>
-                                                {action.label}
-                                            </Text>
-                                        </View>
-                                    </HapticTouchable>
-                                </Animated.View>
-                            ))}
-                        </View>
-                    </Animated.View>
-                ))}
+                                        </HapticTouchable>
+                                    </Animated.View>
+                                ))}
+                            </View>
+                        </Animated.View>
+                    ))
+                }
 
                 {/* Upcoming Events */}
                 <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
@@ -1077,7 +1085,7 @@ export default function HomeScreen() {
                 </Animated.View>
 
                 <View style={{ height: 100 }} />
-            </ScrollView>
+            </ScrollView >
         );
     };
 
@@ -1131,6 +1139,10 @@ export default function HomeScreen() {
                     </View>
                 </Animated.View>
             )}
+
+            {/* School Banner Carousel */}
+            <BannerCarousel schoolId={schoolId} role={user_acc?.role?.name} />
+
             <Text style={styles.sectionTitle}>School Dashboard</Text>
             <Text style={{ padding: 16, color: '#666' }}>Admin features coming soon.</Text>
         </ScrollView>
@@ -1986,52 +1998,59 @@ export default function HomeScreen() {
                         </View>
                     )}
                 </Animated.View>
+
+
+                {/* School Banner Carousel */}
+                <BannerCarousel schoolId={schoolId} role={user_acc?.role?.name} />
+
                 {/* Quick Actions */}
-                {actionGroups && actionGroups.map((group, groupIndex) => (
-                    <Animated.View
-                        key={group.title}
-                        entering={FadeInDown.delay(400 + groupIndex * 100).duration(600)}
-                        style={styles.section}
-                    >
-                        <Text style={styles.sectionTitle}>{group.title}</Text>
-                        <View style={styles.actionsGrid}>
-                            {group.actions.map((action, index) => (
-                                <Animated.View
-                                    key={action.label}
-                                    entering={FadeInDown.delay(500 + index * 50).duration(400)}
-                                >
-                                    <HapticTouchable
-                                        onPress={() => {
-                                            if (action.params) {
-                                                router.push({
-                                                    pathname: action.href,
-                                                    params: action.params,
-                                                });
-                                            } else {
-                                                router.push(action.href || '');
-                                            }
-                                        }}
+                {
+                    actionGroups && actionGroups.map((group, groupIndex) => (
+                        <Animated.View
+                            key={group.title}
+                            entering={FadeInDown.delay(400 + groupIndex * 100).duration(600)}
+                            style={styles.section}
+                        >
+                            <Text style={styles.sectionTitle}>{group.title}</Text>
+                            <View style={styles.actionsGrid}>
+                                {group.actions.map((action, index) => (
+                                    <Animated.View
+                                        key={action.label}
+                                        entering={FadeInDown.delay(500 + index * 50).duration(400)}
                                     >
-                                        <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}
+                                        <HapticTouchable
+                                            onPress={() => {
+                                                if (action.params) {
+                                                    router.push({
+                                                        pathname: action.href,
+                                                        params: action.params,
+                                                    });
+                                                } else {
+                                                    router.push(action.href || '');
+                                                }
+                                            }}
                                         >
-                                            <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
-                                                <action.icon size={22} color={action.color} />
-                                                {action.badge && (
-                                                    <View style={styles.badgeContainer}>
-                                                        <Text style={styles.badgeText}>{action.badge > 99 ? '99+' : action.badge}</Text>
-                                                    </View>
-                                                )}
+                                            <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}
+                                            >
+                                                <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
+                                                    <action.icon size={22} color={action.color} />
+                                                    {action.badge && (
+                                                        <View style={styles.badgeContainer}>
+                                                            <Text style={styles.badgeText}>{action.badge > 99 ? '99+' : action.badge}</Text>
+                                                        </View>
+                                                    )}
+                                                </View>
+                                                <Text style={styles.actionLabel} numberOfLines={1}>
+                                                    {action.label}
+                                                </Text>
                                             </View>
-                                            <Text style={styles.actionLabel} numberOfLines={1}>
-                                                {action.label}
-                                            </Text>
-                                        </View>
-                                    </HapticTouchable>
-                                </Animated.View>
-                            ))}
-                        </View>
-                    </Animated.View>
-                ))}
+                                        </HapticTouchable>
+                                    </Animated.View>
+                                ))}
+                            </View>
+                        </Animated.View>
+                    ))
+                }
                 {/* Upcoming Events */}
                 <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
                     <View style={styles.sectionHeader}>
@@ -2123,7 +2142,7 @@ export default function HomeScreen() {
                     schoolId={schoolId}
                     onSuccess={handleAddChildSuccess}
                 />
-            </Animated.ScrollView>
+            </Animated.ScrollView >
         );
     };
 
@@ -2471,6 +2490,10 @@ export default function HomeScreen() {
                         </HapticTouchable>
                     </Animated.View>
                 )}
+
+                {/* School Banner Carousel */}
+                <BannerCarousel schoolId={schoolId} role={user_acc?.role?.name} />
+
                 <Animated.View entering={FadeInDown.delay(200).duration(600)} style={styles.section}>
                     <Text style={styles.sectionTitle}>Quick Actions</Text>
                     <View style={styles.actionsGrid}>
@@ -3333,7 +3356,10 @@ export default function HomeScreen() {
 
 // === STYLES ===
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#fff' },
+    container: {
+        flex: 1, backgroundColor: '#fff',
+        paddingTop: isSmallDevice ? 120 : 90,
+    },
     schoolBadge: {
         marginHorizontal: 16,
         marginTop: 12,
@@ -4344,7 +4370,7 @@ const styles = StyleSheet.create({
 
 // === TEACHER VIEW (MOVED) ===
 // === TEACHING STAFF VIEW ===
-const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEvents, todaysEvents, header }) => {
+const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEvents, todaysEvents, header, onScroll, paddingTop }) => {
     const [showDelegationModal, setShowDelegationModal] = useState(false);
     const [activeDelegations, setActiveDelegations] = useState([]);
     const [shownDelegations, setShownDelegations] = useState({});
@@ -4505,9 +4531,11 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
     }
 
     return (
-        <ScrollView
+        <Animated.ScrollView
             style={styles.container}
             showsVerticalScrollIndicator={false}
+            onScroll={onScroll}
+            scrollEventThrottle={16}
             refreshControl={
                 <RefreshControl
                     refreshing={refreshing}
@@ -4520,7 +4548,7 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
                 />
             }
         >
-            {header}
+            {/* {header} */}
             {/* Delegation Banner */}
             {activeDelegations.length > 0 && (
                 <Animated.View entering={FadeInDown.duration(400)} style={styles.delegationBannerContainer}>
@@ -4656,6 +4684,9 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
                 </View>
             </Animated.View>
 
+            {/* School Banner Carousel */}
+            <BannerCarousel schoolId={schoolId} role="TEACHING_STAFF" />
+
             {/* Quick Actions */}
             {actionGroups.map((group, groupIndex) => (
                 <Animated.View key={group.title} entering={FadeInDown.delay(400 + groupIndex * 100).duration(600)} style={styles.section}>
@@ -4764,6 +4795,6 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
                 onSelectDelegation={handleSelectDelegation}
                 onClose={handleDismissDelegationModal}
             />
-        </ScrollView>
+        </Animated.ScrollView>
     );
 });

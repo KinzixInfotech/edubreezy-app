@@ -3356,10 +3356,7 @@ export default function HomeScreen() {
 
 // === STYLES ===
 const styles = StyleSheet.create({
-    container: {
-        flex: 1, backgroundColor: '#fff',
-        paddingTop: isSmallDevice ? 120 : 90,
-    },
+    container: { flex: 1, backgroundColor: '#fff' },
     schoolBadge: {
         marginHorizontal: 16,
         marginTop: 12,
@@ -4505,8 +4502,8 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
             title: 'Quick Actions',
             actions: [
                 { icon: Book, label: 'Add Homework', color: '#0469ff', bgColor: '#E3F2FD', href: "/homework/assign" },
-                { icon: Calendar, label: 'Self Attendance', color: '#F9A825', bgColor: '#FFF8E1', href: "attendance" },
-                { icon: Calendar, label: 'Mark Attendance', color: '#F9A825', bgColor: '#FFF8E1', href: "teacher/mark-attendance" },
+                { icon: Calendar, label: 'Self Attendance', color: '#F9A825', bgColor: '#FFF8E1', href: "teachers/attendance" },
+                { icon: Calendar, label: 'Mark Attendance', color: '#F9A825', bgColor: '#FFF8E1', href: "teachers/mark-attendance" },
                 { icon: ChartPie, label: 'Attendance Stats', color: '#F9A825', params: { teacherData: JSON.stringify({ schoolId, userId }) }, bgColor: '#FFF8E1', href: "/teachers/stats-calendar" },
                 { icon: Calendar, label: 'School Calendar', color: '#4CAF50', bgColor: '#E8F5E9', href: "/calendarscreen" },
                 { icon: ClipboardList, label: 'Class Attendance', color: '#3B82F6', bgColor: '#DBEAFE', href: "/teachers/class-attendance" },
@@ -4532,10 +4529,11 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
 
     return (
         <Animated.ScrollView
-            style={styles.container}
+            style={{ flex: 1, backgroundColor: '#fff' }}
             showsVerticalScrollIndicator={false}
             onScroll={onScroll}
             scrollEventThrottle={16}
+            contentContainerStyle={{ paddingBottom: 100 }}
             refreshControl={
                 <RefreshControl
                     refreshing={refreshing}
@@ -4548,7 +4546,7 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
                 />
             }
         >
-            {/* {header} */}
+            {header}
             {/* Delegation Banner */}
             {activeDelegations.length > 0 && (
                 <Animated.View entering={FadeInDown.duration(400)} style={styles.delegationBannerContainer}>

@@ -50,7 +50,7 @@ function TabsLayout() {
           showProfile: true,
           markSelf: false,
           showNoticeBoard: true,
-          showMarkAttendance: true,
+          showMarkAttendance: false,
 
         };
       case 'ADMIN':
@@ -59,7 +59,6 @@ function TabsLayout() {
           showProfile: true,
           showNoticeBoard: true,
           showMarkAttendance: false,
-
         };
       case 'PARENT':
         return {
@@ -93,7 +92,6 @@ function TabsLayout() {
           showNoticeBoard: false,
           markSelf: false,
           showMarkAttendance: false,
-
         };
     }
   };
@@ -184,7 +182,7 @@ function TabsLayout() {
         }}
       />
 
-      <Tabs.Screen
+      {/* <Tabs.Screen
         name="teacher/mark-attendance"
         options={{
           title: 'Mark Attendance',
@@ -198,7 +196,7 @@ function TabsLayout() {
             />
           ),
         }}
-      />
+      /> */}
       <Tabs.Screen
         name="noticeboard"
         options={{
@@ -216,8 +214,9 @@ function TabsLayout() {
         }}
       />
 
-      <Tabs.Screen
-        name="attendance"
+      {/* <Tabs.Screen
+        name="
+        "
         options={{
           title: 'Mark Self',
           href: tabConfig.markSelf ? undefined : null,
@@ -230,7 +229,7 @@ function TabsLayout() {
             />
           ),
         }}
-      />
+      /> */}
     </Tabs>
   );
 }

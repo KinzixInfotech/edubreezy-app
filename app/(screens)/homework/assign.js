@@ -13,6 +13,7 @@ import {
     Platform,
     Modal,
     FlatList,
+    Linking,
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
@@ -33,13 +34,16 @@ import {
     ChevronRight,
     Check,
     AlertTriangle,
+    ImageIcon,
+    Camera,
+    Paperclip,
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
-import * as DocumentPicker from 'expo-document-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import api from '../../../lib/api';
 import HapticTouchable from '../../components/HapticTouch';
 import { Image } from 'expo-image';
+import { pickAndUploadImage, pickAndUploadDocument } from '../../../lib/uploadthing';
 
 
 const TABS = ['Assign', 'My Homework'];
@@ -54,8 +58,8 @@ export default function AssignHomeworkScreen() {
     const [description, setDescription] = useState('');
     const [dueDate, setDueDate] = useState(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
     const [showDatePicker, setShowDatePicker] = useState(false);
-    const [selectedFile, setSelectedFile] = useState(null);
-    const [uploading, setUploading] = useState(false);
+    const [uploadedFile, setUploadedFile] = useState(null); // { url, name, size, type }
+    const [uploadProgress, setUploadProgress] = useState(0);
     const [selectedSubject, setSelectedSubject] = useState(null);
 
     // Submission marking modal state
@@ -184,17 +188,75 @@ export default function AssignHomeworkScreen() {
         }
     });
 
-    const pickDocument = async () => {
+    // Upload state (no hooks needed - using direct functions)
+    const [isUploading, setIsUploading] = useState(false);
+
+    const handlePickImage = async () => {
+        if (!schoolId || !classId) {
+            Alert.alert('Error', 'Please wait for class data to load');
+            return;
+        }
+
         try {
-            const result = await DocumentPicker.getDocumentAsync({
-                type: 'application/pdf',
-                copyToCacheDirectory: true
-            });
-            if (result.canceled === false && result.assets?.[0]) {
-                setSelectedFile(result.assets[0]);
-            }
-        } catch (error) {
-            Alert.alert('Error', 'Failed to pick document');
+            await pickAndUploadImage('homework',
+                { schoolId, classId, teacherId: userId, title },
+                {
+                    onStart: () => setIsUploading(true),
+                    onProgress: (progress) => setUploadProgress(progress),
+                    onComplete: (res) => {
+                        if (res?.[0]) {
+                            setUploadedFile({
+                                url: res[0].url,
+                                name: res[0].fileName || res[0].name || 'Image',
+                                size: res[0].size,
+                                type: 'image'
+                            });
+                            Alert.alert('Success', 'Image uploaded successfully!');
+                        }
+                    },
+                    onError: (error) => {
+                        Alert.alert('Upload Failed', error.message || 'Failed to upload image');
+                    }
+                }
+            );
+        } finally {
+            setIsUploading(false);
+            setUploadProgress(0);
+        }
+    };
+
+    const handlePickDocument = async () => {
+        if (!schoolId || !classId) {
+            Alert.alert('Error', 'Please wait for class data to load');
+            return;
+        }
+
+
+        try {
+            await pickAndUploadDocument('homework',
+                { schoolId, classId, teacherId: userId, title },
+                {
+                    onStart: () => setIsUploading(true),
+                    onProgress: (progress) => setUploadProgress(progress),
+                    onComplete: (res) => {
+                        if (res?.[0]) {
+                            setUploadedFile({
+                                url: res[0].url,
+                                name: res[0].fileName || res[0].name || 'Document',
+                                size: res[0].size,
+                                type: 'document'
+                            });
+                            Alert.alert('Success', 'Document uploaded successfully!');
+                        }
+                    },
+                    onError: (error) => {
+                        Alert.alert('Upload Failed', error.message || 'Failed to upload document');
+                    }
+                }
+            );
+        } finally {
+            setIsUploading(false);
+            setUploadProgress(0);
         }
     };
 
@@ -203,7 +265,8 @@ export default function AssignHomeworkScreen() {
         setDescription('');
         setDueDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
         setSelectedSubject(null);
-        setSelectedFile(null);
+        setUploadedFile(null);
+        setUploadProgress(0);
     };
 
     const handleSubmit = () => {
@@ -219,16 +282,19 @@ export default function AssignHomeworkScreen() {
             Alert.alert('Invalid Date', 'Due date must be in the future');
             return;
         }
+        if (isUploading) {
+            Alert.alert('Please Wait', 'File upload in progress...');
+            return;
+        }
 
         Alert.alert(
             'Confirm Assignment',
-            `Assign homework to ${studentsCount} student(s)?`,
+            `Assign homework to ${studentsCount} student(s)?${uploadedFile ? '\n📎 Attachment included' : ''}`,
             [
                 { text: 'Cancel', style: 'cancel' },
                 {
                     text: 'Assign',
-                    onPress: async () => {
-                        setUploading(true);
+                    onPress: () => {
                         assignMutation.mutate({
                             schoolId,
                             classId,
@@ -238,11 +304,10 @@ export default function AssignHomeworkScreen() {
                             title: title.trim(),
                             description: description.trim(),
                             dueDate: dueDate.toISOString(),
-                            fileUrl: null,
-                            fileName: selectedFile?.name || null,
+                            fileUrl: uploadedFile?.url || null,
+                            fileName: uploadedFile?.name || null,
                             senderId: userId
                         });
-                        setUploading(false);
                     }
                 }
             ]
@@ -444,29 +509,74 @@ export default function AssignHomeworkScreen() {
 
                         <Animated.View entering={FadeInDown.delay(500).duration(400)} style={styles.formGroup}>
                             <Text style={styles.label}>Attachment (Optional)</Text>
-                            {selectedFile ? (
+
+                            {/* Upload Progress */}
+                            {isUploading && (
+                                <View style={styles.uploadProgressContainer}>
+                                    <View style={styles.uploadProgressBar}>
+                                        <View style={[styles.uploadProgressFill, { width: `${uploadProgress}%` }]} />
+                                    </View>
+                                    <Text style={styles.uploadProgressText}>Uploading... {Math.round(uploadProgress)}%</Text>
+                                </View>
+                            )}
+
+                            {/* Uploaded File Preview */}
+                            {uploadedFile && !isUploading ? (
                                 <View style={styles.filePreview}>
                                     <View style={styles.filePreviewLeft}>
-                                        <FileText size={24} color="#0469ff" />
+                                        {uploadedFile.type === 'image' ? (
+                                            <Image
+                                                source={{ uri: uploadedFile.url }}
+                                                style={styles.uploadedImagePreview}
+                                            />
+                                        ) : (
+                                            <View style={styles.fileIconContainer}>
+                                                <FileText size={24} color="#0469ff" />
+                                            </View>
+                                        )}
                                         <View style={styles.fileInfo}>
-                                            <Text style={styles.fileName} numberOfLines={1}>{selectedFile.name}</Text>
-                                            <Text style={styles.fileSize}>{(selectedFile.size / 1024).toFixed(1)} KB</Text>
+                                            <Text style={styles.fileName} numberOfLines={1}>{uploadedFile.name}</Text>
+                                            <View style={styles.fileMetaRow}>
+                                                <CheckCircle2 size={12} color="#10B981" />
+                                                <Text style={styles.fileUploaded}>Uploaded to cloud</Text>
+                                            </View>
                                         </View>
                                     </View>
-                                    <HapticTouchable onPress={() => setSelectedFile(null)}>
+                                    <HapticTouchable onPress={() => setUploadedFile(null)}>
                                         <View style={styles.removeButton}>
                                             <X size={20} color="#EF4444" />
                                         </View>
                                     </HapticTouchable>
                                 </View>
-                            ) : (
-                                <HapticTouchable onPress={pickDocument}>
-                                    <View style={styles.uploadButton}>
-                                        <Upload size={24} color="#0469ff" />
-                                        <Text style={styles.uploadButtonText}>Upload PDF</Text>
-                                    </View>
-                                </HapticTouchable>
-                            )}
+                            ) : !isUploading ? (
+                                <View style={styles.uploadOptions}>
+                                    {/* Image Upload */}
+                                    <HapticTouchable onPress={handlePickImage} style={{ flex: 1 }}>
+                                        <View style={styles.uploadOptionButton}>
+                                            <View style={[styles.uploadOptionIcon, { backgroundColor: '#E3F2FD' }]}>
+                                                <ImageIcon size={24} color="#0469ff" />
+                                            </View>
+                                            <Text style={styles.uploadOptionText}>Image</Text>
+                                            <Text style={styles.uploadOptionHint}>JPG, PNG</Text>
+                                        </View>
+                                    </HapticTouchable>
+
+                                    {/* Document Upload */}
+                                    <HapticTouchable onPress={handlePickDocument} style={{ flex: 1 }}>
+                                        <View style={styles.uploadOptionButton}>
+                                            <View style={[styles.uploadOptionIcon, { backgroundColor: '#FEF3C7' }]}>
+                                                <FileText size={24} color="#F59E0B" />
+                                            </View>
+                                            <Text style={styles.uploadOptionText}>Document</Text>
+                                            <Text style={styles.uploadOptionHint}>PDF, DOC</Text>
+                                        </View>
+                                    </HapticTouchable>
+                                </View>
+                            ) : null}
+
+                            <Text style={styles.uploadHint}>
+                                Max file size: 15MB for PDFs, 10MB for images
+                            </Text>
                         </Animated.View>
                     </View>
 
@@ -551,14 +661,16 @@ export default function AssignHomeworkScreen() {
             {/* Submit Button (Assign Tab Only) */}
             {activeTab === 0 && (
                 <Animated.View entering={FadeInDown.delay(600).duration(400)} style={styles.floatingButton}>
-                    <HapticTouchable onPress={handleSubmit} disabled={uploading || assignMutation.isPending}>
-                        <View style={[styles.submitButton, (uploading || assignMutation.isPending) && styles.submitButtonDisabled]}>
-                            {uploading || assignMutation.isPending ? (
+                    <HapticTouchable onPress={handleSubmit} disabled={isUploading || assignMutation.isPending}>
+                        <View style={[styles.submitButton, (isUploading || assignMutation.isPending) && styles.submitButtonDisabled]}>
+                            {isUploading || assignMutation.isPending ? (
                                 <ActivityIndicator color="#fff" size="small" />
                             ) : (
                                 <>
                                     <Send size={24} color="#fff" />
-                                    <Text style={styles.submitButtonText}>Assign Homework</Text>
+                                    <Text style={styles.submitButtonText}>
+                                        {uploadedFile ? 'Assign with Attachment' : 'Assign Homework'}
+                                    </Text>
                                 </>
                             )}
                         </View>
@@ -780,4 +892,87 @@ const styles = StyleSheet.create({
     statusToggle: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
     statusSubmitted: { backgroundColor: '#10B981' },
     statusPending: { backgroundColor: '#FEE2E2' },
+
+    // UploadThing Upload Styles
+    uploadOptions: {
+        flexDirection: 'row',
+        gap: 12,
+        marginTop: 8
+    },
+    uploadOptionButton: {
+        flex: 1,
+        padding: 16,
+        backgroundColor: '#f8f9fa',
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+        alignItems: 'center',
+        gap: 8
+    },
+    uploadOptionIcon: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        alignItems: 'center',
+        justifyContent: 'center'
+    },
+    uploadOptionText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#111'
+    },
+    uploadOptionHint: {
+        fontSize: 11,
+        color: '#999'
+    },
+    uploadProgressContainer: {
+        marginTop: 12,
+        gap: 8
+    },
+    uploadProgressBar: {
+        height: 6,
+        backgroundColor: '#e5e7eb',
+        borderRadius: 3,
+        overflow: 'hidden'
+    },
+    uploadProgressFill: {
+        height: '100%',
+        backgroundColor: '#0469ff',
+        borderRadius: 3
+    },
+    uploadProgressText: {
+        fontSize: 12,
+        color: '#666',
+        textAlign: 'center'
+    },
+    uploadedImagePreview: {
+        width: 48,
+        height: 48,
+        borderRadius: 8
+    },
+    fileIconContainer: {
+        width: 48,
+        height: 48,
+        borderRadius: 8,
+        backgroundColor: '#E3F2FD',
+        alignItems: 'center',
+        justifyContent: 'center'
+    },
+    fileMetaRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginTop: 2
+    },
+    fileUploaded: {
+        fontSize: 12,
+        color: '#10B981',
+        fontWeight: '500'
+    },
+    uploadHint: {
+        fontSize: 11,
+        color: '#999',
+        textAlign: 'center',
+        marginTop: 8
+    },
 });

@@ -1,4 +1,3 @@
-// app/(tabs)/attendance.jsx - ENHANCED WITH LEAVE TRACKING & DATE PICKERS
 import React, { useState, useEffect, useRef } from 'react';
 import {
     View, Text, StyleSheet, Pressable, ScrollView, RefreshControl,
@@ -16,7 +15,7 @@ import {
     TrendingUp, Timer, Zap, FileText, Send, X as CloseIcon, AlertTriangle,
     Info, ChevronRight, Umbrella
 } from 'lucide-react-native';
-import api from '../../lib/api';
+import api from '../../../lib/api';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 

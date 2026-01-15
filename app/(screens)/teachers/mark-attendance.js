@@ -11,6 +11,7 @@ import {
   Image,
   TextInput
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
@@ -28,6 +29,7 @@ import {
 import * as SecureStore from 'expo-secure-store';
 import api from '../../../lib/api';
 import HapticTouchable from '../../components/HapticTouch';
+import { StatusBar } from 'expo-status-bar';
 
 const getISTDateString = (dateInput = new Date()) => {
   const date = new Date(dateInput);
@@ -38,6 +40,7 @@ const getISTDateString = (dateInput = new Date()) => {
 
 export default function BulkAttendanceMarking() {
   const queryClient = useQueryClient();
+  const insets = useSafeAreaInsets();
   const [selectedDate, setSelectedDate] = useState(getISTDateString());
   const [search, setSearch] = useState('');
   const [attendance, setAttendance] = useState({});
@@ -58,31 +61,51 @@ export default function BulkAttendanceMarking() {
   const userId = userData?.id;
 
   // Fetch teacher data with proper caching
-  const { data: teacherData, isLoading: teacherLoading, refetch: refetchTeacher, error: teacherError } = useQuery({
-    queryKey: ['teacher-data', schoolId, userId],
+  const {
+    data: teacherData,
+    isLoading: teacherLoading,
+    refetch: refetchTeacher,
+    error: teacherError,
+    isError: isTeacherError,
+    isFetching: isTeacherFetching
+  } = useQuery({
+    queryKey: ['teacher-profile', schoolId, userId],
     queryFn: async () => {
-      try {
-        const res = await api.get(`/schools/${schoolId}/teachers/${'a83e7fb3-9603-4fbe-a758-74e1ae83eac4'}`);
+      // ✅ FIXED: Use actual userId
+      const res = await api.get(`/schools/${schoolId}/teachers/${userId}`);
 
-        // Handle different response structures
-        const teachers = res.data?.teacher || res.data;
+      // API returns array of sections assigned to this teacher
+      // Structure: { teacher: [{ class: {...}, teachingStaff: {...} }, ...] }
+      const sections = res.data?.teacher;
 
-        // Return first teacher if array, otherwise return the object
-        if (Array.isArray(teachers)) {
-          return teachers.length > 0 ? teachers[0] : null;
-        }
-
-        return teachers || null;
-      } catch (error) {
-        console.error('Teacher fetch error:', error);
-        return null; // Return null instead of undefined
+      if (!sections || !Array.isArray(sections) || sections.length === 0) {
+        // No sections assigned
+        return { hasSection: false };
       }
+
+      // Get first assigned section for attendance marking
+      const firstSection = sections[0];
+
+      return {
+        hasSection: true,
+        // Extract IDs from the section data
+        classId: firstSection.classId,
+        sectionId: firstSection.id, // section's own ID
+        // Include full data for display
+        class: firstSection.class,
+        section: { id: firstSection.id, name: firstSection.name },
+        teachingStaff: firstSection.teachingStaff,
+        // Keep all sections if needed
+        allSections: sections
+      };
     },
     enabled: !!schoolId && !!userId,
     staleTime: 1000 * 60 * 5, // 5 minutes
     retry: 2,
+    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),
   });
 
+  // Extract classId and sectionId from teacher data
   const classId = teacherData?.classId;
   const sectionId = teacherData?.sectionId;
 
@@ -247,8 +270,8 @@ export default function BulkAttendanceMarking() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await Promise.all([
-      queryClient.invalidateQueries(['teacher-data']),
-      queryClient.invalidateQueries(['bulk-attendance-students']),
+      queryClient.invalidateQueries({ queryKey: ['teacher-profile'] }),
+      queryClient.invalidateQueries({ queryKey: ['bulk-attendance-students'] }),
     ]);
     setRefreshing(false);
   }, [queryClient]);
@@ -270,32 +293,71 @@ export default function BulkAttendanceMarking() {
     );
   }
 
-  if (!teacherData || !classId) {
+  if (isTeacherError || (!teacherData && !teacherLoading) || (!classId && teacherData)) {
+    const isNetworkError = teacherError?.message?.includes('Network') || teacherError?.code === 'NETWORK_ERROR';
+    const isNotFound = teacherError?.response?.status === 404;
+
     return (
-      <View style={styles.loaderContainer}>
-        <AlertCircle size={64} color="#EF4444" />
-        <Text style={styles.errorText}>No class assigned</Text>
-        <Text style={styles.errorSubtext}>
-          {teacherError
-            ? `Error: ${teacherError.message}`
-            : 'Please contact admin to assign you a class'}
+      <View style={styles.errorContainer}>
+        {/* Illustration */}
+        <View style={styles.errorIllustration}>
+          <View style={styles.errorIconBg}>
+            <AlertCircle size={48} color="#EF4444" />
+          </View>
+        </View>
+
+        {/* Error Message */}
+        <Text style={styles.errorTitle}>
+          {isNetworkError ? 'Connection Error' : isNotFound ? 'Profile Not Found' : !classId ? 'No Class Assigned' : 'Something Went Wrong'}
         </Text>
-        <HapticTouchable onPress={() => refetchTeacher()}>
-          <View style={styles.retryButton}>
-            <Text style={styles.retryButtonText}>Retry</Text>
+        <Text style={styles.errorDescription}>
+          {isNetworkError
+            ? 'Please check your internet connection and try again'
+            : isNotFound
+              ? 'Your teacher profile was not found. Please contact your administrator.'
+              : !classId && teacherData
+                ? 'You have not been assigned a class yet. Please contact your school administrator to assign you a class for attendance marking.'
+                : teacherError?.message || 'An unexpected error occurred. Please try again.'}
+        </Text>
+
+        {/* Debug Info (only in dev) */}
+        {__DEV__ && teacherError && (
+          <View style={styles.debugInfo}>
+            <Text style={styles.debugText}>Debug: {teacherError.message}</Text>
           </View>
-        </HapticTouchable>
-        <HapticTouchable onPress={() => router.back()}>
-          <View style={styles.backButtonCenter}>
-            <Text style={styles.backButtonText}>Go Back</Text>
-          </View>
-        </HapticTouchable>
+        )}
+
+        {/* Actions */}
+        <View style={styles.errorActions}>
+          <HapticTouchable onPress={() => refetchTeacher()} disabled={isTeacherFetching}>
+            <View style={[styles.primaryButton, isTeacherFetching && styles.buttonDisabled]}>
+              {isTeacherFetching ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={styles.primaryButtonText}>Try Again</Text>
+              )}
+            </View>
+          </HapticTouchable>
+
+          <HapticTouchable onPress={() => router.back()}>
+            <View style={styles.secondaryButton}>
+              <ArrowLeft size={18} color="#666" />
+              <Text style={styles.secondaryButtonText}>Go Back</Text>
+            </View>
+          </HapticTouchable>
+        </View>
+
+        {/* Help Text */}
+        <Text style={styles.helpText}>
+          Need help? Contact your school administrator
+        </Text>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
+      <StatusBar style='dark' />
       {/* Header */}
       <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
         <HapticTouchable onPress={() => {
@@ -502,7 +564,7 @@ export default function BulkAttendanceMarking() {
 
       {/* Floating Submit Button */}
       {stats.marked > 0 && (
-        <Animated.View entering={FadeInDown.delay(600).duration(400)} style={styles.floatingButton}>
+        <Animated.View entering={FadeInDown.delay(600).duration(400)} style={[styles.floatingButton, { paddingBottom: insets.bottom + 5 }]}>
           <HapticTouchable onPress={handleSubmit} disabled={submitMutation.isPending}>
             <View style={[styles.submitButton, submitMutation.isPending && styles.submitButtonDisabled]}>
               {submitMutation.isPending ? (
@@ -540,12 +602,90 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
   loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16, paddingHorizontal: 32 },
   loadingText: { fontSize: 16, fontWeight: '600', color: '#666', marginTop: 8 },
+
+  // Enhanced Error Screen Styles
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    backgroundColor: '#fff'
+  },
+  errorIllustration: { marginBottom: 24 },
+  errorIconBg: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: '#FEE2E2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 4,
+    borderColor: '#FECACA'
+  },
+  errorTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#111',
+    textAlign: 'center',
+    marginBottom: 12
+  },
+  errorDescription: {
+    fontSize: 15,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 8,
+    paddingHorizontal: 16
+  },
+  debugInfo: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: '#FEF3C7',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FDE68A'
+  },
+  debugText: { fontSize: 11, color: '#92400E', fontFamily: 'monospace' },
+  errorActions: {
+    marginTop: 24,
+    gap: 12,
+    width: '100%',
+    maxWidth: 280
+  },
+  primaryButton: {
+    paddingHorizontal: 32,
+    paddingVertical: 16,
+    backgroundColor: '#0469ff',
+    borderRadius: 14,
+    alignItems: 'center'
+  },
+  primaryButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  buttonDisabled: { opacity: 0.6 },
+  secondaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 14
+  },
+  secondaryButtonText: { color: '#666', fontSize: 15, fontWeight: '600' },
+  helpText: {
+    marginTop: 32,
+    fontSize: 13,
+    color: '#999',
+    textAlign: 'center'
+  },
+
+  // Legacy styles (keep for compatibility)
   errorText: { fontSize: 20, fontWeight: '700', color: '#EF4444', marginTop: 16, textAlign: 'center' },
   errorSubtext: { fontSize: 14, color: '#666', textAlign: 'center', marginTop: 8 },
   retryButton: { marginTop: 20, paddingHorizontal: 32, paddingVertical: 14, backgroundColor: '#0469ff', borderRadius: 12 },
   retryButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
   backButtonCenter: { marginTop: 12, paddingHorizontal: 24, paddingVertical: 12, backgroundColor: '#f5f5f5', borderRadius: 12 },
   backButtonText: { color: '#111', fontSize: 16, fontWeight: '600' },
+
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 50, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', backgroundColor: '#fff' },
   backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#f5f5f5', alignItems: 'center', justifyContent: 'center' },
   headerCenter: { flex: 1, alignItems: 'center' },
@@ -590,7 +730,7 @@ const styles = StyleSheet.create({
   emptyState: { padding: 48, alignItems: 'center' },
   emptyTitle: { fontSize: 18, fontWeight: '700', color: '#111', marginTop: 16, marginBottom: 8 },
   emptyText: { fontSize: 14, color: '#666', textAlign: 'center' },
-  floatingButton: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#f0f0f0' },
+  floatingButton: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#f0f0f0' },  // Note: paddingBottom will be applied dynamically
   submitButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 18, backgroundColor: '#0469ff', borderRadius: 16 },
   submitButtonDisabled: { opacity: 0.6 },
   submitButtonLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },

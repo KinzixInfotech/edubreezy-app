@@ -101,17 +101,41 @@ export default function TeacherClassAttendance() {
     const schoolId = userData?.schoolId;
     const teacherId = userData?.id;
 
-    // Fetch teacher's students
-    const { data: studentsData, isLoading: studentsLoading } = useQuery({
-        queryKey: ['teacher-students', schoolId, teacherId],
+    // Fetch teacher profile to get Class/Section ID
+    const { data: teacherData } = useQuery({
+        queryKey: ['teacher-profile', schoolId, teacherId],
         queryFn: async () => {
             if (!schoolId || !teacherId) return null;
-            const res = await api.get(
-                `/schools/${schoolId}/teachers/${teacherId}/students`
-            );
-            return res.data;
+            const res = await api.get(`/schools/${schoolId}/teachers/${teacherId}`);
+            const sections = res.data?.teacher;
+            if (!sections || !Array.isArray(sections) || sections.length === 0) return null;
+            return {
+                classId: sections[0].classId,
+                sectionId: sections[0].id
+            };
         },
         enabled: !!schoolId && !!teacherId,
+        staleTime: 1000 * 60 * 5,
+    });
+
+    const classId = teacherData?.classId;
+    const sectionId = teacherData?.sectionId;
+
+    // Fetch students using Class ID (to ensure full list)
+    const { data: studentsData, isLoading: studentsLoading } = useQuery({
+        queryKey: ['class-students-list', schoolId, classId, sectionId],
+        queryFn: async () => {
+            if (!schoolId || !classId) return { students: [] };
+            const date = getISTDateString();
+            const params = new URLSearchParams({
+                classId: classId.toString(),
+                date: date,
+                ...(sectionId && { sectionId: sectionId.toString() })
+            });
+            const res = await api.get(`/schools/${schoolId}/attendance/bulk?${params}`);
+            return res.data;
+        },
+        enabled: !!schoolId && !!classId,
         staleTime: 1000 * 60 * 5,
     });
 
@@ -132,18 +156,20 @@ export default function TeacherClassAttendance() {
     });
 
     // Fetch selected student's attendance details for current month
+    const studentId = selectedStudent?.userId || selectedStudent?.id;
+
     const { data: studentStatsData, isLoading: studentStatsLoading } = useQuery({
-        queryKey: ['student-attendance-detail', selectedStudent?.id, currentMonth.getMonth(), currentMonth.getFullYear()],
+        queryKey: ['student-attendance-detail', studentId, currentMonth.getMonth(), currentMonth.getFullYear()],
         queryFn: async () => {
-            if (!selectedStudent?.id) return null;
+            if (!studentId) return null;
             const month = currentMonth.getMonth() + 1;
             const year = currentMonth.getFullYear();
             const res = await api.get(
-                `/schools/${schoolId}/attendance/stats?userId=${selectedStudent?.id}&month=${month}&year=${year}`
+                `/schools/${schoolId}/attendance/stats?userId=${studentId}&month=${month}&year=${year}`
             );
             return res.data;
         },
-        enabled: !!selectedStudent?.id && !!schoolId,
+        enabled: !!studentId && !!schoolId,
         staleTime: 1000 * 60 * 5, // Cache for 5 minutes
     });
 
@@ -153,13 +179,22 @@ export default function TeacherClassAttendance() {
     const studentRecentAttendance = studentStatsData?.recentAttendance || [];
 
     // Filter students by search query
+    // Filter and Sort students
     const filteredStudents = useMemo(() => {
-        if (!searchQuery.trim()) return students;
-        const query = searchQuery.toLowerCase();
-        return students.filter(student =>
-            student.name.toLowerCase().includes(query) ||
-            student.rollNumber?.toString().includes(query)
-        );
+        let result = students;
+        if (searchQuery.trim()) {
+            const query = searchQuery.toLowerCase();
+            result = students.filter(student =>
+                student.name.toLowerCase().includes(query) ||
+                student.rollNumber?.toString().includes(query)
+            );
+        }
+        // Sort by Roll Number
+        return [...result].sort((a, b) => {
+            const rA = parseInt(a.rollNumber) || Infinity;
+            const rB = parseInt(b.rollNumber) || Infinity;
+            return rA - rB;
+        });
     }, [students, searchQuery]);
 
     // Calendar days generation for selected student
@@ -341,7 +376,7 @@ export default function TeacherClassAttendance() {
                     </View>
                 ) : (
                     filteredStudents.map((student, idx) => (
-                        <Animated.View key={student.id} entering={FadeInRight.delay(400 + idx * 50)}>
+                        <Animated.View key={student.userId || student.id || idx} entering={FadeInRight.delay(400 + idx * 50)}>
                             <HapticTouchable onPress={() => openStudentDetail(student)}>
                                 <View style={styles.studentCard}>
                                     <View style={styles.studentAvatar}>

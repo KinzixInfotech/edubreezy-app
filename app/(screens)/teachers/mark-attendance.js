@@ -257,7 +257,11 @@ export default function BulkAttendanceMarking() {
     student.name.toLowerCase().includes(search.toLowerCase()) ||
     student.admissionNo.toLowerCase().includes(search.toLowerCase()) ||
     student.rollNumber?.toLowerCase().includes(search.toLowerCase())
-  );
+  ).sort((a, b) => {
+    const rollA = parseInt(a.rollNumber) || Infinity; // Put those without roll number at end
+    const rollB = parseInt(b.rollNumber) || Infinity;
+    return rollA - rollB;
+  });
 
   const stats = {
     total: filteredStudents.length,

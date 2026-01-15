@@ -74,6 +74,26 @@ export default function HomeScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [notificationPermission, setNotificationPermission] = useState(false);
 
+    // Navigation guard to prevent double-clicking
+    const isNavigatingRef = useRef(false);
+
+    // Safe navigation function - prevents multiple navigations
+    const navigateOnce = useCallback((path, params) => {
+        if (isNavigatingRef.current) return; // Already navigating, ignore
+        isNavigatingRef.current = true;
+
+        if (params) {
+            router.push({ pathname: path, params });
+        } else {
+            router.push(path);
+        }
+
+        // Reset after a short delay (allows navigation to complete)
+        setTimeout(() => {
+            isNavigatingRef.current = false;
+        }, 500);
+    }, []);
+
     // Collapsible Header Logic (Must be top level to avoid rules of hooks error)
     const HEADER_MAX_HEIGHT = 160;
     const HEADER_MIN_HEIGHT = isSmallDevice ? 90 : 120; // Increased slightly to prevent crushing
@@ -581,7 +601,7 @@ export default function HomeScreen() {
                 <View style={{ position: 'absolute', bottom: -60, left: -40, width: 180, height: 180, borderRadius: 90, backgroundColor: 'rgba(255,255,255,0.05)' }} />
 
                 <View style={styles.headerLeft}>
-                    <HapticTouchable onPress={() => router.push('(tabs)/profile')}>
+                    <HapticTouchable onPress={() => navigateOnce('(tabs)/profile')}>
                         {user_acc?.profilePicture && user_acc.profilePicture !== 'default.png' ? (
                             <View style={[styles.avatarContainer, { borderColor: '#fff', borderWidth: 2, overflow: 'hidden', borderRadius: 50 }]}>
                                 <Image source={{ uri: user_acc.profilePicture }} style={{ width: 40, height: 40, borderRadius: 20 }} />
@@ -614,16 +634,42 @@ export default function HomeScreen() {
     });
     // === ROLE-BASED CONTENT ===
     const headerComponent = <Header />;
+
+    const permissionBanner = showPermissionBanner ? (
+        <Animated.View entering={FadeInDown.duration(400)} style={styles.permissionBanner}>
+            <View style={styles.permissionBannerContent}>
+                <View style={styles.permissionIconContainer}>
+                    <BellOff size={24} color="#F59E0B" />
+                </View>
+                <View style={styles.permissionTextContainer}>
+                    <Text style={styles.permissionTitle}>Enable Notifications</Text>
+                    <Text style={styles.permissionDesc}>
+                        Get instant updates about your {user_acc?.role?.name === 'PARENT' ? "child's" : ''} attendance, fees, and important announcements.
+                    </Text>
+                </View>
+            </View>
+            <View style={styles.permissionActions}>
+                <HapticTouchable onPress={dismissPermissionBanner} style={styles.permissionDismiss}>
+                    <Text style={styles.permissionDismissText}>Not now</Text>
+                </HapticTouchable>
+                <HapticTouchable onPress={requestNotificationPermission} style={styles.permissionAllow}>
+                    <Text style={styles.permissionAllowText}>Enable</Text>
+                </HapticTouchable>
+            </View>
+        </Animated.View>
+    ) : null;
+
     const renderContent = () => {
         const role = user_acc?.role?.name ? user_acc.role.name.toLowerCase() : '';
-        // console.log(role);
+        const paddingTop = HEADER_MAX_HEIGHT + 20;
+
         switch (role) {
             case 'student':
-                return <StudentView refreshing={refreshing} onRefresh={onRefresh} header={headerComponent} />;
+                return <StudentView refreshing={refreshing} onRefresh={onRefresh} banner={permissionBanner} paddingTop={paddingTop} navigateOnce={navigateOnce} />;
             case 'teaching_staff':
-                return <TeacherView refreshing={refreshing} schoolId={schoolId} userId={userId} onRefresh={onRefresh} upcomingEvents={upcomingEvents} todaysEvents={todaysEvents} header={headerComponent} onScroll={scrollHandler} />;
+                return <TeacherView refreshing={refreshing} schoolId={schoolId} userId={userId} onRefresh={onRefresh} upcomingEvents={upcomingEvents} todaysEvents={todaysEvents} banner={permissionBanner} paddingTop={paddingTop} onScroll={scrollHandler} navigateOnce={navigateOnce} />;
             case 'admin':
-                return <AdminView refreshing={refreshing} onRefresh={onRefresh} header={headerComponent} />;
+                return <AdminView refreshing={refreshing} onRefresh={onRefresh} banner={permissionBanner} paddingTop={paddingTop} navigateOnce={navigateOnce} />;
             case 'parent':
                 return <ParentView
                     schoolId={user_acc?.schoolId}
@@ -631,7 +677,9 @@ export default function HomeScreen() {
                     refreshing={refreshing}
                     onRefresh={onRefresh}
                     onScroll={scrollHandler}
-                    paddingTop={HEADER_MAX_HEIGHT + 20}
+                    paddingTop={paddingTop}
+                    banner={permissionBanner}
+                    navigateOnce={navigateOnce}
                 />;
             case 'driver':
                 return <DriverView
@@ -642,6 +690,7 @@ export default function HomeScreen() {
                     prefetchedStaffData={transportStaff}
                     prefetchedTripsData={transportTripsData}
                     header={headerComponent}
+                    navigateOnce={navigateOnce}
                 />;
             case 'conductor':
                 return <ConductorView
@@ -652,6 +701,7 @@ export default function HomeScreen() {
                     prefetchedStaffData={transportStaff}
                     prefetchedTripsData={transportTripsData}
                     header={headerComponent}
+                    navigateOnce={navigateOnce}
                 />;
             case 'director':
                 return <DirectorView
@@ -660,6 +710,7 @@ export default function HomeScreen() {
                     schoolId={schoolId}
                     userId={userId}
                     header={headerComponent}
+                    navigateOnce={navigateOnce}
                 />;
             case 'principal':
                 return <PrincipalView
@@ -668,14 +719,15 @@ export default function HomeScreen() {
                     schoolId={schoolId}
                     userId={userId}
                     header={headerComponent}
+                    navigateOnce={navigateOnce}
                 />;
             default:
-                return <StudentView refreshing={refreshing} onRefresh={onRefresh} header={headerComponent} />;
+                return <StudentView refreshing={refreshing} onRefresh={onRefresh} header={headerComponent} navigateOnce={navigateOnce} />;
         }
     };
 
     // === STUDENT VIEW ===
-    const StudentView = ({ refreshing, onRefresh, header }) => {
+    const StudentView = ({ refreshing, onRefresh, banner, paddingTop, navigateOnce }) => {
         // Fetch notices for student
         const { data: recentNotices } = useQuery({
             queryKey: ['student-notices', schoolId, userId],
@@ -840,16 +892,18 @@ export default function HomeScreen() {
             <ScrollView
                 style={styles.container}
                 showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingTop: paddingTop }}
                 refreshControl={
                     <RefreshControl
                         refreshing={refreshing}
                         onRefresh={onRefresh}
                         tintColor="#0469ff"
                         colors={['#0469ff']}
+                        progressViewOffset={paddingTop + 10}
                     />
                 }
             >
-                {header}
+                {banner}
                 {/* Today's Events */}
                 {todaysEvents.length > 0 && (
                     <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.section}>
@@ -893,7 +947,7 @@ export default function HomeScreen() {
                         {recentNotice && (
                             <HapticTouchable
                                 style={styles.updateItem}
-                                onPress={() => router.push('/(screens)/calendarscreen')}
+                                onPress={() => navigateOnce('/(screens)/calendarscreen')}
                             >
                                 <View style={[styles.updateIconBg, { backgroundColor: '#E8F5E9' }]}>
                                     <Calendar size={14} color="#4CAF50" />
@@ -913,7 +967,7 @@ export default function HomeScreen() {
                 {/* Quick Stats - Gradient Cards with Real Data */}
                 <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.section}>
                     <View style={styles.statsGrid}>
-                        <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/student/attendance')}>
+                        <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/student/attendance')}>
                             <LinearGradient colors={['#4ECDC4', '#44A08D']} style={styles.statCard}>
                                 <View style={styles.statIcon}>
                                     <CheckCircle2 size={24} color="#fff" />
@@ -923,7 +977,7 @@ export default function HomeScreen() {
                             </LinearGradient>
                         </HapticTouchable>
 
-                        <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/student/performance')}>
+                        <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/student/performance')}>
                             <LinearGradient colors={['#667eea', '#764ba2']} style={styles.statCard}>
                                 <View style={styles.statIcon}>
                                     <TrendingUp size={24} color="#fff" />
@@ -933,7 +987,7 @@ export default function HomeScreen() {
                             </LinearGradient>
                         </HapticTouchable>
 
-                        <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/homework/view')}>
+                        <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/homework/view')}>
                             <LinearGradient colors={['#f093fb', '#f5576c']} style={styles.statCard}>
                                 <View style={styles.statIcon}>
                                     <BookOpen size={24} color="#fff" />
@@ -965,7 +1019,7 @@ export default function HomeScreen() {
                                         key={action.label}
                                         entering={FadeInDown.delay(500 + index * 50).duration(400)}
                                     >
-                                        <HapticTouchable onPress={() => router.push(action.href || '')}>
+                                        <HapticTouchable onPress={() => navigateOnce(action.href || '')}>
                                             <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}>
                                                 <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
                                                     <action.icon size={22} color={action.color} />
@@ -986,7 +1040,7 @@ export default function HomeScreen() {
                 <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
                     <View style={styles.sectionHeader}>
                         <Text style={styles.sectionTitle}>Upcoming Events</Text>
-                        <HapticTouchable onPress={() => router.push('/(screens)/calendarscreen')}>
+                        <HapticTouchable onPress={() => navigateOnce('/(screens)/calendarscreen')}>
                             <Text style={styles.seeAll}>See All</Text>
                         </HapticTouchable>
                     </View>
@@ -994,7 +1048,7 @@ export default function HomeScreen() {
                         {upcomingEvents && upcomingEvents.length > 0 ? (
                             upcomingEvents.slice(0, 4).map((event, index) => (
                                 <Animated.View key={event.id} entering={FadeInRight.delay(700 + index * 100).duration(500)}>
-                                    <HapticTouchable onPress={() => router.push(`/(screens)/calendarscreen?eventid=${event.id}`)}>
+                                    <HapticTouchable onPress={() => navigateOnce({ pathname: '/(screens)/calendarscreen', params: { eventid: event.id } })}>
                                         <View style={styles.eventCard}>
                                             <View style={[styles.eventIcon, { backgroundColor: event.color + '20' }]}>
                                                 <Text style={styles.eventEmoji}>{event.icon}</Text>
@@ -1034,7 +1088,7 @@ export default function HomeScreen() {
                 <Animated.View entering={FadeInDown.delay(800).duration(600)} style={[styles.section, { marginBottom: 30 }]}>
                     <View style={styles.sectionHeader}>
                         <Text style={styles.sectionTitle}>Recent Notices</Text>
-                        <HapticTouchable onPress={() => router.push('/(tabs)/noticeboard')}>
+                        <HapticTouchable onPress={() => navigateOnce('/(tabs)/noticeboard')}>
                             <Text style={styles.seeAll}>View All</Text>
                         </HapticTouchable>
                     </View>
@@ -1045,7 +1099,7 @@ export default function HomeScreen() {
                                     key={notice.id}
                                     entering={FadeInRight.delay(900 + index * 100).duration(500)}
                                 >
-                                    <HapticTouchable onPress={() => router.push('/(tabs)/noticeboard')}>
+                                    <HapticTouchable onPress={() => navigateOnce('/(tabs)/noticeboard')}>
                                         <View style={styles.noticeCard}>
                                             <View style={styles.noticeLeft}>
                                                 <View style={[styles.noticeIcon, notice.unread && styles.unreadIcon]}>
@@ -1090,20 +1144,21 @@ export default function HomeScreen() {
     };
 
     // === ADMIN VIEW ===
-    const AdminView = ({ refreshing, onRefresh, header }) => (
+    const AdminView = ({ refreshing, onRefresh, banner, paddingTop, navigateOnce }) => (
         <ScrollView
             style={styles.container}
             showsVerticalScrollIndicator={false}
+            contentContainerStyle={{ paddingTop: paddingTop }}
             refreshControl={
                 <RefreshControl
                     refreshing={refreshing}
                     onRefresh={onRefresh}
                     tintColor="#0469ff"
-                    colors={['#0469ff']}
+                    progressViewOffset={paddingTop + 10}
                 />
             }
         >
-            {header}
+            {banner}
             {todaysEvents.length > 0 && (
                 <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
                     <View style={styles.sectionHeader}>
@@ -1151,7 +1206,7 @@ export default function HomeScreen() {
 
 
     // / Complete ParentView Component
-    const ParentView = ({ schoolId, parentId, refreshing, onRefresh, onScroll, paddingTop }) => {
+    const ParentView = ({ schoolId, parentId, refreshing, onRefresh, onScroll, paddingTop, banner, navigateOnce }) => {
         const [showAddChildModal, setShowAddChildModal] = useState(false);
         const [selectedChild, setSelectedChild] = useState(null);
         const queryClient = useQueryClient();
@@ -1664,6 +1719,7 @@ export default function HomeScreen() {
                     />
                 }
             >
+                {banner}
 
                 {todaysEvents.length > 0 && (
                     <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
@@ -1876,7 +1932,7 @@ export default function HomeScreen() {
                         {pendingHomework > 0 && (
                             <HapticTouchable
                                 style={styles.updateItem}
-                                onPress={() => router.push({ pathname: '/my-child/parent-homework', params: { childData: JSON.stringify(selectedChild) } })}
+                                onPress={() => navigateOnce({ pathname: '/my-child/parent-homework', params: { childData: JSON.stringify(selectedChild) } })}
                             >
                                 <View style={[styles.updateIconBg, { backgroundColor: '#E3F2FD' }]}>
                                     <BookOpen size={14} color="#3B82F6" />
@@ -1890,7 +1946,7 @@ export default function HomeScreen() {
                         {newExamResults > 0 && (
                             <HapticTouchable
                                 style={styles.updateItem}
-                                onPress={() => router.push({ pathname: '/my-child/parent-exams', params: { childData: JSON.stringify(selectedChild) } })}
+                                onPress={() => navigateOnce({ pathname: '/my-child/parent-exams', params: { childData: JSON.stringify(selectedChild) } })}
                             >
                                 <View style={[styles.updateIconBg, { backgroundColor: '#FEF3C7' }]}>
                                     <Award size={14} color="#F59E0B" />
@@ -1904,7 +1960,7 @@ export default function HomeScreen() {
                         {recentNotice && (
                             <HapticTouchable
                                 style={styles.updateItem}
-                                onPress={() => router.push('/(screens)/NoticeDetail')}
+                                onPress={() => navigateOnce('/(screens)/NoticeDetail')}
                             >
                                 <View style={[styles.updateIconBg, { backgroundColor: '#FFEBEE' }]}>
                                     <Bell size={14} color="#EF4444" />
@@ -1921,7 +1977,7 @@ export default function HomeScreen() {
                         {nextEvent && (
                             <HapticTouchable
                                 style={styles.updateItem}
-                                onPress={() => router.push('/(screens)/SchoolCalendar')}
+                                onPress={() => navigateOnce('/(screens)/SchoolCalendar')}
                             >
                                 <View style={[styles.updateIconBg, { backgroundColor: '#E8F5E9' }]}>
                                     <Calendar size={14} color="#4CAF50" />
@@ -1949,7 +2005,7 @@ export default function HomeScreen() {
                         </View>
                     ) : (
                         <View style={styles.statsGrid}>
-                            <HapticTouchable style={{ flex: 1 }} onPress={() => router.push({ pathname: '/my-child/attendance', params: { childData: JSON.stringify(selectedChild) } })}>
+                            <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce({ pathname: '/my-child/attendance', params: { childData: JSON.stringify(selectedChild) } })}>
                                 <LinearGradient
                                     colors={['#4ECDC4', '#26A69A']}
                                     start={{ x: 0, y: 0 }}
@@ -1966,7 +2022,7 @@ export default function HomeScreen() {
                                 </LinearGradient>
                             </HapticTouchable>
 
-                            <HapticTouchable style={{ flex: 1 }} onPress={() => router.push({ pathname: '/my-child/parent-exams', params: { childData: JSON.stringify(selectedChild) } })}>
+                            <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce({ pathname: '/my-child/parent-exams', params: { childData: JSON.stringify(selectedChild) } })}>
                                 <LinearGradient
                                     colors={['#FF9F43', '#F59E0B']}
                                     start={{ x: 0, y: 0 }}
@@ -1981,7 +2037,7 @@ export default function HomeScreen() {
                                 </LinearGradient>
                             </HapticTouchable>
 
-                            <HapticTouchable style={{ flex: 1 }} onPress={() => router.push({ pathname: '/(screens)/payfees', params: { childData: JSON.stringify(selectedChild) } })}>
+                            <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce({ pathname: '/(screens)/payfees', params: { childData: JSON.stringify(selectedChild) } })}>
                                 <LinearGradient
                                     colors={childFeePending > 0 ? ['#FF6B6B', '#EE5A5A'] : ['#10B981', '#059669']}
                                     start={{ x: 0, y: 0 }}
@@ -2021,12 +2077,9 @@ export default function HomeScreen() {
                                         <HapticTouchable
                                             onPress={() => {
                                                 if (action.params) {
-                                                    router.push({
-                                                        pathname: action.href,
-                                                        params: action.params,
-                                                    });
+                                                    navigateOnce(action.href, action.params);
                                                 } else {
-                                                    router.push(action.href || '');
+                                                    navigateOnce(action.href || '');
                                                 }
                                             }}
                                         >
@@ -2063,7 +2116,7 @@ export default function HomeScreen() {
                         {upcomingEvents && upcomingEvents.length > 0 ? (
                             upcomingEvents.map((event, index) => (
                                 <Animated.View key={event.id} entering={FadeInRight.delay(700 + index * 100).duration(500)}>
-                                    <HapticTouchable onPress={() => router.push(`/(screens)/calendarscreen?eventid=${event.id}`)}>
+                                    <HapticTouchable onPress={() => navigateOnce({ pathname: '/(screens)/calendarscreen', params: { eventid: event.id } })}>
                                         <View style={styles.eventCard}>
                                             <View style={[styles.eventIcon, { backgroundColor: event.color + '20' }]}>
                                                 <Text style={styles.eventEmoji}>{event.icon}</Text>
@@ -2094,7 +2147,7 @@ export default function HomeScreen() {
                 <Animated.View entering={FadeInDown.delay(800).duration(600)} style={[styles.section, { marginBottom: 30 }]}>
                     <View style={styles.sectionHeader}>
                         <Text style={styles.sectionTitle}>Recent Notices</Text>
-                        <HapticTouchable onPress={() => router.push('/(tabs)/noticeboard')}>
+                        <HapticTouchable onPress={() => navigateOnce('/(tabs)/noticeboard')}>
                             <Text style={styles.seeAll}>View All</Text>
                         </HapticTouchable>
                     </View>
@@ -2105,7 +2158,7 @@ export default function HomeScreen() {
                                     key={notice.id}
                                     entering={FadeInRight.delay(900 + index * 100).duration(500)}
                                 >
-                                    <HapticTouchable onPress={() => router.push('/(tabs)/noticeboard')}>
+                                    <HapticTouchable onPress={() => navigateOnce('/(tabs)/noticeboard')}>
                                         <View style={styles.noticeCard}>
                                             <View style={styles.noticeLeft}>
                                                 <View style={[styles.noticeIcon, notice.unread && styles.unreadIcon]}>
@@ -2148,7 +2201,7 @@ export default function HomeScreen() {
 
 
     // === DRIVER VIEW ===
-    const DriverView = ({ refreshing, onRefresh, schoolId, userId, prefetchedStaffData, prefetchedTripsData, header }) => {
+    const DriverView = ({ refreshing, onRefresh, schoolId, userId, prefetchedStaffData, prefetchedTripsData, header, navigateOnce }) => {
         console.log('🚀 DriverView - using prefetched data');
 
         // Location tracking state
@@ -2320,7 +2373,7 @@ export default function HomeScreen() {
                                     <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.8)', fontWeight: '600', letterSpacing: 0.5, marginBottom: 2 }}>MY ASSIGNED BUS</Text>
                                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                                         <Text style={{ fontSize: 24, fontWeight: '800', color: '#fff' }}>{vehicle.licensePlate}</Text>
-                                        <HapticTouchable onPress={() => router.push('/(screens)/transport/my-vehicle')} style={{ backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 }}>
+                                        <HapticTouchable onPress={() => navigateOnce('/(screens)/transport/my-vehicle')} style={{ backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 }}>
                                             <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>Details</Text>
                                         </HapticTouchable>
                                     </View>
@@ -2471,7 +2524,7 @@ export default function HomeScreen() {
                                 <Text style={{ fontSize: 11, color: '#16A34A' }}>Parents can track</Text>
                             </View>
                         )}
-                        <HapticTouchable onPress={() => router.push({ pathname: '/(screens)/transport/active-trip', params: { tripId: activeTrip.id } })}>
+                        <HapticTouchable onPress={() => navigateOnce({ pathname: '/(screens)/transport/active-trip', params: { tripId: activeTrip.id } })}>
                             <LinearGradient colors={['#10B981', '#059669']} style={{ borderRadius: 16, padding: 16 }}>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                                     <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.3)', alignItems: 'center', justifyContent: 'center' }}>
@@ -2499,7 +2552,7 @@ export default function HomeScreen() {
                     <View style={styles.actionsGrid}>
                         {quickActions.map((action, index) => (
                             <Animated.View key={action.label} entering={FadeInDown.delay(300 + index * 50).duration(400)}>
-                                <HapticTouchable onPress={() => action.href && router.push(action.href)} disabled={!action.href}>
+                                <HapticTouchable onPress={() => action.href && navigateOnce(action.href)} disabled={!action.href}>
                                     <View style={[styles.actionButton, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5 }]}>
                                         <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
                                             <action.icon size={22} color={action.color} />
@@ -2538,7 +2591,7 @@ export default function HomeScreen() {
                             {relevantTrips.map((trip, index) => (
                                 <HapticTouchable
                                     key={trip.id}
-                                    onPress={() => trip.status === 'IN_PROGRESS' && router.push({ pathname: '/(screens)/transport/active-trip', params: { tripId: trip.id } })}
+                                    onPress={() => trip.status === 'IN_PROGRESS' && navigateOnce({ pathname: '/(screens)/transport/active-trip', params: { tripId: trip.id } })}
                                 >
                                     <View style={{
                                         backgroundColor: trip.status === 'IN_PROGRESS' ? '#F0FDF4' : trip.status === 'COMPLETED' ? '#F0FDF4' : '#F8FAFC',
@@ -2610,7 +2663,7 @@ export default function HomeScreen() {
     };
 
     // === CONDUCTOR VIEW ===
-    const ConductorView = ({ refreshing, onRefresh, schoolId, userId, prefetchedStaffData, prefetchedTripsData, header }) => {
+    const ConductorView = ({ refreshing, onRefresh, schoolId, userId, prefetchedStaffData, prefetchedTripsData, header, navigateOnce }) => {
         const queryClient = useQueryClient();
 
         // Use prefetched data directly
@@ -2658,7 +2711,7 @@ export default function HomeScreen() {
                                     <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.8)', fontWeight: '600', letterSpacing: 0.5, marginBottom: 2 }}>ASSIGNED BUS</Text>
                                     <Text style={{ fontSize: 22, fontWeight: '800', color: '#fff' }}>{vehicle.licensePlate}</Text>
                                 </View>
-                                <HapticTouchable onPress={() => router.push('/(screens)/transport/my-vehicle')} style={{ backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 }}>
+                                <HapticTouchable onPress={() => navigateOnce('/(screens)/transport/my-vehicle')} style={{ backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 }}>
                                     <Text style={{ color: '#fff', fontSize: 12, fontWeight: '600' }}>Details</Text>
                                 </HapticTouchable>
                             </View>
@@ -2678,7 +2731,7 @@ export default function HomeScreen() {
 
                 {activeTrip && (
                     <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.section}>
-                        <HapticTouchable onPress={() => router.push({ pathname: '/(screens)/transport/attendance-marking', params: { tripId: activeTrip.id } })}>
+                        <HapticTouchable onPress={() => navigateOnce({ pathname: '/(screens)/transport/attendance-marking', params: { tripId: activeTrip.id } })}>
                             <LinearGradient colors={['#10B981', '#059669']} style={{ borderRadius: 16, padding: 16 }}>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                                     <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.3)', alignItems: 'center', justifyContent: 'center' }}>
@@ -2726,7 +2779,7 @@ export default function HomeScreen() {
                     <View style={styles.actionsGrid}>
                         {quickActions.map((action, index) => (
                             <Animated.View key={action.label} entering={FadeInDown.delay(300 + index * 50).duration(400)}>
-                                <HapticTouchable onPress={() => action.href && router.push(action.href)} disabled={!action.href}>
+                                <HapticTouchable onPress={() => action.href && navigateOnce(action.href)} disabled={!action.href}>
                                     <View style={[styles.actionButton, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5 }]}>
                                         <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
                                             <action.icon size={22} color={action.color} />
@@ -2743,7 +2796,7 @@ export default function HomeScreen() {
     };
 
     // === DIRECTOR VIEW ===
-    const DirectorView = ({ refreshing, onRefresh, schoolId, userId, header }) => {
+    const DirectorView = ({ refreshing, onRefresh, schoolId, userId, header, navigateOnce }) => {
         // Fetch academic years first (like admin web dashboard)
         const { data: academicYears, isLoading: isLoadingYears } = useQuery({
             queryKey: ['academic-years', schoolId],
@@ -2960,7 +3013,7 @@ export default function HomeScreen() {
                             dashboardStats.map((stat, index) => (
                                 <HapticTouchable
                                     key={index}
-                                    onPress={() => stat.href && router.push({ pathname: stat.href, params: { schoolId } })}
+                                    onPress={() => stat.href && navigateOnce({ pathname: stat.href, params: { schoolId } })}
                                     disabled={!stat.href}
                                 >
                                     <View style={[styles.statDataCard, { backgroundColor: stat.bgColor }]}>
@@ -2995,7 +3048,7 @@ export default function HomeScreen() {
                             { icon: CheckCircle2, label: 'Approvals', color: '#EC4899', bgColor: '#FDF2F8', href: '/(screens)/principal/approvals' },
                             { icon: Settings, label: 'Settings', color: '#64748B', bgColor: '#F1F5F9', href: '/profile' },
                         ].map((action, index) => (
-                            <HapticTouchable key={action.label} onPress={() => action.href && router.push(action.href)} disabled={!action.href}>
+                            <HapticTouchable key={action.label} onPress={() => action.href && navigateOnce(action.href)} disabled={!action.href}>
                                 <View style={[styles.actionButton3x3, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5 }]}>
                                     <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
                                         <action.icon size={22} color={action.color} />
@@ -3012,7 +3065,7 @@ export default function HomeScreen() {
 
 
     // === PRINCIPAL VIEW ===
-    const PrincipalView = ({ refreshing, onRefresh, schoolId, userId, header, }) => {
+    const PrincipalView = ({ refreshing, onRefresh, schoolId, userId, header, navigateOnce }) => {
         // Fetch academic years first (like admin web dashboard)
         const { data: academicYears, isLoading: isLoadingYears } = useQuery({
             queryKey: ['academic-years', schoolId],
@@ -3189,7 +3242,7 @@ export default function HomeScreen() {
                             dashboardStats.map((stat, index) => (
                                 <HapticTouchable
                                     key={index}
-                                    onPress={() => stat.href && router.push({ pathname: stat.href, params: { schoolId } })}
+                                    onPress={() => stat.href && navigateOnce({ pathname: stat.href, params: { schoolId } })}
                                     disabled={!stat.href}
                                 >
                                     <View style={[styles.statDataCard, { backgroundColor: stat.bgColor }]}>
@@ -3224,7 +3277,7 @@ export default function HomeScreen() {
                             { icon: Bell, label: 'Broadcast', color: '#EC4899', bgColor: '#FDF2F8', href: '/(screens)/director/broadcast' },
                             { icon: Settings, label: 'Settings', color: '#64748B', bgColor: '#F1F5F9', href: '/profile' },
                         ].map((action, index) => (
-                            <HapticTouchable key={action.label} onPress={() => action.href && router.push(action.href)} disabled={!action.href}>
+                            <HapticTouchable key={action.label} onPress={() => action.href && navigateOnce(action.href)} disabled={!action.href}>
                                 <View style={[styles.actionButton3x3, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5 }]}>
                                     <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
                                         <action.icon size={22} color={action.color} />
@@ -3258,7 +3311,7 @@ export default function HomeScreen() {
                         const isBell = key === 'bell';
                         const isRefresh = key === 'refresh';
                         return (
-                            <HapticTouchable key={i} onPress={isBell ? () => router.push('(screens)/notification') : isRefresh ? onRefresh : undefined}>
+                            <HapticTouchable key={i} onPress={isBell ? () => navigateOnce('(screens)/notification') : isRefresh ? onRefresh : undefined}>
                                 <View style={[styles.iconButton, { backgroundColor: '#fff', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 }]}>
                                     <Icon size={isSmallDevice ? 18 : 20} color="#0469ff" />
                                     {isBell && unreadCount > 0 && (
@@ -3279,7 +3332,7 @@ export default function HomeScreen() {
                             <View style={{ position: 'absolute', top: -50, right: -50, width: 220, height: 220, borderRadius: 110, backgroundColor: 'rgba(255,255,255,0.05)' }} />
 
                             <View style={[styles.headerLeft, { flexDirection: 'row', alignItems: 'center', width: '100%', paddingHorizontal: 20 }]}>
-                                <HapticTouchable onPress={() => router.push('(tabs)/profile')}>
+                                <HapticTouchable onPress={() => navigateOnce('(tabs)/profile')}>
                                     {user_acc?.profilePicture && user_acc.profilePicture !== 'default.png' ? (
                                         <View style={[styles.avatarContainer, { borderColor: '#fff', borderWidth: 2, overflow: 'hidden', borderRadius: 50 }]}>
                                             <Image source={{ uri: user_acc.profilePicture }} style={{ width: 50, height: 50, borderRadius: 25 }} />
@@ -3323,30 +3376,7 @@ export default function HomeScreen() {
                 })()}
             </Animated.View>
             <StatusBar style="light" translucent backgroundColor="transparent" />
-            {/* Notification Permission Banner */}
-            {showPermissionBanner && (
-                <Animated.View entering={FadeInDown.duration(400)} style={styles.permissionBanner}>
-                    <View style={styles.permissionBannerContent}>
-                        <View style={styles.permissionIconContainer}>
-                            <BellOff size={24} color="#F59E0B" />
-                        </View>
-                        <View style={styles.permissionTextContainer}>
-                            <Text style={styles.permissionTitle}>Enable Notifications</Text>
-                            <Text style={styles.permissionDesc}>
-                                Get instant updates about your {user_acc?.role?.name === 'PARENT' ? "child's" : ''} attendance, fees, and important announcements.
-                            </Text>
-                        </View>
-                    </View>
-                    <View style={styles.permissionActions}>
-                        <HapticTouchable onPress={dismissPermissionBanner} style={styles.permissionDismiss}>
-                            <Text style={styles.permissionDismissText}>Not now</Text>
-                        </HapticTouchable>
-                        <HapticTouchable onPress={requestNotificationPermission} style={styles.permissionAllow}>
-                            <Text style={styles.permissionAllowText}>Enable</Text>
-                        </HapticTouchable>
-                    </View>
-                </Animated.View>
-            )}
+
             {/* Today's Events (if any) */}
             {renderContent()}
         </View>
@@ -4367,7 +4397,7 @@ const styles = StyleSheet.create({
 
 // === TEACHER VIEW (MOVED) ===
 // === TEACHING STAFF VIEW ===
-const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEvents, todaysEvents, header, onScroll, paddingTop }) => {
+const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEvents, todaysEvents, banner, onScroll, paddingTop, navigateOnce }) => {
     const [showDelegationModal, setShowDelegationModal] = useState(false);
     const [activeDelegations, setActiveDelegations] = useState([]);
     const [shownDelegations, setShownDelegations] = useState({});
@@ -4476,7 +4506,7 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
     const handleSelectDelegation = async (delegation) => {
         await saveDelegationAsShown(delegation.id, delegation.version);
         setShowDelegationModal(false);
-        router.push({
+        navigateOnce({
             pathname: 'teachers/delegationmarking',
             params: {
                 delegationId: delegation.id,
@@ -4533,7 +4563,7 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
             showsVerticalScrollIndicator={false}
             onScroll={onScroll}
             scrollEventThrottle={16}
-            contentContainerStyle={{ paddingBottom: 100 }}
+            contentContainerStyle={{ paddingBottom: 100, paddingTop: paddingTop }}
             refreshControl={
                 <RefreshControl
                     refreshing={refreshing}
@@ -4543,10 +4573,11 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
                     }}
                     tintColor="#0469ff"
                     colors={['#0469ff']}
+                    progressViewOffset={paddingTop + 10}
                 />
             }
         >
-            {header}
+            {banner}
             {/* Delegation Banner */}
             {activeDelegations.length > 0 && (
                 <Animated.View entering={FadeInDown.duration(400)} style={styles.delegationBannerContainer}>
@@ -4611,7 +4642,7 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
             {(recentNotice || nextEvent) && (
                 <Animated.View entering={FadeInDown.delay(250).duration(500)} style={styles.updatesWidget}>
                     {recentNotice && (
-                        <HapticTouchable style={styles.updateItem} onPress={() => router.push('/(tabs)/noticeboard')}>
+                        <HapticTouchable style={styles.updateItem} onPress={() => navigateOnce('/(tabs)/noticeboard')}>
                             <View style={[styles.updateIconBg, { backgroundColor: '#FFEBEE' }]}>
                                 <Bell size={14} color="#EF4444" />
                             </View>
@@ -4625,7 +4656,7 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
                     {nextEvent && (
                         <HapticTouchable
                             style={styles.updateItem}
-                            onPress={() => router.push('/(screens)/calendarscreen')}
+                            onPress={() => navigateOnce('/(screens)/calendarscreen')}
                         >
                             <View style={[styles.updateIconBg, { backgroundColor: '#E8F5E9' }]}>
                                 <Calendar size={14} color="#4CAF50" />
@@ -4647,7 +4678,7 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
             {/* Quick Stats - Enhanced */}
             <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.section}>
                 <View style={styles.statsGrid}>
-                    <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/teachers/stats-calendar')}>
+                    <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/teachers/stats-calendar')}>
                         <LinearGradient colors={['#0EA5E9', '#0284C7']} style={[styles.statCard, { overflow: 'hidden' }]}>
                             {/* Pattern */}
                             <View style={{ position: 'absolute', top: -10, right: -10, width: 50, height: 50, borderRadius: 25, backgroundColor: 'rgba(255,255,255,0.1)' }} />
@@ -4659,7 +4690,7 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
                         </LinearGradient>
                     </HapticTouchable>
 
-                    <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/teachers/stats-calendar')}>
+                    <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/teachers/stats-calendar')}>
                         <LinearGradient colors={['#F59E0B', '#D97706']} style={[styles.statCard, { overflow: 'hidden' }]}>
                             <View style={{ position: 'absolute', top: -20, left: -10, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.15)' }} />
 
@@ -4669,7 +4700,7 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
                         </LinearGradient>
                     </HapticTouchable>
 
-                    <HapticTouchable style={{ flex: 1 }} onPress={() => router.push('/teachers/stats-calendar')}>
+                    <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/teachers/stats-calendar')}>
                         <LinearGradient colors={['#EF4444', '#DC2626']} style={[styles.statCard, { overflow: 'hidden' }]}>
                             <View style={{ position: 'absolute', bottom: -15, right: -15, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.1)' }} />
                             <View style={{ position: 'absolute', top: 10, left: -10, width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.1)' }} />
@@ -4692,7 +4723,7 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
                     <View style={styles.actionsGrid}>
                         {group.actions.map((action, index) => (
                             <Animated.View key={action.label} entering={FadeInDown.delay(500 + index * 50).duration(400)}>
-                                <HapticTouchable onPress={() => action.params ? router.push({ pathname: action.href, params: action.params }) : router.push(action.href || '')}>
+                                <HapticTouchable onPress={() => action.params ? navigateOnce(action.href, action.params) : navigateOnce(action.href || '')}>
                                     <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}>
                                         <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}><action.icon size={22} color={action.color} /></View>
                                         <Text style={styles.actionLabel} numberOfLines={1}>{action.label}</Text>
@@ -4708,7 +4739,7 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
             <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
                 <View style={styles.sectionHeader}>
                     <Text style={styles.sectionTitle}>Upcoming Events</Text>
-                    <HapticTouchable onPress={() => router.push('/(screens)/calendarscreen')}>
+                    <HapticTouchable onPress={() => navigateOnce('/(screens)/calendarscreen')}>
                         <Text style={styles.seeAll}>See All</Text>
                     </HapticTouchable>
                 </View>
@@ -4716,7 +4747,7 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
                     {upcomingEvents && upcomingEvents.length > 0 ? (
                         upcomingEvents.map((event, index) => (
                             <Animated.View key={event.id} entering={FadeInRight.delay(700 + index * 100).duration(500)}>
-                                <HapticTouchable onPress={() => router.push(`/(screens)/calendarscreen?eventid=${event.id}`)}>
+                                <HapticTouchable onPress={() => navigateOnce({ pathname: '/(screens)/calendarscreen', params: { eventid: event.id } })}>
                                     <View style={styles.eventCard}>
                                         <View style={[styles.eventIcon, { backgroundColor: event.color + '20' }]}>
                                             <Text style={styles.eventEmoji}>{event.icon}</Text>
@@ -4756,13 +4787,13 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
             <Animated.View entering={FadeInDown.delay(800).duration(600)} style={[styles.section, { marginBottom: 30 }]}>
                 <View style={styles.sectionHeader}>
                     <Text style={styles.sectionTitle}>Recent Notices</Text>
-                    <HapticTouchable onPress={() => router.push('/(tabs)/noticeboard')}><Text style={styles.seeAll}>View All</Text></HapticTouchable>
+                    <HapticTouchable onPress={() => navigateOnce('/(tabs)/noticeboard')}><Text style={styles.seeAll}>View All</Text></HapticTouchable>
                 </View>
                 <View style={styles.noticesContainer}>
                     {notices.length > 0 ? (
                         notices.map((notice, index) => (
                             <Animated.View key={notice.id} entering={FadeInRight.delay(900 + index * 100).duration(500)}>
-                                <HapticTouchable onPress={() => router.push('/(tabs)/noticeboard')}>
+                                <HapticTouchable onPress={() => navigateOnce('/(tabs)/noticeboard')}>
                                     <View style={styles.noticeCard}>
                                         <View style={styles.noticeLeft}>
                                             <View style={[styles.noticeIcon, notice.unread && styles.unreadIcon]}>

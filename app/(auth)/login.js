@@ -424,217 +424,200 @@ export default function LoginScreen() {
             </View>
 
             {/* White Card Content */}
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                style={styles.keyboardView}
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-            >
-                <ScrollView
-                    contentContainerStyle={[
-                        styles.scrollContent,
-                        { paddingBottom: Math.max(insets.bottom, 24) }
-                    ]}
-                    showsVerticalScrollIndicator={false}
-                    keyboardShouldPersistTaps="handled"
-                    bounces={false}
+            <View style={styles.contentWrapper}>
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    style={styles.keyboardAvoidingView}
+                    keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
                 >
-                    <View style={styles.formCard}>
-                        {/* School Info Card */}
-                        {schoolConfig && (
-                            <SchoolInfoCard
-                                schoolData={schoolConfig}
-                                onSwitchSchool={handleSwitchSchool}
-                            />
-                        )}
-
-                        {/* General Error */}
-                        {errors.general && (
-                            <Animated.View
-                                entering={FadeIn.duration(300)}
-                                style={styles.generalError}
-                            >
-                                <Ionicons name="alert-circle" size={20} color="#DC2626" />
-                                <Text style={styles.generalErrorText}>{errors.general}</Text>
-                            </Animated.View>
-                        )}
-
-                        {/* Credential (Email/Phone) Input */}
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.inputLabel}>Email or Phone Number</Text>
-                            <View
-                                style={[
-                                    styles.inputWrapper,
-                                    (errors.credential || errors.email) && styles.inputWrapperError,
-                                ]}
-                            >
-                                <Ionicons
-                                    name="person-outline"
-                                    size={20}
-                                    color={(errors.credential || errors.email) ? '#DC2626' : '#9CA3AF'}
-                                    style={styles.inputIcon}
+                    <ScrollView
+                        contentContainerStyle={[
+                            styles.scrollContent,
+                            { paddingBottom: Math.max(insets.bottom, 24) }
+                        ]}
+                        showsVerticalScrollIndicator={false}
+                        keyboardShouldPersistTaps="handled"
+                        bounces={false}
+                    >
+                        <View style={styles.formCard}>
+                            {/* School Info Card */}
+                            {schoolConfig && (
+                                <SchoolInfoCard
+                                    schoolData={schoolConfig}
+                                    onSwitchSchool={handleSwitchSchool}
                                 />
-                                <TextInput
-                                    style={styles.input}
-                                    placeholder="Enter email or 10-digit mobile number"
-                                    placeholderTextColor="#9CA3AF"
-                                    value={credential}
-                                    onChangeText={(text) => {
-                                        setCredential(text);
-                                        if (errors.credential || errors.email) {
-                                            setErrors({ ...errors, credential: null, email: null, general: null });
-                                        }
-                                    }}
-                                    keyboardType="email-address"
-                                    autoCapitalize="none"
-                                    autoCorrect={false}
-                                    returnKeyType="next"
-                                    onSubmitEditing={() => passwordRef.current?.focus()}
-                                    blurOnSubmit={false}
-                                />
-                                {credential.length > 0 && (validateEmail(credential) || validatePhone(credential)) && (
-                                    <Ionicons name="checkmark-circle" size={20} color="#22C55E" />
-                                )}
-                            </View>
-                            {(errors.credential || errors.email) && (
-                                <Animated.Text
-                                    entering={FadeIn.duration(200)}
-                                    style={styles.errorText}
-                                >
-                                    {errors.credential || errors.email}
-                                </Animated.Text>
                             )}
-                        </View>
 
-                        {/* Password Input */}
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.inputLabel}>Password</Text>
-                            <View
-                                style={[
-                                    styles.inputWrapper,
-                                    errors.password && styles.inputWrapperError,
-                                ]}
-                            >
-                                <Ionicons
-                                    name="lock-closed-outline"
-                                    size={20}
-                                    color={errors.password ? '#DC2626' : '#9CA3AF'}
-                                    style={styles.inputIcon}
-                                />
-                                <TextInput
-                                    ref={passwordRef}
-                                    style={styles.input}
-                                    placeholder="Enter your password"
-                                    placeholderTextColor="#9CA3AF"
-                                    value={password}
-                                    onChangeText={(text) => {
-                                        setPassword(text);
-                                        if (errors.password) {
-                                            setErrors({ ...errors, password: null, general: null });
-                                        }
-                                    }}
-                                    secureTextEntry={!showPassword}
-                                    autoCapitalize="none"
-                                    autoCorrect={false}
-                                    returnKeyType="done"
-                                    onSubmitEditing={handleLogin}
-                                />
-                                <TouchableOpacity
-                                    onPress={() => setShowPassword(!showPassword)}
-                                    style={styles.eyeButton}
-                                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                            {/* General Error */}
+                            {errors.general && (
+                                <Animated.View
+                                    entering={FadeIn.duration(300)}
+                                    style={styles.generalError}
+                                >
+                                    <Ionicons name="alert-circle" size={20} color="#DC2626" />
+                                    <Text style={styles.generalErrorText}>{errors.general}</Text>
+                                </Animated.View>
+                            )}
+
+                            {/* Credential (Email/Phone) Input */}
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.inputLabel}>Email or Phone Number</Text>
+                                <View
+                                    style={[
+                                        styles.inputWrapper,
+                                        (errors.credential || errors.email) && styles.inputWrapperError,
+                                    ]}
                                 >
                                     <Ionicons
-                                        name={showPassword ? 'eye-off-outline' : 'eye-outline'}
-                                        size={22}
-                                        color="#9CA3AF"
+                                        name="person-outline"
+                                        size={20}
+                                        color={(errors.credential || errors.email) ? '#DC2626' : '#9CA3AF'}
+                                        style={styles.inputIcon}
                                     />
+                                    <TextInput
+                                        style={styles.input}
+                                        placeholder="Enter email or 10-digit mobile number"
+                                        placeholderTextColor="#9CA3AF"
+                                        value={credential}
+                                        onChangeText={(text) => {
+                                            setCredential(text);
+                                            if (errors.credential || errors.email) {
+                                                setErrors({ ...errors, credential: null, email: null, general: null });
+                                            }
+                                        }}
+                                        keyboardType="email-address"
+                                        autoCapitalize="none"
+                                        autoCorrect={false}
+                                        returnKeyType="next"
+                                        onSubmitEditing={() => passwordRef.current?.focus()}
+                                        blurOnSubmit={false}
+                                    />
+                                    {credential.length > 0 && (validateEmail(credential) || validatePhone(credential)) && (
+                                        <Ionicons name="checkmark-circle" size={20} color="#22C55E" />
+                                    )}
+                                </View>
+                                {(errors.credential || errors.email) && (
+                                    <Animated.Text
+                                        entering={FadeIn.duration(200)}
+                                        style={styles.errorText}
+                                    >
+                                        {errors.credential || errors.email}
+                                    </Animated.Text>
+                                )}
+                            </View>
+
+                            {/* Password Input */}
+                            <View style={styles.inputGroup}>
+                                <Text style={styles.inputLabel}>Password</Text>
+                                <View
+                                    style={[
+                                        styles.inputWrapper,
+                                        errors.password && styles.inputWrapperError,
+                                    ]}
+                                >
+                                    <Ionicons
+                                        name="lock-closed-outline"
+                                        size={20}
+                                        color={errors.password ? '#DC2626' : '#9CA3AF'}
+                                        style={styles.inputIcon}
+                                    />
+                                    <TextInput
+                                        ref={passwordRef}
+                                        style={styles.input}
+                                        placeholder="Enter your password"
+                                        placeholderTextColor="#9CA3AF"
+                                        value={password}
+                                        onChangeText={(text) => {
+                                            setPassword(text);
+                                            if (errors.password) {
+                                                setErrors({ ...errors, password: null, general: null });
+                                            }
+                                        }}
+                                        secureTextEntry={!showPassword}
+                                        autoCapitalize="none"
+                                        autoCorrect={false}
+                                        returnKeyType="done"
+                                        onSubmitEditing={handleLogin}
+                                    />
+                                    <TouchableOpacity
+                                        onPress={() => setShowPassword(!showPassword)}
+                                        style={styles.eyeButton}
+                                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                    >
+                                        <Ionicons
+                                            name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                                            size={22}
+                                            color="#9CA3AF"
+                                        />
+                                    </TouchableOpacity>
+                                </View>
+                                {errors.password && (
+                                    <Animated.Text
+                                        entering={FadeIn.duration(200)}
+                                        style={styles.errorText}
+                                    >
+                                        {errors.password}
+                                    </Animated.Text>
+                                )}
+                            </View>
+
+                            {/* Forgot Password Row */}
+                            <View style={styles.optionsRow}>
+                                <TouchableOpacity
+                                    onPress={handleForgotPassword}
+                                    style={styles.forgotPassword}
+                                    activeOpacity={0.7}
+                                >
+                                    <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
                                 </TouchableOpacity>
                             </View>
-                            {errors.password && (
-                                <Animated.Text
-                                    entering={FadeIn.duration(200)}
-                                    style={styles.errorText}
+
+                            {/* Login Button */}
+                            <Animated.View style={buttonScaleStyle}>
+                                <TouchableOpacity
+                                    style={[styles.loginButton, loading && styles.loginButtonDisabled]}
+                                    onPress={handleLogin}
+                                    disabled={loading}
+                                    activeOpacity={0.85}
                                 >
-                                    {errors.password}
-                                </Animated.Text>
-                            )}
-                        </View>
+                                    {loading ? (
+                                        <View style={styles.loadingContainer}>
+                                            <ActivityIndicator size="small" color="#FFFFFF" />
+                                            <Text style={styles.loginButtonText}>Signing in...</Text>
+                                        </View>
+                                    ) : (
+                                        <Text style={styles.loginButtonText}>Log In</Text>
+                                    )}
+                                </TouchableOpacity>
+                            </Animated.View>
 
-                        {/* Forgot Password Row */}
-                        <View style={styles.optionsRow}>
-                            <TouchableOpacity
-                                onPress={handleForgotPassword}
-                                style={styles.forgotPassword}
-                                activeOpacity={0.7}
+                            {/* Footer - Contact Admin */}
+                            <View style={styles.footer}>
+                                <Text style={styles.footerText}>
+                                    Don't have an account?{' '}
+                                </Text>
+                                <TouchableOpacity activeOpacity={0.7}>
+                                    <Text style={styles.footerLink}>Contact Admin</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            {/* Bottom Branding */}
+                            <Animated.View
+                                entering={FadeIn.delay(1000).duration(500)}
+                                style={styles.branding}
                             >
-                                <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-                            </TouchableOpacity>
+                                <View style={styles.brandingContent}>
+                                    <Ionicons name="school" size={18} color="#9CA3AF" />
+                                    <Text style={styles.brandingText}>EduBreezy</Text>
+                                </View>
+                                <Text style={styles.brandingSubtext}>
+                                    Modern School Management
+                                </Text>
+                            </Animated.View>
                         </View>
-
-                        {/* Login Button */}
-                        <Animated.View style={buttonScaleStyle}>
-                            <TouchableOpacity
-                                style={[styles.loginButton, loading && styles.loginButtonDisabled]}
-                                onPress={handleLogin}
-                                disabled={loading}
-                                activeOpacity={0.85}
-                            >
-                                {loading ? (
-                                    <View style={styles.loadingContainer}>
-                                        <ActivityIndicator size="small" color="#FFFFFF" />
-                                        <Text style={styles.loginButtonText}>Signing in...</Text>
-                                    </View>
-                                ) : (
-                                    <Text style={styles.loginButtonText}>Log In</Text>
-                                )}
-                            </TouchableOpacity>
-                        </Animated.View>
-
-                        {/* Footer - Contact Admin */}
-                        <View style={styles.footer}>
-                            <Text style={styles.footerText}>
-                                Don't have an account?{' '}
-                            </Text>
-                            <TouchableOpacity activeOpacity={0.7}>
-                                <Text style={styles.footerLink}>Contact Admin</Text>
-                            </TouchableOpacity>
-                        </View>
-
-                        {/* Feature Highlights */}
-                        <Animated.View
-                            entering={FadeInUp.delay(500).duration(500)}
-                            style={styles.featuresContainer}
-                        >
-                            <View style={styles.divider}>
-                                <View style={styles.dividerLine} />
-                                <Text style={styles.dividerText}>Why EduBreezy?</Text>
-                                <View style={styles.dividerLine} />
-                            </View>
-
-                            <View style={styles.featuresGrid}>
-                                <FeatureItem icon="shield-checkmark" text="Secure & Private" delay={600} />
-                                <FeatureItem icon="notifications" text="Real-time Updates" delay={700} />
-                                <FeatureItem icon="analytics" text="Track Progress" delay={800} />
-                                <FeatureItem icon="people" text="Stay Connected" delay={900} />
-                            </View>
-                        </Animated.View>
-
-                        {/* Bottom Branding */}
-                        <Animated.View
-                            entering={FadeIn.delay(1000).duration(500)}
-                            style={styles.branding}
-                        >
-                            <View style={styles.brandingContent}>
-                                <Ionicons name="school" size={18} color="#9CA3AF" />
-                                <Text style={styles.brandingText}>EduBreezy</Text>
-                            </View>
-                            <Text style={styles.brandingSubtext}>
-                                Modern School Management
-                            </Text>
-                        </Animated.View>
-                    </View>
-                </ScrollView>
-            </KeyboardAvoidingView>
+                    </ScrollView>
+                </KeyboardAvoidingView>
+            </View>
         </View>
     );
 }
@@ -708,12 +691,16 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         fontWeight: '500',
     },
-    keyboardView: {
+    contentWrapper: {
         flex: 1,
         backgroundColor: '#FFFFFF',
         borderTopLeftRadius: responsive(24, 32, 40),
         borderTopRightRadius: responsive(24, 32, 40),
         marginTop: -verticalScale(20),
+        overflow: 'hidden',
+    },
+    keyboardAvoidingView: {
+        flex: 1,
     },
     scrollContent: {
         flexGrow: 1,

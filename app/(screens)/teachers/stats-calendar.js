@@ -14,7 +14,7 @@ import {
     Calendar as CalendarIcon, TrendingUp, Award, AlertCircle, CheckCircle,
     XCircle, Clock, ChevronLeft, ChevronRight, ArrowLeft, Sparkles,
     BarChart3, FileText, Send, X as CloseIcon, AlertTriangle, Info,
-    ChevronRight as ChevronRightIcon, Umbrella
+    ChevronRight as ChevronRightIcon, Umbrella, Trash2
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import { LineChart } from 'react-native-chart-kit';
@@ -23,12 +23,22 @@ import HapticTouchable from '../../components/HapticTouch';
 
 // Validation Schemas
 const leaveSchema = z.object({
-    leaveType: z.enum(['CASUAL', 'SICK', 'EARNED', 'EMERGENCY']),
+    leaveType: z.enum(['CASUAL', 'SICK', 'EARNED', 'MATERNITY', 'PATERNITY', 'EMERGENCY', 'UNPAID', 'COMPENSATORY']),
     startDate: z.string().min(1, 'Start date is required'),
     endDate: z.string().min(1, 'End date is required'),
     reason: z.string().min(10, 'Reason must be at least 10 characters'),
     emergencyContact: z.string().optional(),
     emergencyContactPhone: z.string().optional(),
+}).refine((data) => {
+    // Start date must be today or in the future
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const startDate = new Date(data.startDate);
+    startDate.setHours(0, 0, 0, 0);
+    return startDate >= today;
+}, {
+    message: "Leave cannot be applied for past dates",
+    path: ["startDate"],
 }).refine((data) => new Date(data.startDate) <= new Date(data.endDate), {
     message: "End date must be after start date",
     path: ["endDate"],
@@ -56,25 +66,6 @@ const getISTDateString = (dateInput = new Date()) => {
     const istDate = new Date(date.getTime() + offset);
     return istDate.toISOString().split('T')[0];
 };
-
-// const formatIST = (dateString) => {
-//     return new Date(dateString).toLocaleDateString('en-IN', {
-//         timeZone: 'Asia/Kolkata',
-//         day: 'numeric',
-//         month: 'short',
-//         year: 'numeric'
-//     });
-// };
-
-// const formatISTTime = (dateString) => {
-//     if (!dateString) return '';
-//     return new Date(dateString).toLocaleTimeString('en-IN', {
-//         timeZone: 'Asia/Kolkata',
-//         hour: '2-digit',
-//         minute: '2-digit',
-//         hour12: true
-//     });
-// };
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CALENDAR_WIDTH = SCREEN_WIDTH - 32;
@@ -160,6 +151,16 @@ export default function TeacherAttendanceView() {
         queryKey: ['teacher-regularization-requests', teacherId, schoolId],
         queryFn: async () => {
             const res = await api.get(`/schools/${schoolId}/attendance/admin/regularization?userId=${teacherId}&status=PENDING,APPROVED,REJECTED`);
+            return res.data;
+        },
+        enabled: !!teacherId && !!schoolId,
+    });
+
+    // Fetch leave balance
+    const { data: leaveBalanceData } = useQuery({
+        queryKey: ['teacher-leave-balance', teacherId, schoolId],
+        queryFn: async () => {
+            const res = await api.get(`/schools/${schoolId}/attendance/leaves/balance?userId=${teacherId}`);
             return res.data;
         },
         enabled: !!teacherId && !!schoolId,
@@ -255,6 +256,57 @@ export default function TeacherAttendanceView() {
             Alert.alert('Failed', err.response?.data?.error || 'Failed to submit regularization');
         }
     });
+
+    // Delete leave request mutation
+    const deleteLeaveRequestMutation = useMutation({
+        mutationFn: async (leaveId) => {
+            return await api.delete(`/schools/${schoolId}/attendance/admin/leave-management?leaveRequestId=${leaveId}&userId=${teacherId}`);
+        },
+        onSuccess: () => {
+            Alert.alert('Success', 'Leave request deleted');
+            queryClient.invalidateQueries({ queryKey: ['teacher-leave-requests'] });
+        },
+        onError: (err) => {
+            Alert.alert('Failed', err.response?.data?.error || 'Failed to delete request');
+        }
+    });
+
+    // Delete regularization request mutation
+    const deleteRegRequestMutation = useMutation({
+        mutationFn: async (requestId) => {
+            return await api.delete(`/schools/${schoolId}/attendance/admin/regularization?requestId=${requestId}&userId=${teacherId}`);
+        },
+        onSuccess: () => {
+            Alert.alert('Success', 'Regularization request deleted');
+            queryClient.invalidateQueries({ queryKey: ['teacher-regularization-requests'] });
+        },
+        onError: (err) => {
+            Alert.alert('Failed', err.response?.data?.error || 'Failed to delete request');
+        }
+    });
+
+    const handleDeleteLeave = (leave) => {
+        const action = leave.status === 'PENDING' ? 'cancel' : 'delete';
+        Alert.alert(
+            `${action.charAt(0).toUpperCase() + action.slice(1)} Request`,
+            `Are you sure you want to ${action} this leave request?`,
+            [
+                { text: 'No', style: 'cancel' },
+                { text: 'Yes', style: 'destructive', onPress: () => deleteLeaveRequestMutation.mutate(leave.id) }
+            ]
+        );
+    };
+
+    const handleDeleteRegularization = (req) => {
+        Alert.alert(
+            'Delete Request',
+            'Are you sure you want to delete this regularization request?',
+            [
+                { text: 'No', style: 'cancel' },
+                { text: 'Yes', style: 'destructive', onPress: () => deleteRegRequestMutation.mutate(req.id) }
+            ]
+        );
+    };
 
     const handleLeaveSubmit = () => {
         try {
@@ -366,13 +418,17 @@ export default function TeacherAttendanceView() {
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
-        await Promise.all([
-            queryClient.invalidateQueries(['teacher-attendance-stats']),
-            queryClient.invalidateQueries(['teacher-leave-requests']),
-            queryClient.invalidateQueries(['teacher-regularization-requests'])
-        ]);
-        setRefreshing(false);
-    }, []);
+        try {
+            await Promise.all([
+                queryClient.refetchQueries({ queryKey: ['teacher-attendance-stats'] }),
+                queryClient.refetchQueries({ queryKey: ['teacher-leave-requests'] }),
+                queryClient.refetchQueries({ queryKey: ['teacher-regularization-requests'] }),
+                queryClient.refetchQueries({ queryKey: ['teacher-leave-balance'] })
+            ]);
+        } finally {
+            setRefreshing(false);
+        }
+    }, [queryClient]);
 
     const getAttendanceStatusColor = (status) => {
         switch (status) {
@@ -495,6 +551,84 @@ export default function TeacherAttendanceView() {
                                 <Text style={styles.secondaryButtonText}>Regularize</Text>
                             </Pressable>
                         </Animated.View>
+
+                        {/* Leave Balance Section */}
+                        {leaveBalanceData?.breakdown && Object.keys(leaveBalanceData.breakdown).length > 0 && (
+                            <Animated.View entering={FadeInDown.delay(400).duration(500)} style={styles.leaveBalanceCard}>
+                                <Text style={styles.leaveBalanceTitle}>Leave Balance</Text>
+                                <View style={styles.leaveBalanceGrid}>
+                                    {/* Casual Leave */}
+                                    <View style={styles.leaveBalanceItem}>
+                                        <View style={[styles.leaveBalanceIcon, { backgroundColor: '#EEF2FF' }]}>
+                                            <Umbrella size={18} color="#6366F1" />
+                                        </View>
+                                        <View style={styles.leaveBalanceInfo}>
+                                            <Text style={styles.leaveBalanceType}>Casual</Text>
+                                            <Text style={styles.leaveBalanceValue}>
+                                                {leaveBalanceData.breakdown.casualLeaveBalance ?? 0}
+                                                <Text style={styles.leaveBalanceTotal}> / {leaveBalanceData.breakdown.casualLeaveTotal ?? 12}</Text>
+                                            </Text>
+                                            <Text style={styles.leaveBalanceUsed}>
+                                                {leaveBalanceData.breakdown.casualLeaveUsed ?? 0} used
+                                            </Text>
+                                        </View>
+                                    </View>
+
+                                    {/* Sick Leave */}
+                                    <View style={styles.leaveBalanceItem}>
+                                        <View style={[styles.leaveBalanceIcon, { backgroundColor: '#FEF2F2' }]}>
+                                            <AlertCircle size={18} color="#EF4444" />
+                                        </View>
+                                        <View style={styles.leaveBalanceInfo}>
+                                            <Text style={styles.leaveBalanceType}>Sick</Text>
+                                            <Text style={styles.leaveBalanceValue}>
+                                                {leaveBalanceData.breakdown.sickLeaveBalance ?? 0}
+                                                <Text style={styles.leaveBalanceTotal}> / {leaveBalanceData.breakdown.sickLeaveTotal ?? 10}</Text>
+                                            </Text>
+                                            <Text style={styles.leaveBalanceUsed}>
+                                                {leaveBalanceData.breakdown.sickLeaveUsed ?? 0} used
+                                            </Text>
+                                        </View>
+                                    </View>
+
+                                    {/* Earned Leave */}
+                                    <View style={styles.leaveBalanceItem}>
+                                        <View style={[styles.leaveBalanceIcon, { backgroundColor: '#F0FDF4' }]}>
+                                            <Award size={18} color="#22C55E" />
+                                        </View>
+                                        <View style={styles.leaveBalanceInfo}>
+                                            <Text style={styles.leaveBalanceType}>Earned</Text>
+                                            <Text style={styles.leaveBalanceValue}>
+                                                {leaveBalanceData.breakdown.earnedLeaveBalance ?? 0}
+                                                <Text style={styles.leaveBalanceTotal}> / {leaveBalanceData.breakdown.earnedLeaveTotal ?? 15}</Text>
+                                            </Text>
+                                            <Text style={styles.leaveBalanceUsed}>
+                                                {leaveBalanceData.breakdown.earnedLeaveUsed ?? 0} used
+                                            </Text>
+                                        </View>
+                                    </View>
+
+                                    {/* Maternity Leave (if applicable) */}
+                                    {(leaveBalanceData.breakdown.maternityLeaveTotal ?? 0) > 0 && (
+                                        <View style={styles.leaveBalanceItem}>
+                                            <View style={[styles.leaveBalanceIcon, { backgroundColor: '#FDF4FF' }]}>
+                                                <Sparkles size={18} color="#A855F7" />
+                                            </View>
+                                            <View style={styles.leaveBalanceInfo}>
+                                                <Text style={styles.leaveBalanceType}>Maternity</Text>
+                                                <Text style={styles.leaveBalanceValue}>
+                                                    {leaveBalanceData.breakdown.maternityLeaveBalance ?? 0}
+                                                    <Text style={styles.leaveBalanceTotal}> / {leaveBalanceData.breakdown.maternityLeaveTotal ?? 0}</Text>
+                                                </Text>
+                                                <Text style={styles.leaveBalanceUsed}>
+                                                    {leaveBalanceData.breakdown.maternityLeaveUsed ?? 0} used
+                                                </Text>
+                                            </View>
+                                        </View>
+                                    )}
+                                </View>
+                            </Animated.View>
+                        )}
 
                         {/* Calendar Section */}
                         <Animated.View entering={FadeInDown.delay(600).duration(500)} style={styles.calendarCard}>
@@ -626,7 +760,22 @@ export default function TeacherAttendanceView() {
                                                         {leave.status}
                                                     </Text>
                                                 </View>
-                                                <Text style={styles.leaveType}>{leave.leaveType}</Text>
+                                                <View style={styles.requestHeaderRight}>
+                                                    <Text style={styles.leaveType}>{leave.leaveType}</Text>
+                                                    {(leave.status === 'REJECTED' || leave.status === 'PENDING') && (
+                                                        <Pressable
+                                                            onPress={() => handleDeleteLeave(leave)}
+                                                            style={styles.deleteButton}
+                                                            disabled={deleteLeaveRequestMutation.isPending}
+                                                        >
+                                                            {deleteLeaveRequestMutation.isPending ? (
+                                                                <ActivityIndicator size="small" color="#EF4444" />
+                                                            ) : (
+                                                                <Trash2 size={18} color="#EF4444" />
+                                                            )}
+                                                        </Pressable>
+                                                    )}
+                                                </View>
                                             </View>
                                             <View style={styles.requestBody}>
                                                 <View style={styles.requestRow}>
@@ -663,7 +812,22 @@ export default function TeacherAttendanceView() {
                                                         {req.approvalStatus}
                                                     </Text>
                                                 </View>
-                                                <Text style={styles.leaveType}>{req.status}</Text>
+                                                <View style={styles.requestHeaderRight}>
+                                                    <Text style={styles.leaveType}>{req.status}</Text>
+                                                    {req.approvalStatus === 'REJECTED' && (
+                                                        <Pressable
+                                                            onPress={() => handleDeleteRegularization(req)}
+                                                            style={styles.deleteButton}
+                                                            disabled={deleteRegRequestMutation.isPending}
+                                                        >
+                                                            {deleteRegRequestMutation.isPending ? (
+                                                                <ActivityIndicator size="small" color="#EF4444" />
+                                                            ) : (
+                                                                <Trash2 size={18} color="#EF4444" />
+                                                            )}
+                                                        </Pressable>
+                                                    )}
+                                                </View>
                                             </View>
                                             <View style={styles.requestBody}>
                                                 <View style={styles.requestRow}>
@@ -711,7 +875,7 @@ export default function TeacherAttendanceView() {
                         <ScrollView style={styles.modalForm} contentContainerStyle={{ paddingBottom: 30 }}>
                             <Text style={styles.inputLabel}>Leave Type</Text>
                             <View style={styles.pickerContainer}>
-                                {['CASUAL', 'SICK', 'EARNED', 'EMERGENCY'].map((type) => (
+                                {['CASUAL', 'SICK', 'EARNED', 'MATERNITY', 'PATERNITY', 'EMERGENCY', 'UNPAID', 'COMPENSATORY'].map((type) => (
                                     <Pressable
                                         key={type}
                                         style={[
@@ -746,6 +910,7 @@ export default function TeacherAttendanceView() {
                                     value={leaveForm.startDate ? new Date(leaveForm.startDate) : new Date()}
                                     mode="date"
                                     display="default"
+                                    minimumDate={new Date()}
                                     onChange={(event, selectedDate) => {
                                         setShowStartDatePicker(false);
                                         if (selectedDate) {
@@ -969,10 +1134,24 @@ const styles = StyleSheet.create({
     secondaryButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, backgroundColor: '#fff', borderRadius: 12, borderWidth: 2, borderColor: '#E2E8F0' },
     secondaryButtonText: { fontSize: 14, fontWeight: '600', color: '#111' },
 
+    // Leave Balance Styles
+    leaveBalanceCard: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: '#E2E8F0' },
+    leaveBalanceTitle: { fontSize: 16, fontWeight: '700', color: '#111', marginBottom: 16 },
+    leaveBalanceGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+    leaveBalanceItem: { width: '47%', flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, backgroundColor: '#F8FAFC', borderRadius: 12 },
+    leaveBalanceIcon: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+    leaveBalanceInfo: { flex: 1 },
+    leaveBalanceType: { fontSize: 12, fontWeight: '600', color: '#64748B', marginBottom: 2 },
+    leaveBalanceValue: { fontSize: 18, fontWeight: '700', color: '#111' },
+    leaveBalanceTotal: { fontSize: 14, fontWeight: '500', color: '#94A3B8' },
+    leaveBalanceUsed: { fontSize: 11, color: '#64748B', marginTop: 2 },
+
     requestSection: { marginBottom: 16 },
     sectionTitle: { fontSize: 18, fontWeight: '700', color: '#111', marginBottom: 12 },
     requestCard: { backgroundColor: '#fff', borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#E2E8F0' },
     requestHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+    requestHeaderRight: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    deleteButton: { padding: 6, borderRadius: 8, backgroundColor: '#FEE2E2' },
     statusBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
     statusBadgeText: { fontSize: 12, fontWeight: '700', textTransform: 'uppercase' },
     leaveType: { fontSize: 13, fontWeight: '600', color: '#666' },

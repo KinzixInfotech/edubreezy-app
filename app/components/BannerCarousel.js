@@ -40,12 +40,12 @@ const BannerCarousel = ({ schoolId, role }) => {
     const fetchImages = async () => {
         try {
             // Map app role to API role format if needed
-            const apiRole = role === 'TEACHING_STAFF' ? 'TEACHERS' : 
-                            role === 'NON_TEACHING_STAFF' ? 'STAFF' : 
-                            role; // STUDENTS, PARENTS, etc.
+            const apiRole = role === 'TEACHING_STAFF' ? 'TEACHERS' :
+                role === 'NON_TEACHING_STAFF' ? 'STAFF' :
+                    role; // STUDENTS, PARENTS, etc.
 
             const response = await api.get(`/schools/carousel?schoolId=${schoolId}&role=${apiRole}`);
-            
+
             if (Array.isArray(response.data)) {
                 setImages(response.data);
             }
@@ -92,7 +92,7 @@ const BannerCarousel = ({ schoolId, role }) => {
                     </View>
                 )}
             />
-            
+
             {/* Dots Indicator */}
             {images.length > 1 && (
                 <View style={styles.pagination}>

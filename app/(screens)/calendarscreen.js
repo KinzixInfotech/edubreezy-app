@@ -32,6 +32,7 @@ import Animated, { FadeInDown, FadeInRight, FadeIn } from 'react-native-reanimat
 import * as SecureStore from 'expo-secure-store';
 import api from '../../lib/api';
 import HapticTouchable from '../components/HapticTouch';
+import { StatusBar } from 'expo-status-bar';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CALENDAR_WIDTH = SCREEN_WIDTH - 32;
@@ -86,20 +87,29 @@ export default function CalendarScreen() {
 
     const schoolId = userData?.schoolId;
 
-    // Fetch calendar events
-    const { data: eventsData, isLoading, refetch } = useQuery({
-        queryKey: ['calendar-events', schoolId, currentDate.getFullYear(), currentDate.getMonth()],
-        queryFn: async () => {
-            const startDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-            const endDate = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0);
+    // Calculate 6-month range once (centered on today)
+    const dateRange = useMemo(() => {
+        const today = new Date();
+        const startDate = new Date(today.getFullYear(), today.getMonth() - 3, 1); // 3 months before
+        const endDate = new Date(today.getFullYear(), today.getMonth() + 4, 0);   // 3 months after (end of month)
+        return { startDate, endDate };
+    }, []); // Only calculate once on mount
 
+    // Fetch calendar events for 6-month range (single query, no refetch on month change)
+    const { data: eventsData, isLoading, isFetching, refetch } = useQuery({
+        queryKey: ['calendar-events-range', schoolId],
+        queryFn: async () => {
+            console.log('📅 Fetching calendar events...'); // Debug log
             const res = await api.get(
-                `/schools/${schoolId}/calendar/events?startDate=${startDate.toISOString()}&endDate=${endDate.toISOString()}`
+                `/schools/${schoolId}/calendar/events?startDate=${dateRange.startDate.toISOString()}&endDate=${dateRange.endDate.toISOString()}`
             );
             return res.data;
         },
         enabled: !!schoolId,
-        staleTime: 1000 * 60 * 5,
+        staleTime: 1000 * 60 * 10, // 10 minutes
+        gcTime: 1000 * 60 * 30,    // Keep in cache for 30 minutes
+        refetchOnMount: false,     // Don't refetch when component mounts if data exists
+        refetchOnWindowFocus: false, // Don't refetch on app focus
     });
 
     // console.log(eventsData)
@@ -243,6 +253,7 @@ export default function CalendarScreen() {
 
     return (
         <View style={styles.container}>
+            <StatusBar style='dark' />
             {/* Header */}
             <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>

@@ -525,23 +525,57 @@ export default function ParentLibraryScreen() {
                                     entering={FadeInRight.delay(400 + index * 60).duration(500)}
                                 >
                                     <View style={styles.requestCard}>
-                                        <View style={styles.bookIcon}>
-                                            <BookOpen size={18} color="#0469ff" />
+                                        <View style={styles.requestCoverContainer}>
+                                            {item.book.coverImage ? (
+                                                <Image
+                                                    source={{ uri: item.book.coverImage }}
+                                                    style={styles.requestCover}
+                                                    contentFit="cover"
+                                                />
+                                            ) : (
+                                                <View style={[styles.requestCover, styles.noCover]}>
+                                                    <BookOpen size={20} color="#9CA3AF" />
+                                                </View>
+                                            )}
                                         </View>
                                         <View style={styles.requestContent}>
-                                            <Text style={styles.bookTitle}>{item.book.title}</Text>
-                                            <Text style={styles.bookAuthor}>by {item.book.author}</Text>
-                                            <View style={[
-                                                styles.statusBadge,
-                                                { backgroundColor: item.status === 'APPROVED' ? '#D1FAE5' : '#FEF3C7' }
-                                            ]}>
-                                                <Text style={[
-                                                    styles.statusText,
-                                                    { color: item.status === 'APPROVED' ? '#10B981' : '#F59E0B' }
+                                            <View style={styles.requestHeader}>
+                                                <Text style={styles.bookTitle} numberOfLines={1}>{item.book.title}</Text>
+                                                <View style={[
+                                                    styles.statusBadge,
+                                                    { backgroundColor: item.status === 'APPROVED' ? '#D1FAE5' : '#FEF3C7' }
                                                 ]}>
-                                                    {item.status === 'APPROVED' ? 'Ready for Pickup' : 'Pending Approval'}
-                                                </Text>
+                                                    <Text style={[
+                                                        styles.statusText,
+                                                        { color: item.status === 'APPROVED' ? '#10B981' : '#F59E0B' }
+                                                    ]}>
+                                                        {item.status === 'APPROVED' ? 'Approved' : 'Pending'}
+                                                    </Text>
+                                                </View>
                                             </View>
+
+                                            <Text style={styles.bookAuthor} numberOfLines={1}>by {item.book.author}</Text>
+
+                                            <View style={styles.requestMeta}>
+                                                <View style={styles.metaItem}>
+                                                    <Calendar size={12} color="#666" />
+                                                    <Text style={styles.metaText}>
+                                                        Requested: {formatDate(item.requestDate)}
+                                                    </Text>
+                                                </View>
+                                                {item.book.category && (
+                                                    <>
+                                                        <Text style={styles.metaDivider}>•</Text>
+                                                        <Text style={styles.metaText}>{item.book.category}</Text>
+                                                    </>
+                                                )}
+                                            </View>
+
+                                            {item.remarks && (
+                                                <Text style={styles.remarksText} numberOfLines={1}>
+                                                    Note: {item.remarks}
+                                                </Text>
+                                            )}
                                         </View>
                                     </View>
                                 </Animated.View>
@@ -799,6 +833,34 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         color: '#6366F1',
     },
+    // Request Card Styles
+    requestCoverContainer: {
+        marginRight: 12,
+    },
+    requestCover: {
+        width: 50,
+        height: 75,
+        borderRadius: 8,
+    },
+    requestHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 4,
+    },
+    requestMeta: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 6,
+        gap: 6,
+    },
+    remarksText: {
+        fontSize: 12,
+        color: '#666',
+        fontStyle: 'italic',
+        marginTop: 4,
+    },
+
     availabilityBadge: {
         paddingHorizontal: 8,
         paddingVertical: 4,

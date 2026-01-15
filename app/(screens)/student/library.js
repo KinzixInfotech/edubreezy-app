@@ -488,20 +488,60 @@ export default function StudentLibraryScreen() {
                     return (
                         <Animated.View key={request.id} entering={FadeInRight.delay(index * 80).duration(400)}>
                             <View style={styles.requestCard}>
-                                <View style={styles.requestInfo}>
-                                    <Text style={styles.requestTitle} numberOfLines={1}>
-                                        {request.book?.title || 'Unknown Book'}
-                                    </Text>
-                                    <Text style={styles.requestDate}>{formatDate(request.createdAt)}</Text>
+                                <View style={styles.requestCoverContainer}>
+                                    {request.book.coverImage ? (
+                                        <Image
+                                            source={{ uri: request.book.coverImage }}
+                                            style={styles.requestCover}
+                                            contentFit="cover"
+                                        />
+                                    ) : (
+                                        <View style={[styles.requestCover, styles.noCover]}>
+                                            <BookOpen size={20} color="#9CA3AF" />
+                                        </View>
+                                    )}
+                                </View>
+                                <View style={styles.requestContent}>
+                                    <View style={styles.requestHeader}>
+                                        <Text style={styles.requestTitle} numberOfLines={1}>
+                                            {request.book?.title || 'Unknown Book'}
+                                        </Text>
+                                        <View style={[styles.statusBadge, { backgroundColor: colors.bg }]}>
+                                            <Text style={[styles.statusText, { color: colors.text }]}>{request.status}</Text>
+                                        </View>
+                                    </View>
+
+                                    <Text style={styles.bookAuthor} numberOfLines={1}>by {request.book?.author}</Text>
+
+                                    <View style={styles.requestMeta}>
+                                        <View style={styles.metaItem}>
+                                            <Calendar size={12} color="#666" />
+                                            <Text style={styles.metaText}>
+                                                Requested: {formatDate(request.createdAt)}
+                                            </Text>
+                                        </View>
+                                        {request.book?.category && (
+                                            <>
+                                                <Text style={styles.metaDivider}>•</Text>
+                                                <Text style={styles.metaText}>
+                                                    {request.book.category?.name || request.book.category}
+                                                </Text>
+                                            </>
+                                        )}
+                                    </View>
+
                                     {request.pickupCode && request.status === 'APPROVED' && (
                                         <View style={styles.pickupCodeContainer}>
                                             <Text style={styles.pickupCodeLabel}>Pickup Code:</Text>
                                             <Text style={styles.pickupCode}>{request.pickupCode}</Text>
                                         </View>
                                     )}
-                                </View>
-                                <View style={[styles.statusBadge, { backgroundColor: colors.bg }]}>
-                                    <Text style={[styles.statusText, { color: colors.text }]}>{request.status}</Text>
+
+                                    {request.remarks && (
+                                        <Text style={styles.remarksText} numberOfLines={1}>
+                                            Note: {request.remarks}
+                                        </Text>
+                                    )}
                                 </View>
                             </View>
                         </Animated.View>
@@ -626,8 +666,15 @@ const styles = StyleSheet.create({
     availabilityText: { fontSize: 11, fontWeight: '600' },
     requestCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f8f9fa', borderRadius: 12, padding: 14, marginBottom: 10 },
     requestInfo: { flex: 1 },
-    requestTitle: { fontSize: 15, fontWeight: '700', color: '#111' },
+    requestTitle: { fontSize: 15, fontWeight: '700', color: '#111', flex: 1, marginRight: 8 },
     requestDate: { fontSize: 12, color: '#999', marginTop: 2 },
+    // New Request Card Styles
+    requestCoverContainer: { marginRight: 12 },
+    requestCover: { width: 50, height: 75, borderRadius: 8 },
+    requestContent: { flex: 1 },
+    requestHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 2 },
+    requestMeta: { flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 6 },
+    remarksText: { fontSize: 12, color: '#666', fontStyle: 'italic', marginTop: 4 },
     pickupCodeContainer: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
     pickupCodeLabel: { fontSize: 11, color: '#666' },
     pickupCode: { fontSize: 13, fontWeight: '700', color: '#10B981', backgroundColor: '#D1FAE5', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },

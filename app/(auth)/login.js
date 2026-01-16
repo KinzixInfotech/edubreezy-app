@@ -33,6 +33,7 @@ import { StatusBar } from 'expo-status-bar';
 import { saveProfile, saveCurrentSchool, clearCurrentSchool } from '../../lib/profileManager';
 import * as WebBrowser from 'expo-web-browser';
 import { Ionicons } from '@expo/vector-icons';
+import api from '../../lib/api';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 export const PRIMARY_COLOR = '#0b5cde';
@@ -306,34 +307,40 @@ export default function LoginScreen() {
 
             let loginEmail = credential.trim();
 
-            // If phone number, lookup email first
+            // If phone number, lookup email first via backend API
             if (isPhone) {
                 console.log('📱 Phone number detected, looking up email for:', loginEmail);
 
-                // Lookup in profiles table
-                const { data: profileData, error: profileError } = await supabase
-                    .from('profiles')
-                    .select('email')
-                    .eq('phone_number', loginEmail)
-                    .maybeSingle();
+                try {
+                    const schoolId = schoolConfig?.id;
+                    if (!schoolId) {
+                        console.error('❌ No school ID available for phone lookup');
+                        setErrors({ general: 'School not configured. Please try email login.' });
+                        setLoading(false);
+                        return;
+                    }
 
-                if (profileError) {
-                    console.error('Error looking up phone:', profileError);
-                    // Fallback to error
-                    setErrors({ general: 'Error verifying phone number. Please try email.' });
+                    // Use backend API for phone-to-email lookup
+                    const response = await api.post(`/schools/${schoolId}/lookup-phone`, {
+                        phoneNumber: loginEmail,
+                    });
+
+                    if (!response.data?.email) {
+                        console.log('❌ Phone number not found');
+                        setErrors({ general: 'Phone number not registered with this school.' });
+                        setLoading(false);
+                        return;
+                    }
+
+                    console.log('✅ Email found for phone:', response.data.email);
+                    loginEmail = response.data.email;
+                } catch (lookupError) {
+                    console.error('Error looking up phone:', lookupError?.response?.data || lookupError);
+                    const errorMsg = lookupError?.response?.data?.error || 'Phone number not found. Please try email.';
+                    setErrors({ general: errorMsg });
                     setLoading(false);
                     return;
                 }
-
-                if (!profileData || !profileData.email) {
-                    console.log('❌ Phone number not found in profiles');
-                    setErrors({ general: 'Phone number not registered with the school.' });
-                    setLoading(false);
-                    return;
-                }
-
-                console.log('✅ Email found for phone:', profileData.email);
-                loginEmail = profileData.email;
             }
 
             const { data, error } = await supabase.auth.signInWithPassword({

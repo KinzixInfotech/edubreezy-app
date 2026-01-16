@@ -642,13 +642,14 @@ export default function ProfileScreen() {
               <View style={{ position: 'absolute', bottom: -60, left: -40, width: 180, height: 180, borderRadius: 90, backgroundColor: 'rgba(255,255,255,0.05)' }} />
               <HapticTouchable onPress={openImageViewer}>
                 {profilePicture && profilePicture !== 'default.png' && profilePicture !== 'N/A' ? (
-                  <View style={[styles.avatarContainer, isTablet && styles.avatarContainerTablet]}>
+                  <View style={[styles.avatarContainer, { marginBottom: 16 }, isTablet && styles.avatarContainerTablet]}>
                     <Image source={{ uri: profilePicture }} style={[styles.avatar, isTablet && styles.avatarTablet, { borderColor: '#fff' }]} />
                     <View style={[styles.statusDot, isTablet && styles.statusDotTablet]} />
                   </View>
                 ) : (
                   <View style={[
                     styles.avatarContainer,
+                    { marginBottom: 16 },
                     isTablet && styles.avatarContainerTablet
                   ]}>
                     <View style={[
@@ -860,10 +861,27 @@ export default function ProfileScreen() {
                     ]}
                   >
                     <View style={styles.avatarContainer}>
-                      <Image
-                        source={{ uri: link.student?.user?.profilePicture || 'https://via.placeholder.com/100' }}
-                        style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#eee' }}
-                      />
+                      {link.student?.user?.profilePicture &&
+                        link.student.user.profilePicture !== 'default.png' &&
+                        link.student.user.profilePicture !== '' ? (
+                        <Image
+                          source={{ uri: link.student.user.profilePicture }}
+                          style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#eee' }}
+                        />
+                      ) : (
+                        <View style={{
+                          width: 40,
+                          height: 40,
+                          borderRadius: 20,
+                          backgroundColor: '#E3F2FD',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}>
+                          <Text style={{ fontSize: 16, fontWeight: '600', color: '#0469ff' }}>
+                            {link.student?.name ? getInitials(link.student.name) : 'S'}
+                          </Text>
+                        </View>
+                      )}
                     </View>
                     <View style={{ flex: 1, marginLeft: 12 }}>
                       <Text style={{ fontSize: 16, fontWeight: '600', color: '#111' }}>
@@ -1066,6 +1084,7 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
+    paddingBottom: 90,
     backgroundColor: '#fff',
   },
   container: {
@@ -1089,7 +1108,7 @@ const styles = StyleSheet.create({
   },
   avatarContainer: {
     position: 'relative',
-    marginBottom: 16,
+    // marginBottom: 16,
   },
   avatar: {
     width: 100,

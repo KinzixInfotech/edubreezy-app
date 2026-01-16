@@ -29,7 +29,6 @@ import {
     BarChart3
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
-import { LineChart } from 'react-native-chart-kit';
 import api from '../../../lib/api';
 import HapticTouchable from '../../components/HapticTouch';
 
@@ -153,8 +152,8 @@ export default function ParentAttendanceView() {
         };
     }, [fullYearData?.monthlyStats, currentMonth]);
 
-    // Graph data from all attendance
-    const graphData = useMemo(() => {
+    // Weekly attendance data for simple bar visualization
+    const weeklyData = useMemo(() => {
         if (!allAttendance.length) return null;
 
         const days = graphPeriod === '7d' ? 7 : graphPeriod === '30d' ? 30 : 90;
@@ -162,54 +161,65 @@ export default function ParentAttendanceView() {
         const startDate = new Date(today);
         startDate.setDate(today.getDate() - days + 1);
 
-        const dateMap = new Map();
-        for (let i = 0; i < days; i++) {
-            const date = new Date(startDate);
-            date.setDate(startDate.getDate() + i);
-            const dateStr = getISTDateString(date);
-            dateMap.set(dateStr, { present: 0, absent: 0 });
-        }
+        // Get attendance records within the period
+        const periodRecords = allAttendance.filter(record => {
+            const recordDate = new Date(record.date);
+            return recordDate >= startDate && recordDate <= today;
+        }).sort((a, b) => new Date(a.date) - new Date(b.date));
 
-        allAttendance.forEach(record => {
-            const dateStr = getISTDateString(record.date);
-            if (dateMap.has(dateStr)) {
-                const data = dateMap.get(dateStr);
-                if (record.status === 'PRESENT') {
-                    data.present = 1;
-                } else if (record.status === 'ABSENT') {
-                    data.absent = 1;
-                }
+        // Count totals
+        let presentCount = 0;
+        let absentCount = 0;
+        let lateCount = 0;
+        let leaveCount = 0;
+
+        const dailyStatus = periodRecords.map(record => {
+            const d = new Date(record.date);
+            let status = 'none';
+
+            if (record.status === 'PRESENT') {
+                status = 'present';
+                presentCount++;
+            } else if (record.status === 'ABSENT') {
+                status = 'absent';
+                absentCount++;
+            } else if (record.status === 'LATE' || record.status === 'HALF_DAY') {
+                status = 'late';
+                lateCount++;
+            } else if (record.status === 'ON_LEAVE') {
+                status = 'leave';
+                leaveCount++;
             }
+
+            return {
+                date: d,
+                dayName: d.toLocaleDateString('en-US', { weekday: 'short' }),
+                dayNum: d.getDate(),
+                month: d.toLocaleDateString('en-US', { month: 'short' }),
+                status,
+            };
         });
 
-        const sortedDates = Array.from(dateMap.keys()).sort();
-        const labels = sortedDates.map(date => {
-            const d = new Date(date);
-            return graphPeriod === '7d'
-                ? d.toLocaleDateString('en-US', { weekday: 'short' })
-                : `${d.getDate()}`;
-        });
-
-        const presentData = sortedDates.map(date => dateMap.get(date).present);
-        const absentData = sortedDates.map(date => dateMap.get(date).absent);
+        // For display: 7d shows all 7, 30d/90d shows last 7 days as preview
+        const maxDisplayDays = 7;
+        const displayDays = dailyStatus.slice(-maxDisplayDays);
 
         return {
-            labels: labels.length > 15 ? labels.filter((_, i) => i % 2 === 0) : labels,
-            datasets: [
-                {
-                    data: presentData,
-                    color: (opacity = 1) => `rgba(81, 207, 102, ${opacity})`,
-                    strokeWidth: 2,
-                },
-                {
-                    data: absentData,
-                    color: (opacity = 1) => `rgba(255, 107, 107, ${opacity})`,
-                    strokeWidth: 2,
-                }
-            ],
-            legend: ['Present', 'Absent']
+            days: displayDays,
+            totalDays: periodRecords.length,
+            presentCount,
+            absentCount,
+            lateCount,
+            leaveCount,
+            percentage: periodRecords.length > 0
+                ? Math.round((presentCount + lateCount) / periodRecords.length * 100)
+                : 0,
+            periodLabel: graphPeriod === '7d' ? 'Last 7 Days' : graphPeriod === '30d' ? 'Last 30 Days' : 'Last 90 Days',
         };
     }, [allAttendance, graphPeriod]);
+
+
+
 
     // Calendar days generation using filtered monthly data
     const calendarDays = useMemo(() => {
@@ -571,13 +581,13 @@ export default function ParentAttendanceView() {
                             );
                         })}
 
-                        {/* Attendance Trend Graph */}
+                        {/* Weekly Attendance Overview */}
                         <Animated.View entering={FadeInDown.delay(600).duration(500)}>
-                            <View style={styles.graphCard}>
+                            <View style={styles.graphCardLight}>
                                 <View style={styles.graphHeader}>
                                     <View style={styles.graphHeaderLeft}>
                                         <BarChart3 size={20} color="#0469ff" />
-                                        <Text style={styles.graphTitle}>Attendance Trend</Text>
+                                        <Text style={styles.graphTitle}>Weekly Overview</Text>
                                     </View>
                                     <View style={styles.periodSelector}>
                                         {['7d', '30d', '90d'].map(period => (
@@ -601,54 +611,79 @@ export default function ParentAttendanceView() {
                                     </View>
                                 </View>
 
-                                {graphData ? (
-                                    <View style={styles.chartContainer}>
-                                        <LineChart
-                                            data={graphData}
-                                            width={SCREEN_WIDTH - 64}
-                                            height={200}
-                                            chartConfig={{
-                                                backgroundColor: '#fff',
-                                                backgroundGradientFrom: '#fff',
-                                                backgroundGradientTo: '#fff',
-                                                decimalPlaces: 0,
-                                                color: (opacity = 1) => `rgba(59, 130, 246, ${opacity})`,
-                                                labelColor: (opacity = 1) => `rgba(102, 102, 102, ${opacity})`,
-                                                style: { borderRadius: 16 },
-                                                propsForDots: { r: '4', strokeWidth: '2' },
-                                                propsForBackgroundLines: {
-                                                    strokeDasharray: '',
-                                                    stroke: '#e5e7eb',
-                                                    strokeWidth: 1,
-                                                }
-                                            }}
-                                            bezier
-                                            style={styles.chart}
-                                            withInnerLines={true}
-                                            withOuterLines={false}
-                                            withVerticalLabels={true}
-                                            withHorizontalLabels={true}
-                                            segments={4}
-                                        />
-                                        <View style={styles.graphLegend}>
-                                            <View style={styles.graphLegendItem}>
-                                                <View style={[styles.legendLine, { backgroundColor: '#51CF66' }]} />
-                                                <Text style={styles.graphLegendText}>Present</Text>
+                                {weeklyData && weeklyData.days.length > 0 ? (
+                                    <>
+                                        {/* Period Label */}
+                                        <Text style={styles.periodLabelText}>{weeklyData.periodLabel} • {weeklyData.totalDays} school days</Text>
+
+                                        {/* Summary Stats */}
+                                        <View style={styles.weeklyStats}>
+                                            <View style={styles.weeklyStatItem}>
+                                                <Text style={styles.weeklyStatValue}>{weeklyData.presentCount}</Text>
+                                                <Text style={styles.weeklyStatLabel}>Present</Text>
                                             </View>
-                                            <View style={styles.graphLegendItem}>
-                                                <View style={[styles.legendLine, { backgroundColor: '#FF6B6B' }]} />
-                                                <Text style={styles.graphLegendText}>Absent</Text>
+                                            <View style={[styles.weeklyStatItem, styles.weeklyStatDivider]}>
+                                                <Text style={[styles.weeklyStatValue, { color: '#FF6B6B' }]}>{weeklyData.absentCount}</Text>
+                                                <Text style={styles.weeklyStatLabel}>Absent</Text>
+                                            </View>
+                                            <View style={styles.weeklyStatItem}>
+                                                <Text style={[styles.weeklyStatValue, { color: '#0469ff' }]}>{weeklyData.percentage}%</Text>
+                                                <Text style={styles.weeklyStatLabel}>Rate</Text>
                                             </View>
                                         </View>
-                                    </View>
+
+
+                                        {/* Daily Bars */}
+                                        <View style={styles.weeklyBarsContainer}>
+                                            {weeklyData.days.map((day, idx) => (
+                                                <View key={idx} style={styles.dayBarWrapper}>
+                                                    <View
+                                                        style={[
+                                                            styles.dayBar,
+                                                            day.status === 'present' && styles.dayBarPresent,
+                                                            day.status === 'absent' && styles.dayBarAbsent,
+                                                            day.status === 'late' && styles.dayBarLate,
+                                                            day.status === 'leave' && styles.dayBarLeave,
+                                                            day.status === 'none' && styles.dayBarNone,
+                                                        ]}
+                                                    >
+                                                        {day.status === 'present' && <CheckCircle size={16} color="#fff" />}
+                                                        {day.status === 'absent' && <XCircle size={16} color="#fff" />}
+                                                        {day.status === 'late' && <Clock size={16} color="#fff" />}
+                                                    </View>
+                                                    <Text style={styles.dayBarLabel}>{day.dayName}</Text>
+                                                    <Text style={styles.dayBarDate}>{day.dayNum}</Text>
+                                                </View>
+                                            ))}
+                                        </View>
+
+                                        {/* Legend */}
+                                        <View style={styles.weeklyLegend}>
+                                            <View style={styles.legendPill}>
+                                                <View style={[styles.legendDotSmall, { backgroundColor: '#51CF66' }]} />
+                                                <Text style={styles.legendPillText}>Present</Text>
+                                            </View>
+                                            <View style={styles.legendPill}>
+                                                <View style={[styles.legendDotSmall, { backgroundColor: '#FF6B6B' }]} />
+                                                <Text style={styles.legendPillText}>Absent</Text>
+                                            </View>
+                                            <View style={styles.legendPill}>
+                                                <View style={[styles.legendDotSmall, { backgroundColor: '#FFB020' }]} />
+                                                <Text style={styles.legendPillText}>Late</Text>
+                                            </View>
+                                        </View>
+                                    </>
                                 ) : (
                                     <View style={styles.noGraphData}>
                                         <BarChart3 size={40} color="#ccc" />
-                                        <Text style={styles.noGraphText}>No data available for selected period</Text>
+                                        <Text style={styles.noGraphText}>No data for selected period</Text>
                                     </View>
                                 )}
                             </View>
                         </Animated.View>
+
+
+
 
                         <View style={{ height: 40 }} />
                     </>
@@ -770,10 +805,11 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     graphCard: {
-        backgroundColor: '#fff',
-        borderRadius: 16,
-        padding: 16,
+        borderRadius: 20,
+        padding: 20,
         marginBottom: 16,
+        marginTop: 8,
+        overflow: 'hidden',
     },
     graphHeader: {
         flexDirection: 'row',
@@ -850,6 +886,185 @@ const styles = StyleSheet.create({
     noGraphText: {
         fontSize: 14,
         color: '#999',
+    },
+    graphCardLight: {
+        backgroundColor: '#fff',
+        borderRadius: 20,
+        padding: 20,
+        marginBottom: 16,
+        marginTop: 8,
+    },
+    legendDotLarge: {
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+    },
+    // Weekly bar visualization styles
+    periodLabelText: {
+        fontSize: 13,
+        color: '#666',
+        textAlign: 'center',
+        marginBottom: 12,
+        fontWeight: '500',
+    },
+    weeklyStats: {
+        flexDirection: 'row',
+        justifyContent: 'space-around',
+        paddingVertical: 16,
+        marginBottom: 16,
+        backgroundColor: '#f8f9fa',
+        borderRadius: 12,
+    },
+    weeklyStatItem: {
+        alignItems: 'center',
+        flex: 1,
+    },
+    weeklyStatDivider: {
+        borderLeftWidth: 1,
+        borderRightWidth: 1,
+        borderColor: '#e5e7eb',
+    },
+    weeklyStatValue: {
+        fontSize: 24,
+        fontWeight: '700',
+        color: '#51CF66',
+    },
+    weeklyStatLabel: {
+        fontSize: 12,
+        color: '#666',
+        marginTop: 4,
+        fontWeight: '600',
+    },
+    weeklyBarsContainer: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        paddingHorizontal: 4,
+        marginBottom: 16,
+    },
+    dayBarWrapper: {
+        alignItems: 'center',
+        flex: 1,
+    },
+    dayBar: {
+        width: 36,
+        height: 36,
+        borderRadius: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 6,
+    },
+    dayBarPresent: {
+        backgroundColor: '#51CF66',
+    },
+    dayBarAbsent: {
+        backgroundColor: '#FF6B6B',
+    },
+    dayBarLate: {
+        backgroundColor: '#FFB020',
+    },
+    dayBarLeave: {
+        backgroundColor: '#8B5CF6',
+    },
+    dayBarNone: {
+        backgroundColor: '#e5e7eb',
+    },
+    dayBarLabel: {
+        fontSize: 11,
+        color: '#666',
+        fontWeight: '600',
+    },
+    dayBarDate: {
+        fontSize: 10,
+        color: '#999',
+        marginTop: 2,
+    },
+    weeklyLegend: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        gap: 12,
+        paddingTop: 12,
+        borderTopWidth: 1,
+        borderTopColor: '#f0f0f0',
+    },
+    legendPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        backgroundColor: '#f5f5f5',
+        borderRadius: 12,
+    },
+    legendDotSmall: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+    },
+    legendPillText: {
+        fontSize: 11,
+        color: '#666',
+        fontWeight: '600',
+    },
+    graphTitleDark: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#fff',
+    },
+    periodSelectorDark: {
+        flexDirection: 'row',
+        gap: 4,
+        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+        borderRadius: 10,
+        padding: 4,
+    },
+    periodButtonDark: {
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 8,
+    },
+    periodButtonActiveDark: {
+        backgroundColor: '#3B82F6',
+    },
+    periodTextDark: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: 'rgba(255, 255, 255, 0.6)',
+    },
+    periodTextActiveDark: {
+        color: '#fff',
+    },
+    graphLegendDark: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        gap: 24,
+        marginTop: 16,
+        paddingTop: 16,
+        borderTopWidth: 1,
+        borderTopColor: 'rgba(255, 255, 255, 0.1)',
+    },
+    graphLegendItemDark: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    legendLineDark: {
+        width: 24,
+        height: 4,
+        borderRadius: 2,
+    },
+    graphLegendTextDark: {
+        fontSize: 13,
+        color: 'rgba(255, 255, 255, 0.8)',
+        fontWeight: '600',
+    },
+    noGraphDataDark: {
+        alignItems: 'center',
+        paddingVertical: 50,
+        gap: 12,
+    },
+    noGraphTextDark: {
+        fontSize: 14,
+        color: 'rgba(255, 255, 255, 0.5)',
     },
     streakCard: {
         marginBottom: 16,

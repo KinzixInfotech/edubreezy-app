@@ -1138,6 +1138,7 @@ export default function HomeScreen() {
                     </View>
                 </Animated.View>
 
+                {/* Bottom Spacer */}
                 <View style={{ height: 100 }} />
             </ScrollView >
         );
@@ -1200,6 +1201,9 @@ export default function HomeScreen() {
 
             <Text style={styles.sectionTitle}>School Dashboard</Text>
             <Text style={{ padding: 16, color: '#666' }}>Admin features coming soon.</Text>
+
+            {/* Bottom Spacer */}
+            <View style={{ height: 100 }} />
         </ScrollView>
     );
 
@@ -1464,7 +1468,6 @@ export default function HomeScreen() {
                         params: { childData: JSON.stringify(selectedChild) },
                         badge: newExamResults > 0 ? newExamResults : null,
                     },
-                    { icon: BookOpen, label: 'Assignments', color: '#FF9800', bgColor: '#FFF3E0', href: "/payfees" },
                 ],
             },
             {
@@ -1756,6 +1759,8 @@ export default function HomeScreen() {
                         </View>
                     </Animated.View>
                 )}
+                {/* School Banner Carousel */}
+                <BannerCarousel schoolId={schoolId} role={user_acc?.role?.name} />
                 {/* Children Selector */}
                 <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.section}>
                     <View style={styles.sectionHeader}>
@@ -2056,8 +2061,7 @@ export default function HomeScreen() {
                 </Animated.View>
 
 
-                {/* School Banner Carousel */}
-                <BannerCarousel schoolId={schoolId} role={user_acc?.role?.name} />
+
 
                 {/* Quick Actions */}
                 {
@@ -2069,37 +2073,48 @@ export default function HomeScreen() {
                         >
                             <Text style={styles.sectionTitle}>{group.title}</Text>
                             <View style={styles.actionsGrid}>
-                                {group.actions.map((action, index) => (
-                                    <Animated.View
-                                        key={action.label}
-                                        entering={FadeInDown.delay(500 + index * 50).duration(400)}
-                                    >
-                                        <HapticTouchable
-                                            onPress={() => {
-                                                if (action.params) {
-                                                    navigateOnce(action.href, action.params);
-                                                } else {
-                                                    navigateOnce(action.href || '');
-                                                }
-                                            }}
+                                {group.actions.map((action, index) => {
+                                    const totalItems = group.actions.length;
+                                    // Full width for: single item OR last item when odd count
+                                    const isFullWidth = totalItems === 1 || (totalItems % 2 === 1 && index === totalItems - 1);
+                                    const itemWidth = isFullWidth
+                                        ? SCREEN_WIDTH - (isSmallDevice ? 24 : 32)
+                                        : (SCREEN_WIDTH - (isSmallDevice ? 24 : 32) - 12) / 2;
+
+                                    return (
+                                        <Animated.View
+                                            key={action.label}
+                                            entering={FadeInDown.delay(500 + index * 50).duration(400)}
                                         >
-                                            <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}
+                                            <HapticTouchable
+                                                onPress={() => {
+                                                    if (action.params) {
+                                                        navigateOnce(action.href, action.params);
+                                                    } else {
+                                                        navigateOnce(action.href || '');
+                                                    }
+                                                }}
                                             >
-                                                <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
-                                                    <action.icon size={22} color={action.color} />
-                                                    {action.badge && (
-                                                        <View style={styles.badgeContainer}>
-                                                            <Text style={styles.badgeText}>{action.badge > 99 ? '99+' : action.badge}</Text>
-                                                        </View>
-                                                    )}
+                                                <View style={[
+                                                    styles.actionButton,
+                                                    { backgroundColor: action.bgColor, width: itemWidth }
+                                                ]}>
+                                                    <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
+                                                        <action.icon size={22} color={action.color} />
+                                                        {action.badge && (
+                                                            <View style={styles.badgeContainer}>
+                                                                <Text style={styles.badgeText}>{action.badge > 99 ? '99+' : action.badge}</Text>
+                                                            </View>
+                                                        )}
+                                                    </View>
+                                                    <Text style={styles.actionLabel} numberOfLines={1}>
+                                                        {action.label}
+                                                    </Text>
                                                 </View>
-                                                <Text style={styles.actionLabel} numberOfLines={1}>
-                                                    {action.label}
-                                                </Text>
-                                            </View>
-                                        </HapticTouchable>
-                                    </Animated.View>
-                                ))}
+                                            </HapticTouchable>
+                                        </Animated.View>
+                                    );
+                                })}
                             </View>
                         </Animated.View>
                     ))
@@ -2186,6 +2201,9 @@ export default function HomeScreen() {
                         )}
                     </View>
                 </Animated.View>
+
+                {/* Bottom Spacer */}
+                <View style={{ height: 100 }} />
 
                 {/* Add Child Modal */}
                 <AddChildModal
@@ -2658,6 +2676,9 @@ export default function HomeScreen() {
                         </View>
                     )}
                 </Animated.View>
+
+                {/* Bottom Spacer */}
+                <View style={{ height: 100 }} />
             </ScrollView>
         );
     };
@@ -2791,6 +2812,9 @@ export default function HomeScreen() {
                         ))}
                     </View>
                 </Animated.View>
+
+                {/* Bottom Spacer */}
+                <View style={{ height: 100 }} />
             </ScrollView>
         );
     };
@@ -3059,6 +3083,9 @@ export default function HomeScreen() {
                         ))}
                     </View>
                 </View>
+
+                {/* Bottom Spacer */}
+                <View style={{ height: 100 }} />
             </ScrollView>
         );
     };
@@ -3288,6 +3315,9 @@ export default function HomeScreen() {
                         ))}
                     </View>
                 </View>
+
+                {/* Bottom Spacer */}
+                <View style={{ height: 100 }} />
             </ScrollView>
         );
     };
@@ -3727,7 +3757,7 @@ const styles = StyleSheet.create({
         flexShrink: 0,
     },
     examEmoji: { fontSize: isSmallDevice ? 28 : 32 },
-    section: { marginBottom: 20 },
+    section: { marginBottom: 30 },
     quickAccessScrollView: { marginLeft: isSmallDevice ? -12 : -16, paddingLeft: isSmallDevice ? 12 : 16 },
     sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
     sectionTitle: { fontSize: isSmallDevice ? 16 : 18, fontWeight: '600', color: '#111' },
@@ -4816,6 +4846,9 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
                     )}
                 </View>
             </Animated.View>
+
+            {/* Bottom Spacer */}
+            <View style={{ height: 100 }} />
 
             {/* Delegation Modal */}
             <DelegationCheckModal

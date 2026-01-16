@@ -11,6 +11,7 @@ import {
     TextInput,
     Modal,
     Dimensions,
+    Alert,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -33,6 +34,7 @@ import {
     Info,
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
+import * as Haptics from 'expo-haptics';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
 
@@ -53,6 +55,7 @@ export default function ParentLibraryScreen() {
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedBook, setSelectedBook] = useState(null);
     const [showBookModal, setShowBookModal] = useState(false);
+    const [isRequesting, setIsRequesting] = useState(false);
 
     // Parse child data from params
     const childData = params.childData ? JSON.parse(params.childData) : null;
@@ -68,6 +71,7 @@ export default function ParentLibraryScreen() {
 
     const schoolId = userData?.schoolId;
     const parentId = userData?.parentData?.id;
+    const parentUserId = userData?.id;
     const studentId = childData?.studentId || childData?.id;
 
     // Fetch library data
@@ -130,6 +134,37 @@ export default function ParentLibraryScreen() {
     const openBookDetails = (book) => {
         setSelectedBook(book);
         setShowBookModal(true);
+    };
+
+    // Handle book request for child
+    const handleRequestBook = async (bookId) => {
+        if (!schoolId || !studentId) {
+            Alert.alert('Error', 'Unable to request book. Student information missing.');
+            return;
+        }
+
+        setIsRequesting(true);
+        try {
+            await api.post(`/schools/${schoolId}/library/requests`, {
+                userId: studentId,
+                bookId: bookId,
+                userType: 'STUDENT',
+                requestedBy: parentUserId, // Use User ID for notification compatibility
+            });
+
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            Alert.alert('Success', `Book request submitted for ${childData.name}!`);
+
+            // Refresh requests data
+            await queryClient.invalidateQueries(['parent-library']);
+            setShowBookModal(false);
+        } catch (error) {
+            console.error('Request book error:', error);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            Alert.alert('Error', error.response?.data?.error || 'Failed to request book. Please try again.');
+        } finally {
+            setIsRequesting(false);
+        }
     };
 
     // No child data error state
@@ -296,6 +331,32 @@ export default function ParentLibraryScreen() {
                                         <Text style={styles.descriptionText}>{selectedBook.description}</Text>
                                     </View>
                                 )}
+
+                                {/* Request Book Button */}
+                                <View style={{ marginTop: 20, marginBottom: 10, paddingHorizontal: 20 }}>
+                                    <HapticTouchable
+                                        onPress={() => handleRequestBook(selectedBook.id)}
+                                        disabled={isRequesting || selectedBook.availableCopies === 0}
+                                    >
+                                        <View style={[
+                                            styles.requestButton,
+                                            (isRequesting || selectedBook.availableCopies === 0) && styles.requestButtonDisabled
+                                        ]}>
+                                            {isRequesting ? (
+                                                <>
+                                                    <ActivityIndicator size="small" color="#fff" />
+                                                    <Text style={styles.requestButtonText}>Requesting...</Text>
+                                                </>
+                                            ) : (
+                                                <Text style={styles.requestButtonText}>
+                                                    {selectedBook.availableCopies > 0
+                                                        ? `Request for ${childData.name}`
+                                                        : 'Not Available'}
+                                                </Text>
+                                            )}
+                                        </View>
+                                    </HapticTouchable>
+                                </View>
                             </>
                         )}
                     </ScrollView>
@@ -1126,5 +1187,22 @@ const styles = StyleSheet.create({
         color: '#666',
         textAlign: 'center',
         paddingHorizontal: 32,
+    },
+    requestButton: {
+        backgroundColor: '#0469ff',
+        paddingVertical: 14,
+        borderRadius: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+    },
+    requestButtonDisabled: {
+        backgroundColor: '#9CA3AF',
+    },
+    requestButtonText: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: '600',
     },
 });

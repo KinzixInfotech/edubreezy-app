@@ -37,8 +37,8 @@ export default {
                 backgroundColor: "#ffffff"
             },
             notification: {
-                icon: "./assets/icon.png",
-                color: "#ffffff"
+                icon: "./assets/notification-icon.png", // ✅ FIXED
+                color: "#000000"
             },
             config: {
                 googleMaps: {

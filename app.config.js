@@ -51,8 +51,11 @@ export default {
                 "RECEIVE_BOOT_COMPLETED",
                 "WAKE_LOCK",
                 "android.permission.ACCESS_COARSE_LOCATION",
-                "android.permission.ACCESS_FINE_LOCATION"
-            ]
+                "android.permission.ACCESS_FINE_LOCATION",
+                "android.permission.ACCESS_BACKGROUND_LOCATION",
+                "android.permission.FOREGROUND_SERVICE",
+                "android.permission.FOREGROUND_SERVICE_LOCATION"
+            ],
         },
         web: {
             favicon: "./assets/favicon.png"

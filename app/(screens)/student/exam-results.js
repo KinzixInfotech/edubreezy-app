@@ -47,49 +47,32 @@ export default function StudentExamResultsScreen() {
     const schoolId = userData?.schoolId;
     const userId = userData?.studentData?.userId || userData?.studentdatafull?.userId || userData?.id;
     const studentRecordId = userData?.studentData?.id || userData?.studentdatafull?.id;
-    const classId = userData?.class?.id || userData?.classs?.id;
+    // classId can be at different paths depending on full vs minimal user data
+    const classId = userData?.studentData?.classId ||
+        userData?.studentData?.class?.id ||
+        userData?.class?.id ||
+        userData?.classs?.id;
 
-    // Fetch exams for student's class
-    const { data: examsData, isLoading: examsLoading } = useQuery({
-        queryKey: ['student-exams', schoolId, classId],
+    // Fetch exam results for student using same API as parent module
+    const { data: examData, isLoading: resultsLoading, refetch } = useQuery({
+        queryKey: ['student-exam-results', schoolId, studentRecordId || userId],
         queryFn: async () => {
-            const res = await api.get(`/schools/${schoolId}/examination/exams`);
-            const allExams = res.data || [];
-            return allExams.filter(exam =>
-                exam.classes?.some(c => c.id === classId) ||
-                exam.status === 'PUBLISHED' ||
-                exam.status === 'COMPLETED'
-            );
+            // Use the same API as parent module which returns pre-filtered results
+            const studentId = studentRecordId || userId;
+            console.log('📊 Fetching student results for ID:', studentId);
+            const res = await api.get(`/schools/${schoolId}/examination/student-results?studentId=${studentId}`);
+            console.log('📊 Got exam data:', res.data);
+            return res.data;
         },
-        enabled: !!schoolId && !!classId,
+        enabled: !!schoolId && !!(studentRecordId || userId),
         staleTime: 1000 * 60 * 5,
     });
 
-    const exams = examsData || [];
+    const exams = examData?.results || [];  // Array of exam results with subjects
+    const stats = examData?.stats || {};
 
-    // Fetch results for selected exam
-    const { data: resultsData, isLoading: resultsLoading, refetch } = useQuery({
-        queryKey: ['student-exam-results', schoolId, userId, selectedExam?.id],
-        queryFn: async () => {
-            const res = await api.get(`/schools/${schoolId}/examination/exams/${selectedExam.id}/results`);
-            const allResults = Array.isArray(res.data) ? res.data : (res.data?.results || res.data?.data || []);
-            console.log('📊 All results:', allResults.length, 'userId:', userId);
-            if (allResults.length > 0) console.log('📋 Sample:', JSON.stringify(allResults[0], null, 2));
-            const studentResults = allResults.filter(r => {
-                return r.studentId === userId ||
-                    r.studentId === studentRecordId ||
-                    r.student?.userId === userId ||
-                    r.student?.user?.id === userId ||
-                    r.student?.id === studentRecordId;
-            });
-            console.log('✅ Filtered:', studentResults.length);
-            return studentResults;
-        },
-        enabled: !!schoolId && !!userId && !!selectedExam?.id,
-        staleTime: 1000 * 60 * 5,
-    });
-
-    const results = resultsData || [];
+    // For this screen, we show all exams in a list instead of selector
+    const results = exams;
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
@@ -191,7 +174,7 @@ export default function StudentExamResultsScreen() {
                 </View>
             )}
 
-            {examsLoading || resultsLoading ? (
+            {resultsLoading ? (
                 <View style={styles.loaderContainer}>
                     <ActivityIndicator size="large" color="#0469ff" />
                 </View>

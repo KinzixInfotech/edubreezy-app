@@ -42,8 +42,14 @@ export default function StudentTimetableScreen() {
     });
 
     const schoolId = userData?.schoolId;
-    const classId = userData?.class?.id || userData?.classs?.id;
-    const sectionId = userData?.section?.id;
+    // classId can be at different paths depending on full vs minimal user data
+    const classId = userData?.studentData?.classId ||
+        userData?.studentData?.class?.id ||
+        userData?.class?.id ||
+        userData?.classs?.id;
+    const sectionId = userData?.studentData?.sectionId ||
+        userData?.studentData?.section?.id ||
+        userData?.section?.id;
 
     // Fetch class timetable
     const { data: timetableData, isLoading, refetch } = useQuery({

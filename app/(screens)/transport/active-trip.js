@@ -1,17 +1,22 @@
-// Active Trip Screen with live tracking
+// Active Trip Screen with live tracking - Premium UI
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, Alert, AppState, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Alert, AppState, Dimensions, ActivityIndicator, Linking, RefreshControl, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
-import { StatusBar } from 'expo-status-bar';
-import { ChevronLeft, MapPin, Clock, Users, Play, Square, Navigation, CheckCircle2, AlertTriangle } from 'lucide-react-native';
+import { ChevronLeft, MapPin, Clock, Users, Play, Square, Navigation, CheckCircle2, AlertTriangle, Phone, Bus, RefreshCw } from 'lucide-react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import * as Location from 'expo-location';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import api from '../../../lib/api';
+import api, { API_BASE_URL } from '../../../lib/api';
 import HapticTouchable from '../../components/HapticTouch';
-import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
+import Animated, { FadeInDown, FadeInUp, FadeIn } from 'react-native-reanimated';
+import {
+    startBackgroundLocationTask,
+    stopBackgroundLocationTask,
+    isBackgroundTaskRunning,
+    flushLocationQueue,
+} from '../../../lib/transport-location-task';
 
 const { width } = Dimensions.get('window');
 
@@ -21,6 +26,17 @@ export default function ActiveTripScreen() {
     const locationWatchRef = useRef(null);
     const appStateRef = useRef(AppState.currentState);
     const [isTracking, setIsTracking] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
+    const [currentUser, setCurrentUser] = useState(null);
+
+    // Get current user for comparison
+    useEffect(() => {
+        const getUser = async () => {
+            const userData = await SecureStore.getItemAsync('user');
+            if (userData) setCurrentUser(JSON.parse(userData));
+        };
+        getUser();
+    }, []);
 
     // Fetch Trip Details
     const { data: tripData, isLoading, refetch } = useQuery({
@@ -31,13 +47,23 @@ export default function ActiveTripScreen() {
         },
         enabled: !!tripId,
         staleTime: 1000 * 30,
-        refetchInterval: 10000, // Poll every 10s for updates
+        refetchInterval: 10000,
     });
 
     const trip = tripData?.trip;
     const stops = trip?.route?.busStops || [];
+    const driver = trip?.driver;
+    const conductor = trip?.conductor;
+    const vehicle = trip?.vehicle;
 
-    // Location Tracking Logic
+    // Pull to refresh
+    const onRefresh = useCallback(async () => {
+        setRefreshing(true);
+        await refetch();
+        setRefreshing(false);
+    }, [refetch]);
+
+    // Location Tracking Logic - now uses background task
     useEffect(() => {
         const setupTracking = async () => {
             if (trip?.status === 'IN_PROGRESS' && !isTracking) {
@@ -48,282 +74,490 @@ export default function ActiveTripScreen() {
 
         const subscription = AppState.addEventListener('change', handleAppStateChange);
         return () => {
-            stopLocationTracking();
+            // Don't stop tracking when component unmounts - that's the point!
+            // Only stop when trip is completed
             subscription.remove();
         };
-    }, [trip?.status]); // Re-run if status changes
+    }, [trip?.status]);
 
-    const handleAppStateChange = (nextAppState) => {
+    const handleAppStateChange = async (nextAppState) => {
         if (appStateRef.current.match(/inactive|background/) && nextAppState === 'active') {
             refetch();
+            // Flush any queued location updates when app comes back
+            await flushLocationQueue();
         }
         appStateRef.current = nextAppState;
     };
 
     const startLocationTracking = async () => {
         try {
-            const { status } = await Location.requestForegroundPermissionsAsync();
-            if (status !== 'granted') {
-                Alert.alert('Permission Denied', 'Location permission is required for live tracking.');
+            const routeName = trip?.route?.name || 'Unknown Route';
+            const vehicleId = trip?.vehicleId;
+
+            if (!vehicleId) {
+                console.error('No vehicle ID for tracking');
                 return;
             }
 
-            const staffData = await SecureStore.getItemAsync('user');
-            const staff = staffData ? JSON.parse(staffData) : null;
-
-            locationWatchRef.current = await Location.watchPositionAsync(
-                { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 20 },
-                async (location) => {
-                    try {
-                        await api.post('/schools/transport/location/update', {
-                            vehicleId: trip?.vehicleId,
-                            tripId,
-                            transportStaffId: staff?.id, // Assuming user ID is staff ID
-                            latitude: location.coords.latitude,
-                            longitude: location.coords.longitude,
-                            speed: location.coords.speed,
-                            heading: location.coords.heading,
-                        });
-                        setIsTracking(true);
-                    } catch (err) {
-                        console.error('Error updating location:', err);
-                    }
-                }
+            // Start background location task with foreground service
+            await startBackgroundLocationTask(
+                tripId,
+                vehicleId,
+                routeName,
+                API_BASE_URL
             );
+
+            setIsTracking(true);
+            console.log('Background location tracking started for trip:', tripId);
         } catch (err) {
             console.error('Error starting location tracking:', err);
+            Alert.alert(
+                'Location Error',
+                'Could not start location tracking. Please ensure location permissions are granted.'
+            );
         }
     };
 
-    const stopLocationTracking = () => {
-        if (locationWatchRef.current) {
-            locationWatchRef.current.remove();
-            locationWatchRef.current = null;
+    const stopLocationTracking = async () => {
+        try {
+            await stopBackgroundLocationTask();
+            setIsTracking(false);
+            console.log('Background location tracking stopped');
+        } catch (err) {
+            console.error('Error stopping location tracking:', err);
         }
-        setIsTracking(false);
     };
 
     // Complete Trip Mutation
     const completeTripMutation = useMutation({
         mutationFn: async () => {
-            return await api.post(`/schools/transport/trips/${tripId}/complete`);
+            console.log('Completing trip:', tripId, 'Status:', trip?.status);
+            const response = await api.post(`/schools/transport/trips/${tripId}/complete`);
+            console.log('Complete trip response:', response.data);
+            return response;
         },
-        onSuccess: () => {
+        onSuccess: (response) => {
+            console.log('Trip completed successfully:', response.data);
             stopLocationTracking();
-            Alert.alert('Success', 'Trip completed successfully!');
-            router.replace('/(tabs)/home'); // Navigate back to home
+            Alert.alert('Success', 'Trip completed successfully!', [
+                { text: 'OK', onPress: () => router.replace('/(tabs)/home') }
+            ]);
             queryClient.invalidateQueries(['driver-trips']);
+            queryClient.invalidateQueries(['trip-details']);
         },
         onError: (error) => {
-            Alert.alert('Error', error?.response?.data?.error || 'Failed to complete trip');
+            console.error('Complete trip error:', error?.response?.data || error.message);
+            Alert.alert(
+                'Error',
+                error?.response?.data?.error || 'Failed to complete trip. Please try again.'
+            );
         }
     });
 
     const handleCompleteTrip = () => {
         Alert.alert('Complete Trip', 'Are you sure you want to end this trip?', [
             { text: 'Cancel', style: 'cancel' },
-            {
-                text: 'End Trip',
-                style: 'destructive',
-                onPress: () => completeTripMutation.mutate(),
-            },
+            { text: 'End Trip', style: 'destructive', onPress: () => completeTripMutation.mutate() },
         ]);
+    };
+
+    const handleCall = (phone) => {
+        if (phone) Linking.openURL(`tel:${phone}`);
+    };
+
+    const handleNavigate = (stop) => {
+        if (stop.latitude && stop.longitude) {
+            const url = Platform.select({
+                ios: `maps:0,0?q=${stop.name}@${stop.latitude},${stop.longitude}`,
+                android: `geo:0,0?q=${stop.latitude},${stop.longitude}(${stop.name})`,
+            });
+            Linking.openURL(url);
+        } else {
+            Alert.alert('Navigation', `No coordinates available for ${stop.name}`);
+        }
+    };
+
+    // Calculate elapsed time
+    const getElapsedTime = () => {
+        if (!trip?.startedAt) return '--:--';
+        const start = new Date(trip.startedAt);
+        const now = new Date();
+        const diff = Math.floor((now - start) / 60000); // minutes
+        if (diff < 60) return `${diff}m`;
+        return `${Math.floor(diff / 60)}h ${diff % 60}m`;
     };
 
     if (isLoading) {
         return (
             <SafeAreaView style={styles.container}>
                 <View style={styles.centerContent}>
-                    <Text>Loading trip details...</Text>
+                    <ActivityIndicator size="large" color="#10B981" />
+                    <Text style={styles.loadingText}>Loading trip details...</Text>
+                </View>
+            </SafeAreaView>
+        );
+    }
+
+    if (!trip) {
+        return (
+            <SafeAreaView style={styles.container}>
+                <View style={styles.centerContent}>
+                    <AlertTriangle size={48} color="#EF4444" />
+                    <Text style={styles.errorTitle}>Trip Not Found</Text>
+                    <Text style={styles.errorText}>Unable to load trip details</Text>
+                    <HapticTouchable onPress={() => router.back()} style={styles.backLink}>
+                        <Text style={styles.backLinkText}>Go Back</Text>
+                    </HapticTouchable>
                 </View>
             </SafeAreaView>
         );
     }
 
     return (
-        <SafeAreaView style={styles.container} edges={['top']}>
-            {/* StatusBar removed - using global */}
-
-            {/* Header */}
-            <View style={styles.header}>
-                <HapticTouchable onPress={() => router.back()} style={styles.backButton}>
-                    <ChevronLeft size={24} color="#111" />
-                </HapticTouchable>
-                <View>
-                    <Text style={styles.headerTitle}>{trip?.route?.name || 'Active Trip'}</Text>
-                    <Text style={styles.headerSubtitle}>
-                        {trip?.vehicle?.licensePlate} • {trip?.tripType}
-                    </Text>
-                </View>
-                {isTracking && (
-                    <View style={styles.liveBadge}>
-                        <View style={styles.liveDot} />
-                        <Text style={styles.liveText}>LIVE</Text>
+        <View style={styles.container}>
+            {/* Gradient Header */}
+            <LinearGradient colors={['#10B981', '#059669']} style={styles.header}>
+                <SafeAreaView edges={['top']}>
+                    <View style={styles.headerContent}>
+                        <HapticTouchable onPress={() => router.back()} style={styles.backButton}>
+                            <ChevronLeft size={24} color="#fff" />
+                        </HapticTouchable>
+                        <View style={styles.headerCenter}>
+                            <Text style={styles.headerTitle}>{trip?.route?.name || 'Active Trip'}</Text>
+                            <View style={styles.headerMeta}>
+                                <Text style={styles.headerSubtitle}>{vehicle?.licensePlate}</Text>
+                                <View style={styles.tripTypeBadge}>
+                                    <Text style={styles.tripTypeText}>{trip?.tripType}</Text>
+                                </View>
+                            </View>
+                        </View>
+                        {isTracking && (
+                            <Animated.View entering={FadeIn.duration(400)} style={styles.liveBadge}>
+                                <View style={styles.livePulse} />
+                                <Text style={styles.liveText}>LIVE</Text>
+                            </Animated.View>
+                        )}
                     </View>
-                )}
-            </View>
+
+                    {/* Stats Row */}
+                    <Animated.View entering={FadeInUp.delay(100).duration(500)} style={styles.statsRow}>
+                        <View style={styles.statBox}>
+                            <Users size={18} color="#fff" />
+                            <Text style={styles.statValue}>{trip?._count?.attendanceRecords || 0}</Text>
+                            <Text style={styles.statLabel}>Students</Text>
+                        </View>
+                        <View style={styles.statDivider} />
+                        <View style={styles.statBox}>
+                            <MapPin size={18} color="#fff" />
+                            <Text style={styles.statValue}>{stops.length}</Text>
+                            <Text style={styles.statLabel}>Stops</Text>
+                        </View>
+                        <View style={styles.statDivider} />
+                        <View style={styles.statBox}>
+                            <Clock size={18} color="#fff" />
+                            <Text style={styles.statValue}>{getElapsedTime()}</Text>
+                            <Text style={styles.statLabel}>Elapsed</Text>
+                        </View>
+                    </Animated.View>
+                </SafeAreaView>
+            </LinearGradient>
 
             <ScrollView
                 style={styles.scrollView}
                 contentContainerStyle={styles.content}
                 showsVerticalScrollIndicator={false}
+                refreshControl={
+                    <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#10B981" />
+                }
             >
-                {/* Trip Stats */}
-                <Animated.View entering={FadeInDown.duration(600)} style={styles.statsCard}>
-                    <View style={styles.statItem}>
-                        <View style={[styles.statIcon, { backgroundColor: '#DBEAFE' }]}>
-                            <Users size={20} color="#2563EB" />
-                        </View>
-                        <Text style={styles.statValue}>{trip?._count?.attendanceRecords || 0}</Text>
-                        <Text style={styles.statLabel}>Students</Text>
-                    </View>
-                    <View style={styles.statDivider} />
-                    <View style={styles.statItem}>
-                        <View style={[styles.statIcon, { backgroundColor: '#DCFCE7' }]}>
-                            <MapPin size={20} color="#16A34A" />
-                        </View>
-                        <Text style={styles.statValue}>{stops.length}</Text>
-                        <Text style={styles.statLabel}>Stops</Text>
-                    </View>
-                    <View style={styles.statDivider} />
-                    <View style={styles.statItem}>
-                        <View style={[styles.statIcon, { backgroundColor: '#FEF3C7' }]}>
-                            <Clock size={20} color="#D97706" />
-                        </View>
-                        <Text style={styles.statValue}>
-                            {trip?.startedAt ? new Date(trip.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--:--'}
-                        </Text>
-                        <Text style={styles.statLabel}>Started</Text>
-                    </View>
-                </Animated.View>
-
-                {/* Status Banner */}
-                {trip?.conductor && (
-                    <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.conductorBanner}>
-                        <Users size={18} color="#475569" />
-                        <Text style={styles.conductorText}>Conductor: <Text style={{ fontWeight: '600' }}>{trip.conductor.name}</Text></Text>
-                    </Animated.View>
-                )}
-
-                {/* Current Action Button */}
-                <Animated.View entering={FadeInDown.delay(200).duration(600)} style={styles.actionSection}>
+                {/* End Trip Button */}
+                <Animated.View entering={FadeInDown.delay(200).duration(600)}>
                     <HapticTouchable
-                        style={[styles.actionButton, { backgroundColor: '#EF4444' }]}
+                        style={styles.endTripButton}
                         onPress={handleCompleteTrip}
                         disabled={completeTripMutation.isPending}
                     >
-                        {completeTripMutation.isPending ? (
-                            <Text style={styles.actionButtonText}>Ending Trip...</Text>
-                        ) : (
-                            <>
-                                <Square size={20} color="#fff" fill="currentColor" />
-                                <Text style={styles.actionButtonText}>End Trip</Text>
-                            </>
-                        )}
+                        <LinearGradient colors={['#EF4444', '#DC2626']} style={styles.endTripGradient}>
+                            {completeTripMutation.isPending ? (
+                                <ActivityIndicator size="small" color="#fff" />
+                            ) : (
+                                <Square size={22} color="#fff" />
+                            )}
+                            <Text style={styles.endTripText}>
+                                {completeTripMutation.isPending ? 'Ending Trip...' : 'End Trip'}
+                            </Text>
+                        </LinearGradient>
                     </HapticTouchable>
+                </Animated.View>
+
+                {/* Driver & Conductor Cards */}
+                {(driver || conductor) && (
+                    <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.crewSection}>
+                        <Text style={styles.sectionTitle}>Crew</Text>
+                        <View style={styles.crewCards}>
+                            {driver && (
+                                <View style={styles.crewCard}>
+                                    <View style={[styles.crewAvatar, { backgroundColor: '#DBEAFE' }]}>
+                                        <Text style={[styles.crewInitials, { color: '#2563EB' }]}>{driver.name?.charAt(0)}</Text>
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.crewName}>{driver.name}</Text>
+                                        <Text style={styles.crewRole}>Driver {driver.userId === currentUser?.id ? '(You)' : ''}</Text>
+                                    </View>
+                                    {/* Only show call button if not the current user */}
+                                    {driver.contactNumber && driver.userId !== currentUser?.id && (
+                                        <HapticTouchable onPress={() => handleCall(driver.contactNumber)} style={styles.callBtn}>
+                                            <Phone size={18} color="#fff" />
+                                        </HapticTouchable>
+                                    )}
+                                </View>
+                            )}
+                            {conductor && (
+                                <View style={styles.crewCard}>
+                                    <View style={[styles.crewAvatar, { backgroundColor: '#F3E8FF' }]}>
+                                        <Text style={[styles.crewInitials, { color: '#9333EA' }]}>{conductor.name?.charAt(0)}</Text>
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.crewName}>{conductor.name}</Text>
+                                        <Text style={styles.crewRole}>Conductor {conductor.userId === currentUser?.id ? '(You)' : ''}</Text>
+                                    </View>
+                                    {/* Only show call button if not the current user */}
+                                    {conductor.contactNumber && conductor.userId !== currentUser?.id && (
+                                        <HapticTouchable onPress={() => handleCall(conductor.contactNumber)} style={styles.callBtn}>
+                                            <Phone size={18} color="#fff" />
+                                        </HapticTouchable>
+                                    )}
+                                </View>
+                            )}
+                        </View>
+                    </Animated.View>
+                )}
+
+                {/* Vehicle Info */}
+                <Animated.View entering={FadeInDown.delay(350).duration(600)} style={styles.vehicleCard}>
+                    <View style={styles.vehicleHeader}>
+                        <Bus size={20} color="#10B981" />
+                        <Text style={styles.vehicleTitle}>Vehicle</Text>
+                    </View>
+                    <View style={styles.vehicleInfo}>
+                        <View style={styles.vehicleInfoItem}>
+                            <Text style={styles.vehicleLabel}>License</Text>
+                            <Text style={styles.vehicleValue}>{vehicle?.licensePlate || 'N/A'}</Text>
+                        </View>
+                        <View style={styles.vehicleInfoItem}>
+                            <Text style={styles.vehicleLabel}>Model</Text>
+                            <Text style={styles.vehicleValue}>{vehicle?.model || 'N/A'}</Text>
+                        </View>
+                        <View style={styles.vehicleInfoItem}>
+                            <Text style={styles.vehicleLabel}>Capacity</Text>
+                            <Text style={styles.vehicleValue}>{vehicle?.capacity || 0} seats</Text>
+                        </View>
+                    </View>
                 </Animated.View>
 
                 {/* Route Timeline */}
                 <View style={styles.timelineSection}>
                     <Text style={styles.sectionTitle}>Route Timeline</Text>
-                    <View style={styles.timeline}>
-                        {stops.map((stop, index) => (
-                            <Animated.View
-                                key={stop.id}
-                                entering={FadeInDown.delay(300 + (index * 50)).duration(500)}
-                                style={styles.timelineItem}
-                            >
-                                <View style={styles.timelineLeft}>
-                                    <View style={[styles.timelineLine, index === stops.length - 1 && { height: 0 }]} />
-                                    <View style={[
-                                        styles.timelineDot,
-                                        index === 0 && styles.startDot,
-                                        index === stops.length - 1 && styles.endDot
-                                    ]}>
-                                        <Text style={styles.orderIndex}>{stop.orderIndex}</Text>
-                                    </View>
-                                </View>
-                                <View style={styles.timelineContent}>
-                                    <View style={styles.stopCard}>
-                                        <View style={{ flex: 1 }}>
-                                            <Text style={styles.stopName}>{stop.name}</Text>
-                                            <Text style={styles.stopTime}>
-                                                {trip?.tripType === 'PICKUP' ? `Pickup: ${stop.pickupTime}` : `Drop: ${stop.dropTime}`}
-                                            </Text>
+                    {stops.length === 0 ? (
+                        <View style={styles.emptyStops}>
+                            <MapPin size={32} color="#CBD5E1" />
+                            <Text style={styles.emptyStopsText}>No stops assigned to this route</Text>
+                        </View>
+                    ) : (
+                        <View style={styles.timeline}>
+                            {stops.map((stop, index) => (
+                                <Animated.View
+                                    key={stop.id}
+                                    entering={FadeInDown.delay(400 + (index * 50)).duration(500)}
+                                    style={styles.timelineItem}
+                                >
+                                    <View style={styles.timelineLeft}>
+                                        {index < stops.length - 1 && <View style={styles.timelineLine} />}
+                                        <View style={[
+                                            styles.timelineDot,
+                                            index === 0 && styles.startDot,
+                                            index === stops.length - 1 && styles.endDot
+                                        ]}>
+                                            <Text style={styles.dotNumber}>{index + 1}</Text>
                                         </View>
-                                        <HapticTouchable
-                                            style={styles.navButton}
-                                            onPress={() => Alert.alert('Navigation', 'Opening maps...')}
-                                        >
-                                            <Navigation size={16} color="#2563EB" />
-                                        </HapticTouchable>
                                     </View>
-                                </View>
-                            </Animated.View>
-                        ))}
-                    </View>
+                                    <View style={styles.timelineContent}>
+                                        <View style={styles.stopCard}>
+                                            <View style={{ flex: 1 }}>
+                                                <Text style={styles.stopName}>{stop.name}</Text>
+                                                <View style={styles.stopMeta}>
+                                                    <Clock size={12} color="#64748B" />
+                                                    <Text style={styles.stopTime}>
+                                                        {trip?.tripType === 'PICKUP' ? stop.pickupTime : stop.dropTime}
+                                                    </Text>
+                                                    {stop.students?.length > 0 && (
+                                                        <>
+                                                            <View style={styles.stopMetaDivider} />
+                                                            <Users size={12} color="#64748B" />
+                                                            <Text style={styles.stopTime}>{stop.students.length}</Text>
+                                                        </>
+                                                    )}
+                                                </View>
+                                            </View>
+                                            <HapticTouchable
+                                                style={styles.navButton}
+                                                onPress={() => handleNavigate(stop)}
+                                            >
+                                                <Navigation size={16} color="#10B981" />
+                                            </HapticTouchable>
+                                        </View>
+                                    </View>
+                                </Animated.View>
+                            ))}
+                        </View>
+                    )}
                 </View>
+
+                {/* Tips */}
+                <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.tipsCard}>
+                    <Text style={styles.tipsTitle}>💡 Trip Tips</Text>
+                    <Text style={styles.tipsText}>• Location updates automatically every 5 seconds</Text>
+                    <Text style={styles.tipsText}>• Tap navigate buttons to open maps</Text>
+                    <Text style={styles.tipsText}>• End trip when all students have been dropped</Text>
+                </Animated.View>
             </ScrollView>
-        </SafeAreaView>
+        </View>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#fff',
+        backgroundColor: '#F8FAFC',
     },
     centerContent: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
+        padding: 40,
+    },
+    loadingText: {
+        marginTop: 16,
+        color: '#64748B',
+        fontSize: 15,
+    },
+    errorTitle: {
+        marginTop: 16,
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#1E293B',
+    },
+    errorText: {
+        marginTop: 4,
+        color: '#64748B',
+    },
+    backLink: {
+        marginTop: 24,
+        paddingVertical: 12,
+        paddingHorizontal: 24,
+        backgroundColor: '#F1F5F9',
+        borderRadius: 12,
+    },
+    backLinkText: {
+        color: '#2563EB',
+        fontWeight: '600',
     },
     header: {
+        paddingBottom: 20,
+        borderBottomLeftRadius: 28,
+        borderBottomRightRadius: 28,
+    },
+    headerContent: {
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 16,
-        paddingVertical: 12,
-        borderBottomWidth: 1,
-        borderBottomColor: '#F1F5F9',
-        backgroundColor: '#fff',
+        paddingTop: Platform.OS === 'android' ? 16 : 8,
     },
     backButton: {
-        padding: 8,
-        marginRight: 8,
+        width: 40,
+        height: 40,
         borderRadius: 20,
-        backgroundColor: '#F8FAFC',
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    headerCenter: {
+        flex: 1,
+        marginLeft: 12,
     },
     headerTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#0F172A',
+        fontSize: 20,
+        fontWeight: '800',
+        color: '#fff',
+    },
+    headerMeta: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 4,
     },
     headerSubtitle: {
         fontSize: 13,
-        color: '#64748B',
+        color: 'rgba(255,255,255,0.9)',
+        fontWeight: '600',
+    },
+    tripTypeBadge: {
+        marginLeft: 8,
+        backgroundColor: 'rgba(255,255,255,0.25)',
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 6,
+    },
+    tripTypeText: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#fff',
     },
     liveBadge: {
-        marginLeft: 'auto',
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        backgroundColor: '#DCFCE7',
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: '#86EFAC',
+        backgroundColor: '#fff',
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 16,
     },
-    liveDot: {
-        width: 6,
-        height: 6,
-        borderRadius: 3,
-        backgroundColor: '#16A34A',
+    livePulse: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#EF4444',
         marginRight: 6,
     },
     liveText: {
         fontSize: 11,
-        fontWeight: '700',
-        color: '#166534',
+        fontWeight: '800',
+        color: '#EF4444',
+    },
+    statsRow: {
+        flexDirection: 'row',
+        marginHorizontal: 16,
+        marginTop: 20,
+        backgroundColor: 'rgba(255,255,255,0.15)',
+        borderRadius: 16,
+        padding: 16,
+    },
+    statBox: {
+        flex: 1,
+        alignItems: 'center',
+    },
+    statDivider: {
+        width: 1,
+        backgroundColor: 'rgba(255,255,255,0.3)',
+    },
+    statValue: {
+        fontSize: 20,
+        fontWeight: '800',
+        color: '#fff',
+        marginTop: 6,
+    },
+    statLabel: {
+        fontSize: 11,
+        color: 'rgba(255,255,255,0.8)',
+        marginTop: 2,
     },
     scrollView: {
         flex: 1,
@@ -332,152 +566,231 @@ const styles = StyleSheet.create({
         padding: 16,
         paddingBottom: 40,
     },
-    statsCard: {
-        flexDirection: 'row',
-        backgroundColor: '#fff',
+    endTripButton: {
+        marginBottom: 20,
         borderRadius: 16,
-        padding: 16,
-        marginBottom: 16,
-        borderWidth: 1,
-        borderColor: '#E2E8F0',
-        shadowColor: '#64748B',
+        overflow: 'hidden',
+        shadowColor: '#EF4444',
         shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.05,
-        shadowRadius: 12,
-        elevation: 3,
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 6,
     },
-    statItem: {
-        flex: 1,
-        alignItems: 'center',
-    },
-    statDivider: {
-        width: 1,
-        height: '80%',
-        backgroundColor: '#F1F5F9',
-        alignSelf: 'center',
-    },
-    statIcon: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
+    endTripGradient: {
+        flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        marginBottom: 8,
+        paddingVertical: 18,
+        gap: 10,
     },
-    statValue: {
+    endTripText: {
+        fontSize: 17,
+        fontWeight: '800',
+        color: '#fff',
+    },
+    crewSection: {
+        marginBottom: 20,
+    },
+    sectionTitle: {
+        fontSize: 17,
+        fontWeight: '700',
+        color: '#1E293B',
+        marginBottom: 12,
+    },
+    crewCards: {
+        gap: 10,
+    },
+    crewCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#fff',
+        padding: 14,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+    },
+    crewAvatar: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+    },
+    crewInitials: {
         fontSize: 18,
         fontWeight: '700',
-        color: '#0F172A',
     },
-    statLabel: {
+    crewName: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#1E293B',
+    },
+    crewRole: {
         fontSize: 12,
         color: '#64748B',
         marginTop: 2,
     },
-    conductorBanner: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#F8FAFC',
-        padding: 12,
-        borderRadius: 12,
-        marginBottom: 16,
-        gap: 8,
-    },
-    conductorText: {
-        fontSize: 14,
-        color: '#475569',
-    },
-    actionSection: {
-        marginBottom: 24,
-    },
-    actionButton: {
-        flexDirection: 'row',
+    callBtn: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: '#10B981',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: 16,
+    },
+    vehicleCard: {
+        backgroundColor: '#fff',
         borderRadius: 16,
+        padding: 16,
+        marginBottom: 20,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+    },
+    vehicleHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 12,
         gap: 8,
-        shadowColor: '#EF4444',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 8,
-        elevation: 4,
     },
-    actionButtonText: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: '#fff',
+    vehicleTitle: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#475569',
     },
-    sectionTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#0F172A',
-        marginBottom: 16,
+    vehicleInfo: {
+        flexDirection: 'row',
+    },
+    vehicleInfoItem: {
+        flex: 1,
+    },
+    vehicleLabel: {
+        fontSize: 11,
+        color: '#94A3B8',
+        marginBottom: 4,
+    },
+    vehicleValue: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#1E293B',
+    },
+    timelineSection: {
+        marginBottom: 20,
+    },
+    emptyStops: {
+        alignItems: 'center',
+        padding: 40,
+        backgroundColor: '#fff',
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+    },
+    emptyStopsText: {
+        marginTop: 12,
+        color: '#64748B',
     },
     timeline: {
         position: 'relative',
     },
     timelineItem: {
         flexDirection: 'row',
-        marginBottom: 0,
     },
     timelineLeft: {
-        width: 40,
+        width: 32,
         alignItems: 'center',
     },
     timelineLine: {
         position: 'absolute',
-        top: 24,
-        bottom: -24,
+        top: 28,
+        bottom: -16,
         width: 2,
         backgroundColor: '#E2E8F0',
         zIndex: -1,
     },
     timelineDot: {
-        width: 24,
-        height: 24,
-        borderRadius: 12,
+        width: 28,
+        height: 28,
+        borderRadius: 14,
         backgroundColor: '#fff',
         borderWidth: 2,
-        borderColor: '#CBD5E1',
+        borderColor: '#10B981',
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 1,
     },
-    startDot: { borderColor: '#16A34A', backgroundColor: '#DCFCE7' },
-    endDot: { borderColor: '#EF4444', backgroundColor: '#FEE2E2' },
-    orderIndex: {
-        fontSize: 10,
+    startDot: {
+        backgroundColor: '#DCFCE7',
+        borderColor: '#10B981',
+    },
+    endDot: {
+        backgroundColor: '#FEE2E2',
+        borderColor: '#EF4444',
+    },
+    dotNumber: {
+        fontSize: 11,
         fontWeight: '700',
-        color: '#64748B',
+        color: '#10B981',
     },
     timelineContent: {
         flex: 1,
-        paddingBottom: 16,
+        paddingBottom: 14,
+        paddingLeft: 10,
     },
     stopCard: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#F8FAFC',
-        padding: 12,
-        borderRadius: 12,
+        backgroundColor: '#fff',
+        padding: 14,
+        borderRadius: 14,
         borderWidth: 1,
-        borderColor: '#F1F5F9',
-        marginLeft: 8,
+        borderColor: '#E2E8F0',
     },
     stopName: {
         fontSize: 15,
         fontWeight: '600',
-        color: '#0F172A',
-        marginBottom: 2,
+        color: '#1E293B',
+    },
+    stopMeta: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 6,
+        gap: 4,
     },
     stopTime: {
-        fontSize: 13,
+        fontSize: 12,
         color: '#64748B',
     },
+    stopMetaDivider: {
+        width: 4,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: '#CBD5E1',
+        marginHorizontal: 6,
+    },
     navButton: {
-        padding: 8,
-        backgroundColor: '#DBEAFE',
-        borderRadius: 8,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: '#DCFCE7',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    tipsCard: {
+        backgroundColor: '#EFF6FF',
+        borderRadius: 16,
+        padding: 16,
+        borderWidth: 1,
+        borderColor: '#DBEAFE',
+    },
+    tipsTitle: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#1E40AF',
+        marginBottom: 10,
+    },
+    tipsText: {
+        fontSize: 13,
+        color: '#3B82F6',
+        lineHeight: 22,
     },
 });

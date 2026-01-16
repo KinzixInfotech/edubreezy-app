@@ -125,6 +125,15 @@ export default function ProfileSelectorScreen() {
         try {
             setSelectingProfile(profile.id);
 
+            // Debug: Check if profile has stored refresh token
+            const hasRefreshToken = !!profile?.sessionTokens?.refresh_token;
+            console.log('🔍 Profile selection:', {
+                name: profile.name,
+                email: profile.email,
+                hasRefreshToken,
+                refreshTokenPrefix: hasRefreshToken ? profile.sessionTokens.refresh_token.substring(0, 10) + '...' : 'none',
+            });
+
             // Update last used timestamp
             await updateLastUsed(schoolCode, profile.id);
 
@@ -133,6 +142,7 @@ export default function ProfileSelectorScreen() {
 
             if (!result.success) {
                 console.log('➡️ Session restore failed, redirecting to login');
+                console.log('   Reason: needsLogin =', result.needsLogin, 'hasRefreshToken =', hasRefreshToken);
                 router.replace({
                     pathname: '/(auth)/login',
                     params: {

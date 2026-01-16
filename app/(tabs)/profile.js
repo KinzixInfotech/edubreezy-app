@@ -427,9 +427,50 @@ export default function ProfileScreen() {
       const res = await api.get(`/auth/user?userId=${storedUserId}`);
       console.log('🔄 Profile - User data received:', res.data ? 'YES' : 'NO');
 
-      // Update SecureStore with fresh data
+      // Update SecureStore with minimal data to avoid size warning
+      // SecureStore has a 2048 byte limit, so we only store essential fields
       if (res.data) {
-        await SecureStore.setItemAsync('user', JSON.stringify(res.data));
+        const minimalUser = {
+          id: res.data.id,
+          email: res.data.email,
+          name: res.data.name,
+          profilePicture: res.data.profilePicture,
+          role: res.data.role,
+          schoolId: res.data.schoolId,
+          // Store minimal nested data
+          ...(res.data.studentData && {
+            studentData: {
+              name: res.data.studentData.name,
+              email: res.data.studentData.email,
+              admissionNo: res.data.studentData.admissionNo,
+              classId: res.data.studentData.classId,
+              sectionId: res.data.studentData.sectionId,
+            },
+          }),
+          ...(res.data.parentData && {
+            parentData: {
+              id: res.data.parentData.id,
+              name: res.data.parentData.name,
+              email: res.data.parentData.email,
+              contactNumber: res.data.parentData.contactNumber,
+            },
+          }),
+          ...(res.data.teacherData && {
+            teacherData: {
+              name: res.data.teacherData.name,
+              email: res.data.teacherData.email,
+              employeeId: res.data.teacherData.employeeId,
+            },
+          }),
+          ...(res.data.school && {
+            school: {
+              id: res.data.school.id,
+              name: res.data.school.name,
+              schoolCode: res.data.school.schoolCode,
+            },
+          }),
+        };
+        await SecureStore.setItemAsync('user', JSON.stringify(minimalUser));
         if (res.data.role?.name) {
           await SecureStore.setItemAsync('userRole', res.data.role.name);
         }
@@ -507,13 +548,29 @@ export default function ProfileScreen() {
           // Simulate delay for better UX
           setTimeout(async () => {
             try {
-              // Clear user data
+              // CRITICAL: Before soft logout, capture the LATEST refresh token
+              // Supabase rotates refresh tokens, so we need to save the current one
+              const { data: { session } } = await supabase.auth.getSession();
+              const currentSchool = await getCurrentSchool();
+
+              if (session?.refresh_token && currentSchool?.schoolCode && user?.id) {
+                console.log('💾 Saving latest refresh token before logout...');
+                // Import dynamically to avoid circular deps
+                const { updateProfileSession } = await import('../../lib/profileManager');
+                await updateProfileSession(currentSchool.schoolCode, user.id, {
+                  access_token: session.access_token,
+                  refresh_token: session.refresh_token,
+                });
+                console.log('✅ Latest refresh token saved to profile');
+              }
+
+              // Clear in-memory session data (SecureStore)
               await SecureStore.deleteItemAsync('user');
               await SecureStore.deleteItemAsync('userRole');
               await SecureStore.deleteItemAsync('token');
 
-              // Get saved school data to redirect to profile-selector
-              const currentSchool = await getCurrentSchool();
+              // DO NOT call supabase.auth.signOut() - this is a soft logout
+              // The refresh token in the saved profile remains valid
 
               if (currentSchool?.schoolCode && currentSchool?.schoolData) {
                 // Redirect to profile-selector with school data
@@ -575,7 +632,9 @@ export default function ProfileScreen() {
   // Get mapped values
   const userName = getNestedValue(user, config.fieldMappings.name);
   const userRole = ROLE_DISPLAY_NAMES[role] || getNestedValue(user, config.fieldMappings.role);
-  const schoolName = getNestedValue(user, config.fieldMappings.school);
+  const schoolName = getNestedValue(user, config.fieldMappings.school) !== 'N/A'
+    ? getNestedValue(user, config.fieldMappings.school)
+    : getNestedValue(user, 'school.name'); // Fallback to top-level school.name
   const profilePicture = getNestedValue(user, config.fieldMappings.profilePicture, 'https://via.placeholder.com/150');
 
   // Get role color for avatar

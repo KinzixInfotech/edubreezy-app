@@ -42,6 +42,7 @@ import GlowingStatusBar from '../components/GlowingStatusBar';
 import AddChildModal from '../components/AddChildModal';
 import DelegationCheckModal from '../components/DelegationCheckModal';
 import BannerCarousel from '../components/BannerCarousel';
+import { useActiveTrip } from '../../hooks/useActiveTrip';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const isSmallDevice = SCREEN_WIDTH < 375;
@@ -73,6 +74,9 @@ export default function HomeScreen() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [notificationPermission, setNotificationPermission] = useState(false);
+
+    // Active trip management
+    const { activeTrip, resumeTrip } = useActiveTrip();
 
     // Navigation guard to prevent double-clicking
     const isNavigatingRef = useRef(false);
@@ -725,6 +729,25 @@ export default function HomeScreen() {
                 return <StudentView refreshing={refreshing} onRefresh={onRefresh} header={headerComponent} navigateOnce={navigateOnce} />;
         }
     };
+
+    // persistent active trip banner
+    const activeTripBanner = activeTrip ? (
+        <Animated.View entering={FadeInUp.duration(500)} style={styles.activeTripFloatingBanner}>
+            <HapticTouchable onPress={resumeTrip} style={styles.activeTripContent}>
+                <View style={styles.activeTripIcon}>
+                    <View style={styles.pulseDot} />
+                    <Bus size={24} color="#fff" />
+                </View>
+                <View style={styles.activeTripInfo}>
+                    <Text style={styles.activeTripTitle}>Trip in Progress</Text>
+                    <Text style={styles.activeTripSubtitle}>{activeTrip.routeName || 'Tap to resume tracking'}</Text>
+                </View>
+                <View style={styles.activeTripArrow}>
+                    <ChevronRight size={20} color="#fff" />
+                </View>
+            </HapticTouchable>
+        </Animated.View>
+    ) : null;
 
     // === STUDENT VIEW ===
     const StudentView = ({ refreshing, onRefresh, banner, paddingTop, navigateOnce }) => {
@@ -2367,12 +2390,7 @@ export default function HomeScreen() {
             { icon: Users, label: 'Attendance', color: '#10B981', bgColor: '#D1FAE5', href: activeTrip ? { pathname: '/(screens)/transport/attendance-marking', params: { tripId: activeTrip.id } } : '/(screens)/transport/driver-attendance-history' },
             { icon: MapPin, label: 'My Route', color: '#8B5CF6', bgColor: '#EDE9FE', href: '/(screens)/transport/my-route' },
             { icon: Calendar, label: 'Trip History', color: '#F59E0B', bgColor: '#FEF3C7', href: '/(screens)/transport/driver-attendance-history' },
-            { icon: FileText, label: 'Reports', color: '#EF4444', bgColor: '#FEE2E2', href: '/(screens)/transport/driver-attendance-history' },
-            { icon: Settings, label: 'Profile', color: '#64748B', bgColor: '#F1F5F9', href: '/profile' },
         ];
-
-        // Note: Loading is handled at HomeScreen level now
-
         // Get today's scheduled trips for this driver
         const todaysScheduledTrips = trips.filter(t => t.status === 'SCHEDULED');
 
@@ -2711,8 +2729,6 @@ export default function HomeScreen() {
             { icon: Users, label: 'Attendance', color: '#10B981', bgColor: '#D1FAE5', href: activeTrip ? { pathname: '/(screens)/transport/attendance-marking', params: { tripId: activeTrip.id } } : '/(screens)/transport/driver-attendance-history' },
             { icon: MapPin, label: 'My Route', color: '#8B5CF6', bgColor: '#EDE9FE', href: '/(screens)/transport/my-route' },
             { icon: Calendar, label: 'History', color: '#F59E0B', bgColor: '#FEF3C7', href: '/(screens)/transport/driver-attendance-history' },
-            { icon: FileText, label: 'Reports', color: '#EF4444', bgColor: '#FEE2E2', href: '/(screens)/transport/driver-attendance-history' },
-            { icon: Settings, label: 'Profile', color: '#64748B', bgColor: '#F1F5F9', href: '/profile' },
         ];
 
         // Note: Loading is handled at HomeScreen level now
@@ -3409,6 +3425,7 @@ export default function HomeScreen() {
 
             {/* Today's Events (if any) */}
             {renderContent()}
+            {activeTripBanner}
         </View>
     );
 }
@@ -3416,6 +3433,62 @@ export default function HomeScreen() {
 
 // === STYLES ===
 const styles = StyleSheet.create({
+    activeTripFloatingBanner: {
+        position: 'absolute',
+        bottom: 90, // Above bottom tabs
+        left: 16,
+        right: 16,
+        backgroundColor: '#10B981',
+        borderRadius: 16,
+        shadowColor: '#10B981',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 6,
+        zIndex: 100,
+    },
+    activeTripContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+    },
+    activeTripIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+        position: 'relative',
+    },
+    pulseDot: {
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        backgroundColor: '#EF4444',
+        borderWidth: 1.5,
+        borderColor: '#10B981',
+    },
+    activeTripInfo: {
+        flex: 1,
+    },
+    activeTripTitle: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: 'bold',
+    },
+    activeTripSubtitle: {
+        color: 'rgba(255,255,255,0.9)',
+        fontSize: 12,
+        marginTop: 2,
+    },
+    activeTripArrow: {
+        marginLeft: 8,
+    },
     container: { flex: 1, backgroundColor: '#fff' },
     schoolBadge: {
         marginHorizontal: 16,

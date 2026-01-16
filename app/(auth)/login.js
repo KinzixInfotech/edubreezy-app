@@ -364,12 +364,47 @@ export default function LoginScreen() {
                 setErrors({ general: 'User not found in system' });
                 return;
             }
-
-            await SecureStore.setItemAsync('user', JSON.stringify(user));
-            await SecureStore.setItemAsync('userRole', JSON.stringify(user?.role?.name));
+            // Store minimal user data in SecureStore (2048 byte limit)
+            const minimalUser = {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                profilePicture: user.profilePicture,
+                role: user.role,
+                schoolId: user.schoolId,
+                ...(user.studentData && {
+                    studentData: {
+                        name: user.studentData.name,
+                        email: user.studentData.email,
+                        admissionNo: user.studentData.admissionNo,
+                    },
+                }),
+                ...(user.parentData && {
+                    parentData: {
+                        id: user.parentData.id,
+                        name: user.parentData.name,
+                        email: user.parentData.email,
+                    },
+                }),
+                ...(user.teacherData && {
+                    teacherData: {
+                        name: user.teacherData.name,
+                        email: user.teacherData.email,
+                    },
+                }),
+                ...(user.school && {
+                    school: {
+                        id: user.school.id,
+                        name: user.school.name,
+                        schoolCode: user.school.schoolCode,
+                    },
+                }),
+            };
+            await SecureStore.setItemAsync('user', JSON.stringify(minimalUser));
+            await SecureStore.setItemAsync('userRole', user?.role?.name || '');
             await SecureStore.setItemAsync('token', data.session.access_token);
 
-            // Save profile for this school code WITH session tokens
+            // Save profile for this school code WITH session tokens (full user for profile manager)
             const schoolCode = schoolConfig?.schoolcode || schoolConfig?.schoolCode;
             console.log('Saving profile for school code:', schoolCode);
 
@@ -614,8 +649,8 @@ export default function LoginScreen() {
                                 style={styles.branding}
                             >
                                 <View style={styles.brandingContent}>
-                                    <Ionicons name="school" size={18} color="#9CA3AF" />
-                                    <Text style={styles.brandingText}>EduBreezy</Text>
+                                    {/* <Ionicons name="school" size={18} color="#9CA3AF" /> */}
+                                    <Text style={styles.brandingText}>edubreezy</Text>
                                 </View>
                                 <Text style={styles.brandingSubtext}>
                                     Modern School Management

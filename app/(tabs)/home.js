@@ -21,7 +21,8 @@ import {
     Clock,
     CalendarDays,
     Umbrella,
-    BellOff
+    BellOff,
+    Play
 } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
@@ -730,8 +731,9 @@ export default function HomeScreen() {
         }
     };
 
-    // persistent active trip banner
-    const activeTripBanner = activeTrip ? (
+    // persistent active trip banner - only show for non-driver roles (drivers have their own indicator)
+    const isDriverRole = user_acc?.role?.name === 'DRIVER' || user_acc?.role?.name === 'CONDUCTOR';
+    const activeTripBanner = activeTrip && !isDriverRole ? (
         <Animated.View entering={FadeInUp.duration(500)} style={styles.activeTripFloatingBanner}>
             <HapticTouchable onPress={resumeTrip} style={styles.activeTripContent}>
                 <View style={styles.activeTripIcon}>
@@ -2483,37 +2485,42 @@ export default function HomeScreen() {
                     </View>
                 </Animated.View>
 
-                {/* Start Trip Widget - Show when there are scheduled trips but no active trip */}
-                {!activeTrip && todaysScheduledTrips.length > 0 && (
-                    <Animated.View entering={FadeInDown.delay(150).duration(600)} style={styles.section}>
-                        <View style={{ backgroundColor: '#FFF7ED', borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#FDBA74' }}>
-                            {/* Header with Vehicle Info */}
-                            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
-                                <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: '#FFEDD5', alignItems: 'center', justifyContent: 'center' }}>
-                                    <Clock size={24} color="#EA580C" />
-                                </View>
-                                <View style={{ marginLeft: 14, flex: 1 }}>
-                                    <Text style={{ fontSize: 18, fontWeight: '700', color: '#9A3412' }}>Ready to Start</Text>
-                                    <Text style={{ fontSize: 13, color: '#C2410C' }}>{todaysScheduledTrips.length} trip{todaysScheduledTrips.length > 1 ? 's' : ''} scheduled</Text>
-                                </View>
-                            </View>
+                {/* Start Trip Widget - Enhanced with PICKUP before DROP logic */}
+                {!activeTrip && todaysScheduledTrips.length > 0 && (() => {
+                    // Check if PICKUP trip is completed for today
+                    const todaysPickupCompleted = trips.some(t => {
+                        const tripDate = new Date(t.scheduledDate || t.createdAt).toISOString().split('T')[0];
+                        return tripDate === today && t.tripType === 'PICKUP' && t.status === 'COMPLETED';
+                    });
 
-                            {/* Vehicle Info Banner */}
-                            {vehicle && (
-                                <View style={{ backgroundColor: '#FFEDD5', borderRadius: 12, padding: 12, marginBottom: 16, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#FDBA74' }}>
-                                    <Bus size={20} color="#EA580C" />
-                                    <View style={{ marginLeft: 10, flex: 1 }}>
-                                        <Text style={{ fontSize: 14, fontWeight: '700', color: '#9A3412' }}>{vehicle.licensePlate}</Text>
-                                        <Text style={{ fontSize: 12, color: '#C2410C' }}>{vehicle.model} • {vehicle.capacity} seats</Text>
-                                    </View>
-                                </View>
-                            )}
+                    // Sort trips: PICKUP first, then DROP
+                    const sortedTrips = [...todaysScheduledTrips].sort((a, b) => {
+                        if (a.tripType === 'PICKUP' && b.tripType !== 'PICKUP') return -1;
+                        if (a.tripType !== 'PICKUP' && b.tripType === 'PICKUP') return 1;
+                        return 0;
+                    });
 
-                            {/* Trip Cards */}
-                            {todaysScheduledTrips.map((trip, idx) => (
-                                <HapticTouchable
-                                    key={trip.id}
-                                    onPress={async () => {
+                    const handleStartTrip = async (trip) => {
+                        // Check if trying to start DROP without completing PICKUP
+                        if (trip.tripType === 'DROP' && !todaysPickupCompleted) {
+                            Alert.alert(
+                                '🔒 Complete PICKUP First',
+                                'You need to complete the PICKUP trip before starting the DROP trip.',
+                                [{ text: 'OK', style: 'default' }]
+                            );
+                            return;
+                        }
+
+                        // Confirmation dialog
+                        Alert.alert(
+                            `Start ${trip.tripType} Trip?`,
+                            `You are about to start the ${trip.tripType.toLowerCase()} trip for ${trip.route?.name}.\n\nThis will begin live tracking and notify parents.`,
+                            [
+                                { text: 'Cancel', style: 'cancel' },
+                                {
+                                    text: 'Start Trip',
+                                    style: 'default',
+                                    onPress: async () => {
                                         try {
                                             const res = await api.post(`/schools/transport/trips/${trip.id}/start`, { driverId: transportStaffId });
                                             if (res.data.success) {
@@ -2522,32 +2529,133 @@ export default function HomeScreen() {
                                             }
                                         } catch (err) {
                                             console.error('Failed to start trip:', err);
+                                            Alert.alert('Error', err.response?.data?.error || 'Failed to start trip. Please try again.');
                                         }
-                                    }}
-                                    style={{
-                                        flexDirection: 'row',
-                                        alignItems: 'center',
-                                        backgroundColor: '#fff',
-                                        padding: 14,
-                                        borderRadius: 14,
-                                        marginTop: idx > 0 ? 10 : 0,
-                                    }}
-                                >
-                                    <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: trip.tripType === 'PICKUP' ? '#DBEAFE' : '#FCE7F3', alignItems: 'center', justifyContent: 'center' }}>
-                                        <Text style={{ fontSize: 20 }}>{trip.tripType === 'PICKUP' ? '🌅' : '🌆'}</Text>
+                                    }
+                                }
+                            ]
+                        );
+                    };
+
+                    return (
+                        <Animated.View entering={FadeInDown.delay(150).duration(600)} style={styles.section}>
+                            <View style={{ backgroundColor: '#FFF7ED', borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#FDBA74' }}>
+                                {/* Header */}
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                                    <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: '#FFEDD5', alignItems: 'center', justifyContent: 'center' }}>
+                                        <Clock size={24} color="#EA580C" />
                                     </View>
-                                    <View style={{ flex: 1, marginLeft: 12 }}>
-                                        <Text style={{ fontSize: 16, fontWeight: '700', color: '#1E293B' }}>{trip.route?.name || 'Route'}</Text>
-                                        <Text style={{ fontSize: 13, color: '#64748B', marginTop: 2 }}>{trip.tripType} Trip</Text>
+                                    <View style={{ marginLeft: 14, flex: 1 }}>
+                                        <Text style={{ fontSize: 18, fontWeight: '700', color: '#9A3412' }}>Ready to Start</Text>
+                                        <Text style={{ fontSize: 13, color: '#C2410C' }}>{todaysScheduledTrips.length} trip{todaysScheduledTrips.length > 1 ? 's' : ''} scheduled</Text>
                                     </View>
-                                    <LinearGradient colors={['#10B981', '#059669']} style={{ paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10 }}>
-                                        <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>Start</Text>
-                                    </LinearGradient>
-                                </HapticTouchable>
-                            ))}
-                        </View>
-                    </Animated.View>
-                )}
+                                </View>
+
+                                {/* Vehicle Info Banner */}
+                                {vehicle && (
+                                    <View style={{ backgroundColor: '#FFEDD5', borderRadius: 12, padding: 12, marginBottom: 16, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#FDBA74' }}>
+                                        <Bus size={20} color="#EA580C" />
+                                        <View style={{ marginLeft: 10, flex: 1 }}>
+                                            <Text style={{ fontSize: 14, fontWeight: '700', color: '#9A3412' }}>{vehicle.licensePlate}</Text>
+                                            <Text style={{ fontSize: 12, color: '#C2410C' }}>{vehicle.model} • {vehicle.capacity} seats</Text>
+                                        </View>
+                                    </View>
+                                )}
+
+                                {/* Trip Cards with Premium Start Button */}
+                                {sortedTrips.map((trip, idx) => {
+                                    const isDropLocked = trip.tripType === 'DROP' && !todaysPickupCompleted;
+
+                                    return (
+                                        <HapticTouchable
+                                            key={trip.id}
+                                            onPress={() => handleStartTrip(trip)}
+                                            style={{
+                                                backgroundColor: isDropLocked ? '#F8FAFC' : '#fff',
+                                                padding: 16,
+                                                borderRadius: 16,
+                                                marginTop: idx > 0 ? 12 : 0,
+                                                opacity: isDropLocked ? 0.7 : 1,
+                                                borderWidth: 1,
+                                                borderColor: isDropLocked ? '#E2E8F0' : '#10B981',
+                                                shadowColor: isDropLocked ? '#000' : '#10B981',
+                                                shadowOffset: { width: 0, height: 4 },
+                                                shadowOpacity: isDropLocked ? 0.05 : 0.2,
+                                                shadowRadius: 8,
+                                                elevation: isDropLocked ? 1 : 4,
+                                            }}
+                                        >
+                                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                                <View style={{
+                                                    width: 52,
+                                                    height: 52,
+                                                    borderRadius: 26,
+                                                    backgroundColor: trip.tripType === 'PICKUP' ? '#DBEAFE' : '#FCE7F3',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center'
+                                                }}>
+                                                    <Text style={{ fontSize: 24 }}>{trip.tripType === 'PICKUP' ? '🌅' : '🌆'}</Text>
+                                                </View>
+                                                <View style={{ flex: 1, marginLeft: 14 }}>
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                                        <Text style={{ fontSize: 17, fontWeight: '700', color: isDropLocked ? '#94A3B8' : '#1E293B' }}>
+                                                            {trip.route?.name || 'Route'}
+                                                        </Text>
+                                                        {isDropLocked && (
+                                                            <View style={{ marginLeft: 8, backgroundColor: '#FEE2E2', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}>
+                                                                <Text style={{ fontSize: 10, color: '#DC2626', fontWeight: '700' }}>🔒 Locked</Text>
+                                                            </View>
+                                                        )}
+                                                    </View>
+                                                    <Text style={{ fontSize: 13, color: '#64748B', marginTop: 3 }}>
+                                                        {trip.tripType} Trip • {trip.route?.busStops?.length || 0} stops
+                                                    </Text>
+                                                </View>
+                                            </View>
+
+                                            {/* Start Button */}
+                                            <View style={{
+                                                marginTop: 14,
+                                                backgroundColor: isDropLocked ? '#94A3B8' : '#10B981',
+                                                paddingVertical: 14,
+                                                borderRadius: 12,
+                                                flexDirection: 'row',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                gap: 8,
+                                            }}>
+                                                {isDropLocked ? (
+                                                    <Text style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>🔒 Complete PICKUP First</Text>
+                                                ) : (
+                                                    <>
+                                                        <View style={{
+                                                            width: 28,
+                                                            height: 28,
+                                                            borderRadius: 14,
+                                                            backgroundColor: 'rgba(255,255,255,0.25)',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'center'
+                                                        }}>
+                                                            <Play size={14} color="#fff" fill="#fff" />
+                                                        </View>
+                                                        <Text style={{ fontSize: 16, fontWeight: '800', color: '#fff' }}>Start {trip.tripType} Trip</Text>
+                                                    </>
+                                                )}
+                                            </View>
+                                        </HapticTouchable>
+                                    );
+                                })}
+
+                                {/* Helpful tip */}
+                                {sortedTrips.some(t => t.tripType === 'DROP') && !todaysPickupCompleted && (
+                                    <View style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center', backgroundColor: '#DBEAFE', padding: 10, borderRadius: 10 }}>
+                                        <Text style={{ fontSize: 12, color: '#1E40AF', flex: 1 }}>💡 Complete the PICKUP trip first to unlock DROP</Text>
+                                    </View>
+                                )}
+                            </View>
+                        </Animated.View>
+                    );
+                })()}
 
                 {activeTrip && (
                     <Animated.View entering={FadeInDown.delay(75).duration(600)} style={styles.section}>

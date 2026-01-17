@@ -16,7 +16,8 @@ import {
     TrendingUp, Timer, Zap, FileText, Send, X as CloseIcon, AlertTriangle,
     Info, ChevronRight, Umbrella, Bell, LogOut
 } from 'lucide-react-native';
-import api from '../../../lib/api';
+import api, { API_BASE_URL } from '../../../lib/api';
+import { getSchoolLocation, isNearSchool, getDistanceMeters } from '../../../lib/geofence-service';
 import { StatusBar } from 'expo-status-bar';
 
 // Configure notification handler
@@ -65,6 +66,9 @@ export default function SelfAttendance() {
     const [location, setLocation] = useState(null);
     const [locationError, setLocationError] = useState(null);
     const [deviceInfo, setDeviceInfo] = useState(null);
+    const [schoolLocation, setSchoolLocation] = useState(null);
+    const [distanceToSchool, setDistanceToSchool] = useState(null);
+    const [isWithinRadius, setIsWithinRadius] = useState(false);
     const [liveHours, setLiveHours] = useState(0);
     const pulseAnim = useSharedValue(1);
     const intervalRef = useRef(null);
@@ -112,7 +116,21 @@ export default function SelfAttendance() {
     const loadUser = async () => {
         try {
             const stored = await SecureStore.getItemAsync('user');
-            if (stored) setUser(JSON.parse(stored));
+            if (stored) {
+                const userData = JSON.parse(stored);
+                setUser(userData);
+
+                // Fetch school location settings
+                if (userData.schoolId) {
+                    try {
+                        const sLoc = await getSchoolLocation(userData.schoolId, API_BASE_URL);
+                        setSchoolLocation(sLoc);
+                        console.log('School location loaded for attendance:', sLoc);
+                    } catch (e) {
+                        console.error('Failed to load school location:', e);
+                    }
+                }
+            }
         } catch (error) {
             Alert.alert('Error', 'Failed to load user data');
         }
@@ -144,6 +162,26 @@ export default function SelfAttendance() {
                     longitude: loc.coords.longitude,
                     accuracy: loc.coords.accuracy
                 });
+
+                // Calculate distance if school location is available
+                if (schoolLocation?.latitude && schoolLocation?.longitude) {
+                    const dist = getDistanceMeters(
+                        loc.coords.latitude,
+                        loc.coords.longitude,
+                        schoolLocation.latitude,
+                        schoolLocation.longitude
+                    );
+                    setDistanceToSchool(Math.round(dist));
+
+                    const radius = schoolLocation.attendanceRadius || 500;
+                    setIsWithinRadius(dist <= radius);
+                } else {
+                    // If no school location set, assume generic success or handle as "no restriction"
+                    // But requirement implies strict check. sticking to strict if location exists.
+                    // If no location configured, maybe allow? Let's assume strict if config exists.
+                    setIsWithinRadius(true); // Allow if no school location configured? Or block?
+                    // For now defaulting to true if no config to avoid breaking existing users.
+                }
             } catch (err) {
                 setLocationError(err.message || 'Failed to get location');
             }
@@ -434,6 +472,13 @@ export default function SelfAttendance() {
     const checkInMutation = useMutation({
         mutationFn: async () => {
             if (!location) throw new Error('Location not available');
+
+            // Proximity Check
+            if (schoolLocation && isWithinRadius === false) {
+                const radius = schoolLocation.attendanceRadius || 500;
+                throw new Error(`You are too far from school. Please ensure you are within ${radius}m.`);
+            }
+
             return await api.post(`/schools/${schoolId}/attendance/mark`, {
                 userId,
                 type: 'CHECK_IN',
@@ -472,6 +517,13 @@ export default function SelfAttendance() {
     const checkOutMutation = useMutation({
         mutationFn: async () => {
             if (!location) throw new Error('Location not available');
+
+            // Proximity Check
+            if (schoolLocation && isWithinRadius === false) {
+                const radius = schoolLocation.attendanceRadius || 500;
+                throw new Error(`You are too far from school. Please ensure you are within ${radius}m.`);
+            }
+
             return await api.post(`/schools/${schoolId}/attendance/mark`, {
                 userId,
                 type: 'CHECK_OUT',
@@ -684,9 +736,18 @@ export default function SelfAttendance() {
                         </Text>
                     </View>
                     {config?.enableGeoFencing && location && (
-                        <View style={styles.locationBadge}>
-                            <MapPin size={16} color="#10B981" />
-                            <Text style={styles.locationText}>GPS Ready</Text>
+                        <View style={[styles.locationBadge, !isWithinRadius && styles.locationBadgeError]}>
+                            {isWithinRadius ? (
+                                <MapPin size={16} color="#10B981" />
+                            ) : (
+                                <AlertCircle size={16} color="#EF4444" />
+                            )}
+                            <Text style={[styles.locationText, !isWithinRadius && styles.locationTextError]}>
+                                {isWithinRadius
+                                    ? `GPS Ready (${distanceToSchool ? formatDistance(distanceToSchool) : ''})`
+                                    : `Too Far (${distanceToSchool ? formatDistance(distanceToSchool) : 'Checking...'})`
+                                }
+                            </Text>
                         </View>
                     )}
                 </View>
@@ -771,6 +832,15 @@ export default function SelfAttendance() {
                                 <View style={[styles.statusHintBox, { backgroundColor: '#FEF2F2' }]}>
                                     <AlertCircle size={16} color="#EF4444" />
                                     <Text style={[styles.statusHintText, { color: '#991B1B' }]}>Enable location to check in</Text>
+                                </View>
+                            )}
+                            {location && !isWithinRadius && schoolLocation && (
+                                <View style={[styles.statusHintBox, { backgroundColor: '#FEF2F2' }]}>
+                                    <AlertTriangle size={16} color="#DC2626" />
+                                    <Text style={[styles.statusHintText, { color: '#991B1B' }]}>
+                                        You are too far from school ({distanceToSchool ? formatDistance(distanceToSchool) : 'calculating...'}).
+                                        Radius: {schoolLocation.attendanceRadius || 500}m
+                                    </Text>
                                 </View>
                             )}
                             {!windows?.checkIn?.isOpen && !canCheckIn && (
@@ -1201,6 +1271,8 @@ const styles = StyleSheet.create({
     headerDate: { fontSize: 15, color: '#666' },
     locationBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#DCFCE7', borderRadius: 12 },
     locationText: { fontSize: 12, fontWeight: '600', color: '#10B981' },
+    locationBadgeError: { backgroundColor: '#FEE2E2' },
+    locationTextError: { color: '#EF4444' },
 
     errorCard: { flexDirection: 'row', alignItems: 'center', gap: 8, margin: 20, padding: 12, backgroundColor: '#FEE2E2', borderRadius: 12 },
     errorCardText: { flex: 1, fontSize: 14, color: '#991B1B' },

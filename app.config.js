@@ -25,7 +25,10 @@ export default {
                     "fetch",
                     "location",
                     "remote-notification"
-                ]
+                ],
+                NSLocationAlwaysAndWhenInUseUsageDescription: "EduBreezy needs access to your location to track bus routes and provide real-time updates to parents.",
+                NSLocationWhenInUseUsageDescription: "EduBreezy needs access to your location to show your position on the map.",
+                NSLocationAlwaysUsageDescription: "EduBreezy needs background location access to track bus routes even when the app is closed."
             },
             bundleIdentifier: "com.kinzix.edubreezy",
             googleServicesFile: "./GoogleService-Info.plist"
@@ -37,7 +40,7 @@ export default {
                 backgroundColor: "#ffffff"
             },
             notification: {
-                icon: "./assets/notification-icon.png", // ✅ FIXED
+                icon: "./assets/notification-icon.png",
                 color: "#000000"
             },
             config: {
@@ -54,8 +57,9 @@ export default {
                 "android.permission.ACCESS_FINE_LOCATION",
                 "android.permission.ACCESS_BACKGROUND_LOCATION",
                 "android.permission.FOREGROUND_SERVICE",
-                "android.permission.FOREGROUND_SERVICE_LOCATION"
-            ],
+                "android.permission.FOREGROUND_SERVICE_LOCATION",
+                "android.permission.VIBRATE"
+            ]
         },
         web: {
             favicon: "./assets/favicon.png"
@@ -65,11 +69,19 @@ export default {
             "@react-native-firebase/messaging",
             "expo-notifications",
             "expo-background-fetch",
-            "expo-location",
+            [
+                "expo-location",
+                {
+                    locationAlwaysAndWhenInUsePermission: "EduBreezy needs access to your location to track bus routes.",
+                    isAndroidBackgroundLocationEnabled: true,
+                    isAndroidForegroundServiceEnabled: true
+                }
+            ],
             "expo-font",
             "expo-web-browser",
             "expo-router",
-            "expo-secure-store"
+            "expo-secure-store",
+            "expo-task-manager"
         ],
         extra: {
             router: {},

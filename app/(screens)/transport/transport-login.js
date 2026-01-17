@@ -83,6 +83,23 @@ export default function TransportLoginScreen() {
             await SecureStore.setItemAsync('transportRefreshToken', data.refreshToken);
             await SecureStore.setItemAsync('todayTrips', JSON.stringify(data.todayTrips));
 
+            // ALSO store as regular user/token for profile page compatibility
+            await SecureStore.setItemAsync('user', JSON.stringify({
+                ...data.user,
+                schoolId: data.transportStaff.school?.id,
+                role: { name: data.transportStaff.role },
+                transportStaffData: data.transportStaff,
+            }));
+            await SecureStore.setItemAsync('token', data.accessToken);
+            await SecureStore.setItemAsync('userRole', data.transportStaff.role);
+
+            // Set Supabase session on client so getSession() works
+            const { supabase } = await import('../../../lib/supabase');
+            await supabase.auth.setSession({
+                access_token: data.accessToken,
+                refresh_token: data.refreshToken,
+            });
+
             // Route based on role
             if (data.transportStaff.role === 'DRIVER') {
                 router.replace('/(screens)/transport/driver-dashboard');

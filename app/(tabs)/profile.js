@@ -411,7 +411,16 @@ export default function ProfileScreen() {
   // Get stored userId on mount
   useEffect(() => {
     (async () => {
-      const stored = await SecureStore.getItemAsync('user');
+      // Check regular user first
+      let stored = await SecureStore.getItemAsync('user');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setStoredUserId(parsed.id);
+        return;
+      }
+
+      // Fallback: check transport user (Driver/Conductor)
+      stored = await SecureStore.getItemAsync('transportUser');
       if (stored) {
         const parsed = JSON.parse(stored);
         setStoredUserId(parsed.id);
@@ -423,8 +432,9 @@ export default function ProfileScreen() {
   const { data: userData, isLoading: loading, refetch } = useQuery({
     queryKey: ['user-profile', storedUserId],
     queryFn: async () => {
-      console.log('🔄 Profile - Fetching user data via API...');
-      const res = await api.get(`/auth/user?userId=${storedUserId}`);
+      console.log('🔄 Profile - Fetching user data via Mobile API...');
+      // Use mobile-friendly endpoint (no session check required)
+      const res = await api.get(`/mobile/user/${storedUserId}`);
       console.log('🔄 Profile - User data received:', res.data ? 'YES' : 'NO');
 
       // Update SecureStore with minimal data to avoid size warning

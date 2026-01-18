@@ -24,7 +24,7 @@ import {
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
-
+import { StatusBar } from 'expo-status-bar';
 const DAYS = [
     { id: 1, name: 'Mon', fullName: 'Monday' },
     { id: 2, name: 'Tue', fullName: 'Tuesday' },
@@ -116,6 +116,7 @@ export default function ParentTimetableScreen() {
 
     return (
         <View style={styles.container}>
+            <StatusBar style="dark" />
             {/* Header */}
             <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>

@@ -222,6 +222,12 @@ class FCMService {
         }
     }
 
+    // Check if notification is a notice type (for badge increment)
+    isNoticeType(remoteMessage) {
+        const type = remoteMessage?.data?.type || remoteMessage?.data?.notificationType;
+        return type === 'notice' || type === 'NOTICE' || type === 'broadcast' || type === 'BROADCAST';
+    }
+
     setupNotificationListeners(onNotificationReceived) {
         // console.log('🔔 Setting up FCM notification listeners...');
 
@@ -236,8 +242,8 @@ class FCMService {
         const unsubscribeForeground = messaging().onMessage(async remoteMessage => {
             // console.log('📲 FCM foreground message received:', remoteMessage);
 
-            // Increment badge for foreground notifications too
-            await this.incrementBadgeInStorage();
+            // DON'T increment badge here - let _layout.js handle it with user context
+            // This prevents double counting and allows self-broadcast detection
 
             if (onNotificationReceived) onNotificationReceived(remoteMessage);
 
@@ -248,15 +254,12 @@ class FCMService {
         const unsubscribeBackground = messaging().onNotificationOpenedApp(async remoteMessage => {
             // console.log('📬 Notification opened from background:', remoteMessage);
 
-            // Badge increment is handled by background handler usually, but effectively handled here if not
-            // We don't want to double count if background handler ran, but safe to ensure storage is up to date
-            // Usually background handler runs separately. 
-            // However, onNotificationOpenedApp happens when user taps it.
+            // Don't increment here - background handler already did if it was a notice
 
             const noticeId = remoteMessage?.data?.noticeId;
             if (noticeId) {
                 router.push(`/(tabs)/noticeboard?noticeId=${noticeId}`);
-            } else {
+            } else if (this.isNoticeType(remoteMessage)) {
                 router.push(`/(tabs)/noticeboard`);
             }
 
@@ -268,13 +271,15 @@ class FCMService {
             if (remoteMessage) {
                 // console.log('📭 Notification opened from quit state:', remoteMessage);
 
-                // Consistency check
-                await this.incrementBadgeInStorage();
+                // Only increment for notice types
+                if (this.isNoticeType(remoteMessage)) {
+                    await this.incrementBadgeInStorage();
+                }
 
                 const noticeId = remoteMessage?.data?.noticeId;
                 if (noticeId) {
                     router.push(`/(tabs)/noticeboard?noticeId=${noticeId}`);
-                } else {
+                } else if (this.isNoticeType(remoteMessage)) {
                     router.push(`/(tabs)/noticeboard`);
                 }
 
@@ -320,15 +325,21 @@ class FCMService {
         messaging().setBackgroundMessageHandler(async remoteMessage => {
             // console.log('📨 FCM Background Message:', remoteMessage);
 
-            // Increment badge
-            try {
-                const saved = await SecureStore.getItemAsync(BADGE_KEY);
-                const current = saved ? parseInt(saved, 10) : 0;
-                const newCount = isNaN(current) ? 1 : current + 1;
-                await SecureStore.setItemAsync(BADGE_KEY, newCount.toString());
-                // console.log('🔔 Background handler: Badge incremented to:', newCount);
-            } catch (error) {
-                console.error('Error incrementing badge in background:', error);
+            // Check if it's a notice type notification
+            const type = remoteMessage?.data?.type || remoteMessage?.data?.notificationType;
+            const isNotice = type === 'notice' || type === 'NOTICE' || type === 'broadcast' || type === 'BROADCAST';
+
+            // Only increment badge for notice-type notifications
+            if (isNotice) {
+                try {
+                    const saved = await SecureStore.getItemAsync(BADGE_KEY);
+                    const current = saved ? parseInt(saved, 10) : 0;
+                    const newCount = isNaN(current) ? 1 : current + 1;
+                    await SecureStore.setItemAsync(BADGE_KEY, newCount.toString());
+                    // console.log('🔔 Background handler: Badge incremented to:', newCount);
+                } catch (error) {
+                    console.error('Error incrementing badge in background:', error);
+                }
             }
 
             // FALLBACK: If "notification" payload is missing (Data-only), show Local Notification

@@ -31,6 +31,7 @@ import {
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
+import { StatusBar } from 'expo-status-bar';
 
 const EXAM_LAST_VIEWED_KEY = 'exam_last_viewed';
 
@@ -144,6 +145,8 @@ export default function ParentExamsScreen() {
 
     return (
         <View style={styles.container}>
+            <StatusBar style="dark" />
+
             {/* Header */}
             <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>

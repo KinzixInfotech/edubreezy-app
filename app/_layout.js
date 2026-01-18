@@ -103,6 +103,20 @@ function RootLayoutContent() {
     // 1. FCM FOREGROUND LISTENER – REGISTERED EARLY (BEFORE USER INIT)
     // ========================================================================
     useEffect(() => {
+        // Get current user ID for self-broadcast detection
+        const getCurrentUserId = async () => {
+            try {
+                const userStr = await SecureStore.getItemAsync('user');
+                if (userStr) {
+                    const user = JSON.parse(userStr);
+                    return user?.id;
+                }
+            } catch (e) {
+                console.error('Error getting current user:', e);
+            }
+            return null;
+        };
+
         // Create Android Notification Channel
         if (Platform.OS === 'android') {
             Notifications.setNotificationChannelAsync('default', {
@@ -118,19 +132,28 @@ function RootLayoutContent() {
             });
         }
 
-        const unsubscribe = fcmService.setupNotificationListeners((remoteMessage) => {
+        const unsubscribe = fcmService.setupNotificationListeners(async (remoteMessage) => {
             console.log('FCM FOREGROUND message received:', remoteMessage);
 
-            // Increment badge on every new notice (foreground)
-            incrementNoticeBadge();
+            // Extract notification type and sender from data
+            const notificationType = remoteMessage.data?.type || remoteMessage.data?.notificationType;
+            const senderId = remoteMessage.data?.senderId || remoteMessage.data?.broadcasterUserId;
 
-            // Commented out: Global alert for foreground notifications (Debug only)
-            // if (remoteMessage.notification) {
-            //     Alert.alert(
-            //         remoteMessage.notification.title || 'New Notification',
-            //         remoteMessage.notification.body
-            //     );
-            // }
+            // Only increment badge for NOTICE type notifications
+            // Also exclude if the sender is the current user (self-broadcast)
+            if (notificationType === 'notice' || notificationType === 'NOTICE' || notificationType === 'broadcast') {
+                const currentUserId = await getCurrentUserId();
+
+                // Don't increment if this is a self-broadcast
+                if (senderId && currentUserId && senderId === currentUserId) {
+                    console.log('📌 Skipping badge increment for self-broadcast');
+                } else {
+                    incrementNoticeBadge();
+                    console.log('📌 Badge incremented for notice notification');
+                }
+            } else {
+                console.log('📌 Skipping badge increment - not a notice type:', notificationType);
+            }
 
             if (isAppActiveRef.current) {
                 console.log('New notice from FCM:', remoteMessage.notification?.title);

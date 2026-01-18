@@ -28,6 +28,7 @@ import {
     Filter,
     User,
 } from 'lucide-react-native';
+import { StatusBar } from 'expo-status-bar';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
@@ -271,6 +272,7 @@ export default function ParentHomeworkScreen() {
 
     return (
         <View style={styles.container}>
+            <StatusBar style="dark" />
             {/* Header */}
             <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>

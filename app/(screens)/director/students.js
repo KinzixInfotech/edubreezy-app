@@ -7,6 +7,7 @@ import { Users, Search, ChevronLeft, UserCheck, UserX, ChevronDown, X } from 'lu
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
+import { StatusBar } from 'expo-status-bar';
 
 export default function StudentsScreen() {
     const [searchQuery, setSearchQuery] = useState('');
@@ -104,6 +105,7 @@ export default function StudentsScreen() {
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
+            <StatusBar style='dark' />
             <Stack.Screen options={{ headerShown: false }} />
 
             {/* Header */}

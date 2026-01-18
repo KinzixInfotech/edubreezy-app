@@ -26,6 +26,7 @@ import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
 import * as SecureStore from 'expo-secure-store';
 import api from '../../lib/api';
 import HapticTouchable from '../components/HapticTouch';
+import { StatusBar } from 'expo-status-bar';
 
 export default function PayFeesScreen() {
   const params = useLocalSearchParams();
@@ -219,6 +220,7 @@ export default function PayFeesScreen() {
 
   return (
     <View style={styles.container}>
+      <StatusBar style="dark" />
       {/* Header */}
       <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
         <HapticTouchable onPress={() => router.back()}>

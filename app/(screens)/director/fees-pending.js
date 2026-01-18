@@ -8,6 +8,7 @@ import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
+import { StatusBar } from 'expo-status-bar';
 
 export default function FeesPendingScreen() {
     const [refreshing, setRefreshing] = useState(false);
@@ -436,6 +437,7 @@ export default function FeesPendingScreen() {
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
+            <StatusBar style='dark' />
             <Stack.Screen options={{ headerShown: false }} />
 
             <View style={styles.header}>
@@ -461,7 +463,9 @@ export default function FeesPendingScreen() {
                         <Text style={styles.emptyText}>No students found</Text>
                     </View>
                 }
-                // Performance optimizations
+                // o
+                // o
+                //  optimizations
                 initialNumToRender={10}
                 maxToRenderPerBatch={10}
                 windowSize={10}

@@ -37,6 +37,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as Haptics from 'expo-haptics';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
+import { StatusBar } from 'expo-status-bar';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -587,6 +588,7 @@ export default function StudentLibraryScreen() {
 
     return (
         <View style={styles.container}>
+            <StatusBar style="dark" />
             <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>
                     <View style={styles.backButton}>

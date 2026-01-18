@@ -26,13 +26,14 @@ import {
     X,
 } from 'lucide-react-native';
 import { Image } from 'expo-image';
-import * as ImagePicker from 'expo-image-picker';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as SecureStore from 'expo-secure-store';
 import * as Haptics from 'expo-haptics';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
+import { pickAndUploadImage } from '../../../lib/uploadthing';
+import { StatusBar } from 'expo-status-bar';
 
 const AUDIENCE_OPTIONS = [
     { key: 'ALL', label: 'Everyone', icon: Users, color: '#0469ff', description: 'All staff, students & parents' },
@@ -49,18 +50,14 @@ const CATEGORY_OPTIONS = [
     { key: 'EVENT', label: 'Event', color: '#F59E0B' },
 ];
 
-// Get API base URL from the api instance
-const getBaseUrl = () => {
-    return api.defaults.baseURL || 'http://192.0.0.2:3000/api';
-};
-
 export default function BroadcastScreen() {
     const [title, setTitle] = useState('');
     const [message, setMessage] = useState('');
     const [audience, setAudience] = useState('ALL');
     const [category, setCategory] = useState('GENERAL');
-    const [selectedImage, setSelectedImage] = useState(null);
+    const [uploadedImage, setUploadedImage] = useState(null); // { url, name }
     const [isUploading, setIsUploading] = useState(false);
+    const [uploadProgress, setUploadProgress] = useState(0);
     const [refreshing, setRefreshing] = useState(false);
     const queryClient = useQueryClient();
 
@@ -88,72 +85,47 @@ export default function BroadcastScreen() {
         staleTime: 60 * 1000,
     });
 
-    // Pick image from gallery
-    const pickImage = async () => {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-            Alert.alert('Permission Required', 'Please allow access to photos to attach images.');
+    // Pick and upload image using UploadThing
+    const handlePickImage = async () => {
+        if (!schoolId || !userId) {
+            Alert.alert('Error', 'Please wait for user data to load');
             return;
         }
 
-        const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.Images,
-            allowsEditing: true,
-            aspect: [16, 9],
-            quality: 0.8,
-        });
-
-        if (!result.canceled && result.assets?.[0]) {
-            setSelectedImage(result.assets[0]);
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        }
-    };
-
-    // Upload image to server
-    const uploadImage = async () => {
-        if (!selectedImage) return null;
-
-        setIsUploading(true);
         try {
-            const formData = new FormData();
-            const uri = selectedImage.uri;
-            const filename = uri.split('/').pop();
-            const match = /\.(\w+)$/.exec(filename);
-            const type = match ? `image/${match[1]}` : 'image/jpeg';
-
-            formData.append('file', {
-                uri,
-                name: filename,
-                type,
-            });
-            formData.append('schoolId', schoolId);
-            formData.append('userId', userId);
-            formData.append('type', 'broadcast');
-
-            const response = await fetch(`${getBaseUrl()}/mobile/upload`, {
-                method: 'POST',
-                body: formData,
-                headers: {
-                    'Content-Type': 'multipart/form-data',
-                },
-            });
-
-            const data = await response.json();
-            if (data.success && data.url) {
-                return data.url;
-            } else {
-                throw new Error(data.error || 'Upload failed');
-            }
-        } catch (error) {
-            console.error('Upload error:', error);
-            Alert.alert('Upload Failed', 'Could not upload image. Please try again.');
-            return null;
+            await pickAndUploadImage('broadcast',
+                { schoolId, userId, type: 'broadcast' },
+                {
+                    onStart: () => {
+                        setIsUploading(true);
+                        setUploadProgress(0);
+                    },
+                    onProgress: (progress) => setUploadProgress(progress),
+                    onComplete: (res) => {
+                        if (res?.[0]) {
+                            setUploadedImage({
+                                url: res[0].url,
+                                name: res[0].fileName || res[0].name || 'Image',
+                            });
+                            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                        }
+                    },
+                    onError: (error) => {
+                        Alert.alert('Upload Failed', error.message || 'Failed to upload image');
+                    }
+                }
+            );
         } finally {
             setIsUploading(false);
+            setUploadProgress(0);
         }
     };
 
-    // Send broadcast mutation
+    const removeImage = () => {
+        setUploadedImage(null);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    };
+
     const broadcastMutation = useMutation({
         mutationFn: async (data) => {
             return api.post(`/schools/${schoolId}/broadcast`, data);
@@ -169,7 +141,7 @@ export default function BroadcastScreen() {
             setMessage('');
             setAudience('ALL');
             setCategory('GENERAL');
-            setSelectedImage(null);
+            setUploadedImage(null);
             queryClient.invalidateQueries(['broadcasts', schoolId]);
             queryClient.invalidateQueries(['notices', schoolId]);
         },
@@ -193,6 +165,10 @@ export default function BroadcastScreen() {
             Alert.alert('Error', 'Please enter a message');
             return;
         }
+        if (isUploading) {
+            Alert.alert('Please Wait', 'Image upload in progress...');
+            return;
+        }
 
         const isEmergency = category === 'EMERGENCY';
 
@@ -205,11 +181,6 @@ export default function BroadcastScreen() {
                     text: 'Send',
                     style: isEmergency ? 'destructive' : 'default',
                     onPress: async () => {
-                        let imageUrl = null;
-                        if (selectedImage) {
-                            imageUrl = await uploadImage();
-                        }
-
                         broadcastMutation.mutate({
                             title: title.trim(),
                             message: message.trim(),
@@ -217,7 +188,7 @@ export default function BroadcastScreen() {
                             category,
                             priority: isEmergency ? 'URGENT' : 'NORMAL',
                             senderId: userId,
-                            imageUrl,
+                            imageUrl: uploadedImage?.url || null,
                         });
                     },
                 },
@@ -235,11 +206,6 @@ export default function BroadcastScreen() {
         });
     };
 
-    const removeImage = () => {
-        setSelectedImage(null);
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    };
-
     if (isLoading || !schoolId) {
         return (
             <View style={styles.loadingContainer}>
@@ -255,6 +221,7 @@ export default function BroadcastScreen() {
             style={styles.container}
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
+            <StatusBar style="dark" />
             {/* Header */}
             <View style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>
@@ -306,23 +273,38 @@ export default function BroadcastScreen() {
 
                     {/* Image Upload */}
                     <Text style={styles.label}>Attach Image (Optional)</Text>
-                    {selectedImage ? (
+
+                    {/* Upload Progress */}
+                    {isUploading && (
+                        <View style={styles.uploadProgressContainer}>
+                            <View style={styles.uploadProgressBar}>
+                                <View style={[styles.uploadProgressFill, { width: `${uploadProgress}%` }]} />
+                            </View>
+                            <Text style={styles.uploadProgressText}>Uploading... {Math.round(uploadProgress)}%</Text>
+                        </View>
+                    )}
+
+                    {uploadedImage && !isUploading ? (
                         <View style={styles.imagePreviewContainer}>
                             <Image
-                                source={{ uri: selectedImage.uri }}
+                                source={{ uri: uploadedImage.url }}
                                 style={styles.imagePreview}
                                 contentFit="cover"
                             />
+                            <View style={styles.uploadedBadge}>
+                                <CheckCircle2 size={12} color="#10B981" />
+                                <Text style={styles.uploadedText}>Uploaded to cloud</Text>
+                            </View>
                             <HapticTouchable style={styles.removeImageBtn} onPress={removeImage}>
                                 <X size={18} color="#fff" />
                             </HapticTouchable>
                         </View>
-                    ) : (
-                        <HapticTouchable style={styles.imagePickerBtn} onPress={pickImage}>
+                    ) : !isUploading ? (
+                        <HapticTouchable style={styles.imagePickerBtn} onPress={handlePickImage}>
                             <ImageIcon size={24} color="#6B7280" />
                             <Text style={styles.imagePickerText}>Tap to add image</Text>
                         </HapticTouchable>
-                    )}
+                    ) : null}
 
                     {/* Category Selection */}
                     <Text style={styles.label}>Category</Text>
@@ -683,5 +665,43 @@ const styles = StyleSheet.create({
     broadcastTime: {
         fontSize: 11,
         color: '#9CA3AF',
+    },
+    // UploadThing styles
+    uploadProgressContainer: {
+        marginBottom: 14,
+        gap: 8,
+    },
+    uploadProgressBar: {
+        height: 6,
+        backgroundColor: '#E5E7EB',
+        borderRadius: 3,
+        overflow: 'hidden',
+    },
+    uploadProgressFill: {
+        height: '100%',
+        backgroundColor: '#0469ff',
+        borderRadius: 3,
+    },
+    uploadProgressText: {
+        fontSize: 12,
+        color: '#6B7280',
+        textAlign: 'center',
+    },
+    uploadedBadge: {
+        position: 'absolute',
+        bottom: 8,
+        left: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        backgroundColor: 'rgba(255,255,255,0.95)',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 12,
+    },
+    uploadedText: {
+        fontSize: 11,
+        color: '#10B981',
+        fontWeight: '600',
     },
 });

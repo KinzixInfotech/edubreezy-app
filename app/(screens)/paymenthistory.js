@@ -43,6 +43,7 @@ import * as Sharing from 'expo-sharing';
 import api from '../../lib/api';
 import HapticTouchable from '../components/HapticTouch';
 import { Modal } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 
 export default function PaymentHistoryScreen() {
     const params = useLocalSearchParams();
@@ -253,6 +254,7 @@ Thank you for your payment!
 
     return (
         <View style={styles.container}>
+            <StatusBar style="dark" />
             {/* Header */}
             <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>

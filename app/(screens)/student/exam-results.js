@@ -28,6 +28,7 @@ import {
 import * as SecureStore from 'expo-secure-store';
 import api from '../../../lib/api';
 import HapticTouchable from '../../components/HapticTouch';
+import { StatusBar } from 'expo-status-bar';
 
 export default function StudentExamResultsScreen() {
     const [refreshing, setRefreshing] = useState(false);
@@ -118,6 +119,7 @@ export default function StudentExamResultsScreen() {
 
     return (
         <View style={styles.container}>
+            <StatusBar style='dark' />
             {/* Header */}
             <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>

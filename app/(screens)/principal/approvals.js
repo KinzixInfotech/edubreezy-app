@@ -31,6 +31,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as Haptics from 'expo-haptics';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
+import { StatusBar } from 'expo-status-bar';
 
 const CATEGORY_CONFIG = {
     leave: {
@@ -300,6 +301,7 @@ export default function ApprovalsScreen() {
 
     return (
         <View style={styles.container}>
+            <StatusBar style="dark" />
             {/* Header */}
             <View style={styles.header}>
                 <HapticTouchable onPress={() => router.back()} style={styles.backButton}>
@@ -518,11 +520,6 @@ const styles = StyleSheet.create({
         marginBottom: 12,
         borderWidth: 1,
         borderColor: '#E5E7EB',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 4,
-        elevation: 2,
     },
     urgentCard: {
         borderColor: '#FECACA',

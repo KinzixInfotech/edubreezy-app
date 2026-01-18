@@ -7,6 +7,7 @@ import { Users, Search, ChevronLeft, GraduationCap, Briefcase } from 'lucide-rea
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
+import { StatusBar } from 'expo-status-bar';
 
 export default function TeachersScreen() {
     const [searchQuery, setSearchQuery] = useState('');
@@ -100,8 +101,8 @@ export default function TeachersScreen() {
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
+            <StatusBar style="dark" />
             <Stack.Screen options={{ headerShown: false }} />
-
             <View style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>
                     <ChevronLeft size={24} color="#1F2937" />
@@ -109,7 +110,6 @@ export default function TeachersScreen() {
                 <Text style={styles.headerTitle}>Teachers & Staff</Text>
                 <View style={{ width: 24 }} />
             </View>
-
             <View style={styles.summaryContainer}>
                 <View style={[styles.summaryCard, { backgroundColor: '#F3F4F6' }]}>
                     <Users size={20} color="#6B7280" />
@@ -127,7 +127,6 @@ export default function TeachersScreen() {
                     <Text style={styles.summaryLabel}>Non-Teaching</Text>
                 </View>
             </View>
-
             {/* Type Filter */}
             <View style={styles.filterContainer}>
                 {['all', 'teaching', 'non-teaching'].map((f) => (
@@ -140,7 +139,6 @@ export default function TeachersScreen() {
                     </HapticTouchable>
                 ))}
             </View>
-
             {/* Status Filter */}
             <View style={styles.filterContainer}>
                 {['all', 'active', 'on-leave'].map((s) => (

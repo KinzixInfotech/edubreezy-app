@@ -8,6 +8,7 @@ import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
+import { StatusBar } from 'expo-status-bar';
 
 export default function LibraryScreen() {
     const [refreshing, setRefreshing] = useState(false);
@@ -285,6 +286,7 @@ export default function LibraryScreen() {
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
+            <StatusBar style='dark' />
             <Stack.Screen options={{ headerShown: false }} />
 
             <View style={styles.header}>

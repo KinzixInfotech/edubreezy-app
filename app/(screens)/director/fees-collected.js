@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { DollarSign, ChevronLeft, CreditCard, Banknote, Smartphone, TrendingUp } from 'lucide-react-native';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
+import { StatusBar } from 'expo-status-bar';
 
 export default function FeesCollectedScreen() {
     const { schoolId } = useLocalSearchParams();
@@ -89,8 +90,8 @@ export default function FeesCollectedScreen() {
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
+            <StatusBar style='dark' />
             <Stack.Screen options={{ headerShown: false }} />
-
             <View style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>
                     <ChevronLeft size={24} color="#1F2937" />

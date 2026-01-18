@@ -9,7 +9,9 @@ import {
   Dimensions,
   ActivityIndicator,
   RefreshControl,
+  Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, BellOff, FileText, X, Megaphone, Send, Inbox, Image as ImageIcon, Eye } from 'lucide-react-native';
 import { Image } from 'expo-image';
@@ -20,6 +22,7 @@ import api from '../../lib/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNotification } from '../../contexts/NotificationContext';
 import { useMarkNoticeRead } from '../../hooks/useMarkNoticeRead';
+import { StatusBar } from 'expo-status-bar';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -83,6 +86,8 @@ const AuthorAvatar = React.memo(({ profilePic, name, size = 40, isSent = false }
 });
 
 const NoticeBoardScreen = () => {
+  const insets = useSafeAreaInsets();
+
   // User state (forcing refresh)
   const [schoolId, setSchoolId] = useState(null);
   const [userId, setUserId] = useState(null);
@@ -253,6 +258,7 @@ const NoticeBoardScreen = () => {
 
   return (
     <View style={styles.container}>
+      <StatusBar style='dark' />
       {/* Header */}
       <View style={styles.header}>
         <HapticTouchable onPress={() => router.back()}>
@@ -340,7 +346,18 @@ const NoticeBoardScreen = () => {
 
       {/* FAB */}
       {canBroadcast && (
-        <HapticTouchable onPress={openBroadcastScreen} style={styles.fab}>
+        <HapticTouchable
+          onPress={openBroadcastScreen}
+          style={[
+            styles.fab,
+            {
+              bottom: Platform.select({
+                ios: 110, // TabBar(90) + 20
+                android: 90 + (insets.bottom > 0 ? insets.bottom : 10) // TabBar(70) + Inset + 20 margin
+              })
+            }
+          ]}
+        >
           <Megaphone size={24} color="#fff" />
         </HapticTouchable>
       )}

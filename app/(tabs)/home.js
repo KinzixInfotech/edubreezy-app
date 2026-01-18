@@ -1990,7 +1990,7 @@ export default function HomeScreen() {
                         {recentNotice && (
                             <HapticTouchable
                                 style={styles.updateItem}
-                                onPress={() => navigateOnce('/(screens)/NoticeDetail')}
+                                onPress={() => navigateOnce('/(tabs)/noticeboard')}
                             >
                                 <View style={[styles.updateIconBg, { backgroundColor: '#FFEBEE' }]}>
                                     <Bell size={14} color="#EF4444" />
@@ -2395,6 +2395,25 @@ export default function HomeScreen() {
         ];
         // Get today's scheduled trips for this driver
         const todaysScheduledTrips = trips.filter(t => t.status === 'SCHEDULED');
+
+        // Fetch notices for driver
+        const { data: recentNotices } = useQuery({
+            queryKey: ['driver-notices', schoolId, userId],
+            queryFn: async () => {
+                if (!schoolId || !userId) return { notices: [] };
+                const res = await api.get(`/notices/${schoolId}?userId=${userId}&limit=4&page=1`);
+                return res.data;
+            },
+            enabled: !!schoolId && !!userId,
+            staleTime: 1000 * 60 * 2,
+        });
+
+        const notices = recentNotices?.notices?.map((n) => ({
+            id: n.id,
+            title: n.title,
+            time: new Date(n.createdAt).toLocaleString(),
+            unread: !n.read,
+        })) || [];
 
         return (
             <ScrollView style={styles.container} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" colors={['#0469ff']} />}>
@@ -2803,6 +2822,107 @@ export default function HomeScreen() {
                     )}
                 </Animated.View>
 
+                {/* Upcoming Events */}
+                <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Upcoming Events</Text>
+                        <HapticTouchable onPress={() => navigateOnce('/(screens)/calendarscreen')}>
+                            <Text style={styles.seeAll}>See All</Text>
+                        </HapticTouchable>
+                    </View>
+                    <View style={styles.eventsContainer}>
+                        {upcomingEvents && upcomingEvents.length > 0 ? (
+                            upcomingEvents.slice(0, 4).map((event, index) => (
+                                <Animated.View key={event.id} entering={FadeInRight.delay(700 + index * 100).duration(500)}>
+                                    <HapticTouchable onPress={() => navigateOnce({ pathname: '/(screens)/calendarscreen', params: { eventid: event.id } })}>
+                                        <View style={styles.eventCard}>
+                                            <View style={[styles.eventIcon, { backgroundColor: event.color + '20' }]}>
+                                                <Text style={styles.eventEmoji}>{event.icon}</Text>
+                                            </View>
+                                            <View style={styles.eventInfo}>
+                                                <Text style={styles.eventTitle}>{event.title}</Text>
+                                                <View style={styles.eventDate}>
+                                                    <Calendar size={14} color="#666" />
+                                                    <Text style={styles.eventDateText}>{event.date}</Text>
+                                                </View>
+                                            </View>
+                                            <ChevronRight size={20} color="#999" />
+                                        </View>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))
+                        ) : (
+                            <Animated.View
+                                entering={FadeInRight.delay(700).duration(500)}
+                                style={{
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    paddingVertical: 20,
+                                    opacity: 0.8,
+                                }}
+                            >
+                                <CheckCircle2 size={26} color="#0469ff" />
+                                <Text style={{ marginTop: 8, fontSize: 14, color: '#555' }}>
+                                    You're all caught up!
+                                </Text>
+                            </Animated.View>
+                        )}
+                    </View>
+                </Animated.View>
+                {/* Recent Notices */}
+                <Animated.View entering={FadeInDown.delay(800).duration(600)} style={[styles.section, { marginBottom: 30 }]}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Recent Notices</Text>
+                        <HapticTouchable onPress={() => navigateOnce('/(tabs)/noticeboard')}>
+                            <Text style={styles.seeAll}>View All</Text>
+                        </HapticTouchable>
+                    </View>
+                    <View style={styles.noticesContainer}>
+                        {notices && notices.length > 0 ? (
+                            notices.map((notice, index) => (
+                                <Animated.View
+                                    key={notice.id}
+                                    entering={FadeInRight.delay(900 + index * 100).duration(500)}
+                                >
+                                    <HapticTouchable onPress={() => navigateOnce('/(tabs)/noticeboard')}>
+                                        <View style={styles.noticeCard}>
+                                            <View style={styles.noticeLeft}>
+                                                <View style={[styles.noticeIcon, notice.unread && styles.unreadIcon]}>
+                                                    <Bell size={16} color={notice.unread ? '#0469ff' : '#999'} />
+                                                </View>
+                                                <View style={styles.noticeInfo}>
+                                                    <Text style={[styles.noticeTitle, notice.unread && styles.unreadTitle]} numberOfLines={1}>
+                                                        {notice.title}
+                                                    </Text>
+                                                    <Text style={styles.noticeTime}>
+                                                        {notice.time}
+                                                    </Text>
+                                                </View>
+                                            </View>
+                                            {notice.unread && <View style={styles.unreadDot} />}
+                                        </View>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))
+                        ) : (
+                            <Animated.View
+                                entering={FadeInRight.delay(900).duration(500)}
+                                style={{
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    paddingVertical: 20,
+                                    opacity: 0.8,
+                                }}
+                            >
+                                <CheckCircle2 size={26} color="#0469ff" />
+                                <Text style={{ marginTop: 8, fontSize: 14, color: '#555' }}>
+                                    No notices yet
+                                </Text>
+                            </Animated.View>
+                        )}
+                    </View>
+                </Animated.View>
+
                 {/* Bottom Spacer */}
                 <View style={{ height: 100 }} />
             </ScrollView>
@@ -2831,6 +2951,25 @@ export default function HomeScreen() {
         const activeTrip = trips.find(t => t.status === 'IN_PROGRESS');
         const totalStudents = activeTrip?.route?.busStops?.reduce((sum, stop) => sum + (stop.students?.length || 0), 0) || 0;
         const completedTrips = trips.filter(t => t.status === 'COMPLETED').length;
+
+        // Fetch notices for conductor
+        const { data: recentNotices } = useQuery({
+            queryKey: ['conductor-notices', schoolId, userId],
+            queryFn: async () => {
+                if (!schoolId || !userId) return { notices: [] };
+                const res = await api.get(`/notices/${schoolId}?userId=${userId}&limit=4&page=1`);
+                return res.data;
+            },
+            enabled: !!schoolId && !!userId,
+            staleTime: 1000 * 60 * 2,
+        });
+
+        const notices = recentNotices?.notices?.map((n) => ({
+            id: n.id,
+            title: n.title,
+            time: new Date(n.createdAt).toLocaleString(),
+            unread: !n.read,
+        })) || [];
 
         const quickActions = [
             { icon: Bus, label: 'My Vehicle', color: '#0469ff', bgColor: '#DBEAFE', href: '/(screens)/transport/my-vehicle' },
@@ -2937,6 +3076,107 @@ export default function HomeScreen() {
                     </View>
                 </Animated.View>
 
+                {/* Upcoming Events */}
+                <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Upcoming Events</Text>
+                        <HapticTouchable onPress={() => navigateOnce('/(screens)/calendarscreen')}>
+                            <Text style={styles.seeAll}>See All</Text>
+                        </HapticTouchable>
+                    </View>
+                    <View style={styles.eventsContainer}>
+                        {upcomingEvents && upcomingEvents.length > 0 ? (
+                            upcomingEvents.slice(0, 4).map((event, index) => (
+                                <Animated.View key={event.id} entering={FadeInRight.delay(700 + index * 100).duration(500)}>
+                                    <HapticTouchable onPress={() => navigateOnce({ pathname: '/(screens)/calendarscreen', params: { eventid: event.id } })}>
+                                        <View style={styles.eventCard}>
+                                            <View style={[styles.eventIcon, { backgroundColor: event.color + '20' }]}>
+                                                <Text style={styles.eventEmoji}>{event.icon}</Text>
+                                            </View>
+                                            <View style={styles.eventInfo}>
+                                                <Text style={styles.eventTitle}>{event.title}</Text>
+                                                <View style={styles.eventDate}>
+                                                    <Calendar size={14} color="#666" />
+                                                    <Text style={styles.eventDateText}>{event.date}</Text>
+                                                </View>
+                                            </View>
+                                            <ChevronRight size={20} color="#999" />
+                                        </View>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))
+                        ) : (
+                            <Animated.View
+                                entering={FadeInRight.delay(700).duration(500)}
+                                style={{
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    paddingVertical: 20,
+                                    opacity: 0.8,
+                                }}
+                            >
+                                <CheckCircle2 size={26} color="#0469ff" />
+                                <Text style={{ marginTop: 8, fontSize: 14, color: '#555' }}>
+                                    You're all caught up!
+                                </Text>
+                            </Animated.View>
+                        )}
+                    </View>
+                </Animated.View>
+                {/* Recent Notices */}
+                <Animated.View entering={FadeInDown.delay(800).duration(600)} style={[styles.section, { marginBottom: 30 }]}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Recent Notices</Text>
+                        <HapticTouchable onPress={() => navigateOnce('/(tabs)/noticeboard')}>
+                            <Text style={styles.seeAll}>View All</Text>
+                        </HapticTouchable>
+                    </View>
+                    <View style={styles.noticesContainer}>
+                        {notices && notices.length > 0 ? (
+                            notices.map((notice, index) => (
+                                <Animated.View
+                                    key={notice.id}
+                                    entering={FadeInRight.delay(900 + index * 100).duration(500)}
+                                >
+                                    <HapticTouchable onPress={() => navigateOnce('/(tabs)/noticeboard')}>
+                                        <View style={styles.noticeCard}>
+                                            <View style={styles.noticeLeft}>
+                                                <View style={[styles.noticeIcon, notice.unread && styles.unreadIcon]}>
+                                                    <Bell size={16} color={notice.unread ? '#0469ff' : '#999'} />
+                                                </View>
+                                                <View style={styles.noticeInfo}>
+                                                    <Text style={[styles.noticeTitle, notice.unread && styles.unreadTitle]} numberOfLines={1}>
+                                                        {notice.title}
+                                                    </Text>
+                                                    <Text style={styles.noticeTime}>
+                                                        {notice.time}
+                                                    </Text>
+                                                </View>
+                                            </View>
+                                            {notice.unread && <View style={styles.unreadDot} />}
+                                        </View>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))
+                        ) : (
+                            <Animated.View
+                                entering={FadeInRight.delay(900).duration(500)}
+                                style={{
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    paddingVertical: 20,
+                                    opacity: 0.8,
+                                }}
+                            >
+                                <CheckCircle2 size={26} color="#0469ff" />
+                                <Text style={{ marginTop: 8, fontSize: 14, color: '#555' }}>
+                                    No notices yet
+                                </Text>
+                            </Animated.View>
+                        )}
+                    </View>
+                </Animated.View>
+
                 {/* Bottom Spacer */}
                 <View style={{ height: 100 }} />
             </ScrollView>
@@ -3018,6 +3258,25 @@ export default function HomeScreen() {
             if (amount >= 10000000) return `₹${(amount / 10000000).toFixed(1)}Cr`; // 1 Crore+
             return `₹${amount.toLocaleString('en-IN')}`; // Show exact: ₹7,44,000
         };
+
+        // Fetch notices for director
+        const { data: recentNotices } = useQuery({
+            queryKey: ['director-notices', schoolId, userId],
+            queryFn: async () => {
+                if (!schoolId || !userId) return { notices: [] };
+                const res = await api.get(`/notices/${schoolId}?userId=${userId}&limit=4&page=1`);
+                return res.data;
+            },
+            enabled: !!schoolId && !!userId,
+            staleTime: 1000 * 60 * 2,
+        });
+
+        const notices = recentNotices?.notices?.map((n) => ({
+            id: n.id,
+            title: n.title,
+            time: new Date(n.createdAt).toLocaleString(),
+            unread: !n.read,
+        })) || [];
 
         // Map API data to dashboard cards
         const dashboardStats = apiStats ? [
@@ -3118,28 +3377,8 @@ export default function HomeScreen() {
                 }
             >
                 {header}
-                {/* School Card */}
-                <View style={styles.schoolCard}>
-                    <View style={styles.schoolCardGradient}>
-                        <View style={styles.schoolCardContent}>
-                            <View style={styles.schoolLogoContainer}>
-                                {user_acc?.school?.profilePicture && user_acc.school.profilePicture !== 'default.png' ? (
-                                    <Image source={{ uri: user_acc.school.profilePicture }} style={styles.schoolLogo} />
-                                ) : (
-                                    <View style={[styles.schoolLogo, styles.schoolLogoPlaceholder]}>
-                                        <Building size={28} color="#6366F1" />
-                                    </View>
-                                )}
-                            </View>
-                            <View style={styles.schoolInfo}>
-                                <Text style={styles.schoolName}>{user_acc?.school?.name || 'School Name'}</Text>
-                                <Text style={styles.schoolLocation}>
-                                    <MapPin size={11} color="#94A3B8" /> {user_acc?.school?.location || 'Location'}
-                                </Text>
-                            </View>
-                        </View>
-                    </View>
-                </View>
+                {/* School Banner Carousel */}
+                <BannerCarousel schoolId={schoolId} role={user_acc?.role?.name} />
 
                 {/* Dashboard Stats */}
                 <View style={styles.dashboardSection}>
@@ -3194,7 +3433,13 @@ export default function HomeScreen() {
                             { icon: GraduationCap, label: 'Students', color: '#0EA5E9', bgColor: '#F0F9FF', href: '/(screens)/director/students' },
                             { icon: Bell, label: 'Broadcast', color: '#F59E0B', bgColor: '#FFFBEB', href: '/(screens)/director/broadcast' },
                             { icon: CheckCircle2, label: 'Approvals', color: '#EC4899', bgColor: '#FDF2F8', href: '/(screens)/principal/approvals' },
-                            { icon: Settings, label: 'Settings', color: '#64748B', bgColor: '#F1F5F9', href: '/profile' },
+                            {
+                                icon: Calendar,
+                                label: 'School Calendar',
+                                color: '#4CAF50',     // green icon
+                                bgColor: '#E8F5E9',   // light green background
+                                href: "/calendarscreen"
+                            },
                         ].map((action, index) => (
                             <HapticTouchable key={action.label} onPress={() => action.href && navigateOnce(action.href)} disabled={!action.href}>
                                 <View style={[styles.actionButton3x3, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5 }]}>
@@ -3207,6 +3452,107 @@ export default function HomeScreen() {
                         ))}
                     </View>
                 </View>
+
+                {/* Upcoming Events */}
+                <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Upcoming Events</Text>
+                        <HapticTouchable onPress={() => navigateOnce('/(screens)/calendarscreen')}>
+                            <Text style={styles.seeAll}>See All</Text>
+                        </HapticTouchable>
+                    </View>
+                    <View style={styles.eventsContainer}>
+                        {upcomingEvents && upcomingEvents.length > 0 ? (
+                            upcomingEvents.slice(0, 4).map((event, index) => (
+                                <Animated.View key={event.id} entering={FadeInRight.delay(700 + index * 100).duration(500)}>
+                                    <HapticTouchable onPress={() => navigateOnce({ pathname: '/(screens)/calendarscreen', params: { eventid: event.id } })}>
+                                        <View style={styles.eventCard}>
+                                            <View style={[styles.eventIcon, { backgroundColor: event.color + '20' }]}>
+                                                <Text style={styles.eventEmoji}>{event.icon}</Text>
+                                            </View>
+                                            <View style={styles.eventInfo}>
+                                                <Text style={styles.eventTitle}>{event.title}</Text>
+                                                <View style={styles.eventDate}>
+                                                    <Calendar size={14} color="#666" />
+                                                    <Text style={styles.eventDateText}>{event.date}</Text>
+                                                </View>
+                                            </View>
+                                            <ChevronRight size={20} color="#999" />
+                                        </View>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))
+                        ) : (
+                            <Animated.View
+                                entering={FadeInRight.delay(700).duration(500)}
+                                style={{
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    paddingVertical: 20,
+                                    opacity: 0.8,
+                                }}
+                            >
+                                <CheckCircle2 size={26} color="#0469ff" />
+                                <Text style={{ marginTop: 8, fontSize: 14, color: '#555' }}>
+                                    You're all caught up!
+                                </Text>
+                            </Animated.View>
+                        )}
+                    </View>
+                </Animated.View>
+                {/* Recent Notices */}
+                <Animated.View entering={FadeInDown.delay(800).duration(600)} style={[styles.section, { marginBottom: 30 }]}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Recent Notices</Text>
+                        <HapticTouchable onPress={() => navigateOnce('/(tabs)/noticeboard')}>
+                            <Text style={styles.seeAll}>View All</Text>
+                        </HapticTouchable>
+                    </View>
+                    <View style={styles.noticesContainer}>
+                        {notices && notices.length > 0 ? (
+                            notices.map((notice, index) => (
+                                <Animated.View
+                                    key={notice.id}
+                                    entering={FadeInRight.delay(900 + index * 100).duration(500)}
+                                >
+                                    <HapticTouchable onPress={() => navigateOnce('/(tabs)/noticeboard')}>
+                                        <View style={styles.noticeCard}>
+                                            <View style={styles.noticeLeft}>
+                                                <View style={[styles.noticeIcon, notice.unread && styles.unreadIcon]}>
+                                                    <Bell size={16} color={notice.unread ? '#0469ff' : '#999'} />
+                                                </View>
+                                                <View style={styles.noticeInfo}>
+                                                    <Text style={[styles.noticeTitle, notice.unread && styles.unreadTitle]} numberOfLines={1}>
+                                                        {notice.title}
+                                                    </Text>
+                                                    <Text style={styles.noticeTime}>
+                                                        {notice.time}
+                                                    </Text>
+                                                </View>
+                                            </View>
+                                            {notice.unread && <View style={styles.unreadDot} />}
+                                        </View>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))
+                        ) : (
+                            <Animated.View
+                                entering={FadeInRight.delay(900).duration(500)}
+                                style={{
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    paddingVertical: 20,
+                                    opacity: 0.8,
+                                }}
+                            >
+                                <CheckCircle2 size={26} color="#0469ff" />
+                                <Text style={{ marginTop: 8, fontSize: 14, color: '#555' }}>
+                                    No notices yet
+                                </Text>
+                            </Animated.View>
+                        )}
+                    </View>
+                </Animated.View>
 
                 {/* Bottom Spacer */}
                 <View style={{ height: 100 }} />
@@ -3259,6 +3605,25 @@ export default function HomeScreen() {
             if (amount < 10000000) return `₹${(amount / 100000).toFixed(1)}L`;
             return `₹${(amount / 10000000).toFixed(1)}Cr`;
         };
+
+        // Fetch notices for principal
+        const { data: recentNotices } = useQuery({
+            queryKey: ['principal-notices', schoolId, userId],
+            queryFn: async () => {
+                if (!schoolId || !userId) return { notices: [] };
+                const res = await api.get(`/notices/${schoolId}?userId=${userId}&limit=4&page=1`);
+                return res.data;
+            },
+            enabled: !!schoolId && !!userId,
+            staleTime: 1000 * 60 * 2,
+        });
+
+        const notices = recentNotices?.notices?.map((n) => ({
+            id: n.id,
+            title: n.title,
+            time: new Date(n.createdAt).toLocaleString(),
+            unread: !n.read,
+        })) || [];
 
         // Map API data to dashboard cards (Principal-specific view)
         const dashboardStats = apiStats ? [
@@ -3350,29 +3715,7 @@ export default function HomeScreen() {
                 }
             >
                 {header}
-                {/* School Card */}
-                <View style={styles.schoolCard}>
-                    <View style={styles.schoolCardGradient}>
-                        <View style={styles.schoolCardContent}>
-                            <View style={styles.schoolLogoContainer}>
-                                {user_acc?.school?.profilePicture && user_acc.school.profilePicture !== 'default.png' ? (
-                                    <Image source={{ uri: user_acc.school.profilePicture }} style={styles.schoolLogo} />
-                                ) : (
-                                    <View style={[styles.schoolLogo, styles.schoolLogoPlaceholder]}>
-                                        <Building size={28} color="#6366F1" />
-                                    </View>
-                                )}
-                            </View>
-                            <View style={styles.schoolInfo}>
-                                <Text style={styles.schoolName}>{user_acc?.school?.name || 'School Name'}</Text>
-                                <Text style={styles.schoolLocation}>
-                                    <MapPin size={11} color="#94A3B8" /> {user_acc?.school?.location || 'Location'}
-                                </Text>
-                            </View>
-                        </View>
-                    </View>
-                </View>
-
+                <BannerCarousel schoolId={schoolId} role={user_acc?.role?.name} />
                 {/* Dashboard Stats */}
                 <View style={styles.dashboardSection}>
                     <Text style={styles.dashboardSectionTitle}>Dashboard Overview</Text>
@@ -3440,6 +3783,107 @@ export default function HomeScreen() {
                     </View>
                 </View>
 
+                {/* Upcoming Events */}
+                <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Upcoming Events</Text>
+                        <HapticTouchable onPress={() => navigateOnce('/(screens)/calendarscreen')}>
+                            <Text style={styles.seeAll}>See All</Text>
+                        </HapticTouchable>
+                    </View>
+                    <View style={styles.eventsContainer}>
+                        {upcomingEvents && upcomingEvents.length > 0 ? (
+                            upcomingEvents.slice(0, 4).map((event, index) => (
+                                <Animated.View key={event.id} entering={FadeInRight.delay(700 + index * 100).duration(500)}>
+                                    <HapticTouchable onPress={() => navigateOnce({ pathname: '/(screens)/calendarscreen', params: { eventid: event.id } })}>
+                                        <View style={styles.eventCard}>
+                                            <View style={[styles.eventIcon, { backgroundColor: event.color + '20' }]}>
+                                                <Text style={styles.eventEmoji}>{event.icon}</Text>
+                                            </View>
+                                            <View style={styles.eventInfo}>
+                                                <Text style={styles.eventTitle}>{event.title}</Text>
+                                                <View style={styles.eventDate}>
+                                                    <Calendar size={14} color="#666" />
+                                                    <Text style={styles.eventDateText}>{event.date}</Text>
+                                                </View>
+                                            </View>
+                                            <ChevronRight size={20} color="#999" />
+                                        </View>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))
+                        ) : (
+                            <Animated.View
+                                entering={FadeInRight.delay(700).duration(500)}
+                                style={{
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    paddingVertical: 20,
+                                    opacity: 0.8,
+                                }}
+                            >
+                                <CheckCircle2 size={26} color="#0469ff" />
+                                <Text style={{ marginTop: 8, fontSize: 14, color: '#555' }}>
+                                    You're all caught up!
+                                </Text>
+                            </Animated.View>
+                        )}
+                    </View>
+                </Animated.View>
+                {/* Recent Notices */}
+                <Animated.View entering={FadeInDown.delay(800).duration(600)} style={[styles.section, { marginBottom: 30 }]}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Recent Notices</Text>
+                        <HapticTouchable onPress={() => navigateOnce('/(tabs)/noticeboard')}>
+                            <Text style={styles.seeAll}>View All</Text>
+                        </HapticTouchable>
+                    </View>
+                    <View style={styles.noticesContainer}>
+                        {notices && notices.length > 0 ? (
+                            notices.map((notice, index) => (
+                                <Animated.View
+                                    key={notice.id}
+                                    entering={FadeInRight.delay(900 + index * 100).duration(500)}
+                                >
+                                    <HapticTouchable onPress={() => navigateOnce('/(tabs)/noticeboard')}>
+                                        <View style={styles.noticeCard}>
+                                            <View style={styles.noticeLeft}>
+                                                <View style={[styles.noticeIcon, notice.unread && styles.unreadIcon]}>
+                                                    <Bell size={16} color={notice.unread ? '#0469ff' : '#999'} />
+                                                </View>
+                                                <View style={styles.noticeInfo}>
+                                                    <Text style={[styles.noticeTitle, notice.unread && styles.unreadTitle]} numberOfLines={1}>
+                                                        {notice.title}
+                                                    </Text>
+                                                    <Text style={styles.noticeTime}>
+                                                        {notice.time}
+                                                    </Text>
+                                                </View>
+                                            </View>
+                                            {notice.unread && <View style={styles.unreadDot} />}
+                                        </View>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))
+                        ) : (
+                            <Animated.View
+                                entering={FadeInRight.delay(900).duration(500)}
+                                style={{
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    paddingVertical: 20,
+                                    opacity: 0.8,
+                                }}
+                            >
+                                <CheckCircle2 size={26} color="#0469ff" />
+                                <Text style={{ marginTop: 8, fontSize: 14, color: '#555' }}>
+                                    No notices yet
+                                </Text>
+                            </Animated.View>
+                        )}
+                    </View>
+                </Animated.View>
+
                 {/* Bottom Spacer */}
                 <View style={{ height: 100 }} />
             </ScrollView>
@@ -3451,6 +3895,7 @@ export default function HomeScreen() {
 
     return (
         <View style={styles.container} edges={['top']}>
+            <StatusBar style="light" />
             <Animated.View style={[{ zIndex: 100, position: 'absolute', top: 0, left: 0, right: 0, height: HEADER_MAX_HEIGHT }, headerAnimatedStyle]}>
                 {/* Dynamically render header content with animations */}
                 {(() => {
@@ -3529,7 +3974,6 @@ export default function HomeScreen() {
                     );
                 })()}
             </Animated.View>
-            <StatusBar style="light" translucent backgroundColor="transparent" />
 
             {/* Today's Events (if any) */}
             {renderContent()}
@@ -3616,6 +4060,7 @@ const styles = StyleSheet.create({
     dashboardSection: {
         marginHorizontal: 16,
         marginBottom: 20,
+        marginTop: 20,
     },
     dashboardSectionTitle: {
         fontSize: 14,

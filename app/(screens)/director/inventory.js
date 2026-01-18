@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { ClipboardList, ChevronLeft, Search, Package, AlertTriangle, CheckCircle } from 'lucide-react-native';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
+import { StatusBar } from 'expo-status-bar';
 
 export default function InventoryScreen() {
     const { schoolId } = useLocalSearchParams();
@@ -69,8 +70,8 @@ export default function InventoryScreen() {
 
     return (
         <SafeAreaView style={styles.container} edges={['top']}>
+            <StatusBar style='dark' />
             <Stack.Screen options={{ headerShown: false }} />
-
             {/* Header */}
             <View style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>

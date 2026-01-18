@@ -18,6 +18,7 @@ import {
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import { StatusBar } from 'expo-status-bar';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
 import {
     BookOpen,
@@ -413,6 +414,7 @@ export default function SyllabusScreen() {
 
     return (
         <View style={styles.container}>
+            <StatusBar style="dark" />
             {/* Header - UNCHANGED */}
             <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>

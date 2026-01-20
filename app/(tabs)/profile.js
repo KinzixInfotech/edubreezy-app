@@ -13,6 +13,7 @@ import * as Haptics from 'expo-haptics';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../../lib/api';
 import { getCurrentSchool } from '../../lib/profileManager';
+import Constants from 'expo-constants';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const isSmallDevice = SCREEN_WIDTH < 375;
@@ -1017,6 +1018,14 @@ export default function ProfileScreen() {
               </HapticTouchable>
             </View>
           </Animated.View>
+          {/* Footer Info */}
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>Developed by Kinzix Infotech</Text>
+            <Text style={styles.footerText}>All rights reserved</Text>
+            <Text style={styles.footerVersion}>
+              v{Constants.expoConfig?.version || Constants.manifest?.version || '1.0.0'}
+            </Text>
+          </View>
         </ScrollView>
 
         {/* Image Viewer Modal */}
@@ -1638,5 +1647,21 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  footer: {
+    paddingVertical: 32,
+    alignItems: 'center',
+    opacity: 0.6,
+  },
+  footerText: {
+    fontSize: 13,
+    color: '#64748b',
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  footerVersion: {
+    fontSize: 12,
+    color: '#94a3b8',
+    marginTop: 4,
   },
 });

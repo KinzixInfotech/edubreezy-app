@@ -70,6 +70,35 @@ const QUERY_KEYS = {
     dashboardOverview: (schoolId, academicYearId) => ['dashboard', 'overview', schoolId, academicYearId],
 };
 
+// ============================================
+// CENTRALIZED CACHE CONFIGURATION
+// Prevents screen reload on back navigation
+// ============================================
+const CACHE_CONFIG = {
+    // Static data (events, profile, syllabus) - long cache
+    STATIC: {
+        staleTime: 1000 * 60 * 10, // 10 min
+        gcTime: 1000 * 60 * 60, // 1 hour
+        refetchOnMount: false,
+        refetchOnWindowFocus: false, // No auto-refresh
+    },
+    // Semi-dynamic data (stats, homework, attendance)
+    MODERATE: {
+        staleTime: 1000 * 60 * 5, // 5 min
+        gcTime: 1000 * 60 * 30, // 30 min
+        refetchOnMount: false,
+        refetchOnWindowFocus: false, // No auto-refresh
+    },
+    // Real-time data (notifications) - no auto polling
+    REALTIME: {
+        staleTime: 1000 * 60 * 2, // 2 min
+        gcTime: 1000 * 60 * 30,
+        refetchOnMount: false,
+        refetchOnWindowFocus: false, // No auto-refresh
+        // Removed refetchInterval - user must manually refresh
+    },
+};
+
 export default function HomeScreen() {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -227,9 +256,8 @@ export default function HomeScreen() {
             );
             return res.data;
         },
-        enabled: !!schoolId,
-        staleTime: 1000 * 60, // Cache for 1 minute
-        refetchInterval: 1000 * 60 * 2, // Auto-refresh every 2 minutes
+        enabled: !!schoolId && !!userId,
+        ...CACHE_CONFIG.REALTIME,
     });
 
     // Filter out self-sent notifications and calculate unread count
@@ -300,8 +328,8 @@ export default function HomeScreen() {
             );
             return res.data.teacher;
         },
-        enabled: user_acc?.role?.name === "TEACHING_STAFF" && !!schoolId,
-        staleTime: 1000 * 60 * 2,
+        enabled: user_acc?.role?.name === "TEACHING_STAFF" && !!schoolId && !!userId,
+        ...CACHE_CONFIG.STATIC,
     });
 
     // Pre-fetch transport staff data for Driver/Conductor roles
@@ -314,7 +342,7 @@ export default function HomeScreen() {
             return res.data;
         },
         enabled: isTransportRole && !!schoolId && !!userId,
-        staleTime: 1000 * 60 * 5,
+        ...CACHE_CONFIG.MODERATE,
     });
 
     const transportStaff = transportStaffData?.staff?.[0];
@@ -336,7 +364,7 @@ export default function HomeScreen() {
             return res.data;
         },
         enabled: isTransportRole && !!schoolId && !!transportStaffId,
-        staleTime: 1000 * 60,
+        ...CACHE_CONFIG.MODERATE,
     });
 
     // Check if transport data is still loading
@@ -350,7 +378,7 @@ export default function HomeScreen() {
             return res.data;
         },
         enabled: !!schoolId,
-        staleTime: 1000 * 60 * 5, // 5 minutes
+        ...CACHE_CONFIG.STATIC,
     });
     // Helper function to get category icon
     const getCategoryIcon = (category, eventType) => {
@@ -762,7 +790,7 @@ export default function HomeScreen() {
                 return res.data;
             },
             enabled: !!schoolId && !!userId,
-            staleTime: 1000 * 60 * 2,
+            ...CACHE_CONFIG.MODERATE,
         });
 
         // Fetch student stats (attendance + exams + homework)
@@ -787,7 +815,7 @@ export default function HomeScreen() {
                 };
             },
             enabled: !!schoolId && !!userId,
-            staleTime: 1000 * 60 * 5,
+            ...CACHE_CONFIG.MODERATE,
         });
 
         // Helper function to get grade label
@@ -993,32 +1021,59 @@ export default function HomeScreen() {
                 <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.section}>
                     <View style={styles.statsGrid}>
                         <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/student/attendance')}>
-                            <LinearGradient colors={['#4ECDC4', '#44A08D']} style={styles.statCard}>
+                            <LinearGradient
+                                colors={['#4ECDC4', '#26A69A']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={[styles.statCard, { shadowColor: '#4ECDC4', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                            >
+                                <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                                <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
                                 <View style={styles.statIcon}>
-                                    <CheckCircle2 size={24} color="#fff" />
+                                    <CheckCircle2 size={22} color="#fff" />
                                 </View>
-                                <Text style={styles.statValue}>{Math.round(attendancePercentage)}%</Text>
-                                <Text style={styles.statLabel}>Attendance</Text>
+                                <View>
+                                    <Text style={styles.statValue}>{Math.round(attendancePercentage)}%</Text>
+                                    <Text style={styles.statLabel}>Attendance</Text>
+                                </View>
                             </LinearGradient>
                         </HapticTouchable>
 
                         <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/student/performance')}>
-                            <LinearGradient colors={['#667eea', '#764ba2']} style={styles.statCard}>
+                            <LinearGradient
+                                colors={['#667eea', '#764ba2']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={[styles.statCard, { shadowColor: '#667eea', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                            >
+                                <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                                <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
                                 <View style={styles.statIcon}>
-                                    <TrendingUp size={24} color="#fff" />
+                                    <TrendingUp size={22} color="#fff" />
                                 </View>
-                                <Text style={styles.statValue}>{overallScore}</Text>
-                                <Text style={styles.statLabel}>Performance</Text>
+                                <View>
+                                    <Text style={styles.statValue}>{overallScore}</Text>
+                                    <Text style={styles.statLabel}>Performance</Text>
+                                </View>
                             </LinearGradient>
                         </HapticTouchable>
 
                         <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/homework/view')}>
-                            <LinearGradient colors={['#f093fb', '#f5576c']} style={styles.statCard}>
+                            <LinearGradient
+                                colors={['#f093fb', '#f5576c']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={[styles.statCard, { shadowColor: '#f093fb', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                            >
+                                <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                                <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
                                 <View style={styles.statIcon}>
-                                    <BookOpen size={24} color="#fff" />
+                                    <BookOpen size={22} color="#fff" />
                                 </View>
-                                <Text style={styles.statValue}>{pendingHomework}</Text>
-                                <Text style={styles.statLabel}>Pending Work</Text>
+                                <View>
+                                    <Text style={styles.statValue}>{pendingHomework}</Text>
+                                    <Text style={styles.statLabel}>Pending Work</Text>
+                                </View>
                             </LinearGradient>
                         </HapticTouchable>
                     </View>
@@ -1046,6 +1101,10 @@ export default function HomeScreen() {
                                     >
                                         <HapticTouchable onPress={() => navigateOnce(action.href || '')}>
                                             <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}>
+                                                {/* Decorative Graphics */}
+                                                <View style={{ position: 'absolute', top: -15, right: -15, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.2)' }} />
+                                                <View style={{ position: 'absolute', bottom: -20, left: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.15)' }} />
+
                                                 <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
                                                     <action.icon size={22} color={action.color} />
                                                 </View>
@@ -1259,7 +1318,7 @@ export default function HomeScreen() {
             },
             enabled: !!schoolId && !!userId,
             keepPreviousData: true,
-            staleTime: 1000 * 60,               // ← cache for 1 min instead of forcing refetch
+            ...CACHE_CONFIG.MODERATE,
         });
         // console.log(recentNotices);
         const notices = recentNotices?.notices?.map((n) => ({
@@ -1301,7 +1360,7 @@ export default function HomeScreen() {
                 };
             },
             enabled: !!schoolId && !!selectedChild?.studentId,
-            staleTime: 1000 * 60 * 2,
+            ...CACHE_CONFIG.MODERATE,
         });
 
         // Extract stats from batched query
@@ -1309,34 +1368,48 @@ export default function HomeScreen() {
         const homeworkData = childStats?.homework;
         const examBadgeData = childStats?.exams;
 
-        // Fetch fee status for selected child (for dashboard card) - DISABLED due to 404s
-        // const { data: academicYearData } = useQuery({
-        //     queryKey: ['academic-years-parent', schoolId],
-        //     queryFn: async () => {
-        //         const res = await api.get(`/schools/academic-years?schoolId=${schoolId}`);
-        //         return res.data?.find(y => y.isActive);
-        //     },
-        //     enabled: !!schoolId,
-        //     staleTime: 1000 * 60 * 10,
-        // });
+        // Fetch fee status for selected child (for dashboard card)
+        const { data: academicYearData } = useQuery({
+            queryKey: ['academic-years-parent', schoolId],
+            queryFn: async () => {
+                const res = await api.get(`/schools/academic-years?schoolId=${schoolId}`);
+                return res.data?.find(y => y.isActive);
+            },
+            enabled: !!schoolId,
+            staleTime: 1000 * 60 * 10,
+        });
 
-        // const { data: feeData } = useQuery({
-        //     queryKey: ['parent-child-fee', selectedChild?.studentId, academicYearData?.id],
-        //     queryFn: async () => {
-        //         if (!selectedChild?.studentId || !academicYearData?.id) return null;
-        //         const params = new URLSearchParams({ academicYearId: academicYearData.id });
-        //         const res = await api.get(`/schools/fee/students/${selectedChild.studentId}?${params}`);
-        //         return res.data;
-        //     },
-        //     enabled: !!selectedChild?.studentId && !!academicYearData?.id,
-        //     staleTime: 1000 * 60 * 5,
-        // });
+        const { data: feeData } = useQuery({
+            queryKey: ['parent-child-fee', selectedChild?.studentId, academicYearData?.id],
+            queryFn: async () => {
+                if (!selectedChild?.studentId || !academicYearData?.id) return null;
+                const params = new URLSearchParams({ academicYearId: academicYearData.id });
+                const res = await api.get(`/schools/fee/students/${selectedChild.studentId}?${params}`);
+                return res.data;
+            },
+            enabled: !!selectedChild?.studentId && !!academicYearData?.id,
+            staleTime: 1000 * 60 * 5,
+        });
+
+        // Helper for abbreviated currency formatting (K, L, Cr) - clean whole numbers
+        const formatAbbr = (amount) => {
+            if (!amount || amount === 0) return '0';
+            const value = Math.abs(amount);
+            if (value >= 10000000) return `${Math.round(value / 10000000)}Cr`;
+            if (value >= 100000) return `${(value / 100000).toFixed(1).replace(/\.0$/, '')}L`;
+            if (value >= 1000) return `${(value / 1000).toFixed(1).replace(/\.0$/, '')}K`;
+            return `${Math.round(value)}`;
+        };
 
         // Calculate dashboard card values
         const childAttendance = attendanceStats?.monthlyStats?.attendancePercentage ?? 0;
-        // Fee status: Disabled due to API 404s
-        const childFeeStatus = '—';
-        const childFeePending = 0;
+
+        // Fee status calculation
+        const totalFee = feeData?.originalAmount || 0;
+        const paidFee = feeData?.paidAmount || 0;
+        const pendingFee = feeData?.balanceAmount || 0;
+
+        const feeStatusDisplay = `₹${formatAbbr(paidFee)}`;
 
         // Fetch upcoming events for parent
         const { data: upcomingEvents } = useQuery({
@@ -1347,7 +1420,7 @@ export default function HomeScreen() {
                 return res.data?.events || res.data || [];
             },
             enabled: !!schoolId,
-            staleTime: 1000 * 60 * 5,
+            ...CACHE_CONFIG.STATIC,
         });
 
         // Get recent unread notice only (don't show if already read)
@@ -1566,7 +1639,7 @@ export default function HomeScreen() {
                 return res.data;
             },
             enabled: Boolean(schoolId && parentId),
-            staleTime: 1000 * 60,
+            ...CACHE_CONFIG.MODERATE,
         });
 
         const uiChildren = useMemo(() =>
@@ -2040,15 +2113,21 @@ export default function HomeScreen() {
                                     colors={['#4ECDC4', '#26A69A']}
                                     start={{ x: 0, y: 0 }}
                                     end={{ x: 1, y: 1 }}
-                                    style={[styles.statCard, { shadowColor: '#4ECDC4', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 8 }]}
+                                    style={[styles.statCard, { shadowColor: '#4ECDC4', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
                                 >
-                                    <View style={[styles.statIcon, { backgroundColor: 'rgba(255,255,255,0.25)' }]}>
-                                        <CheckCircle2 size={24} color="#fff" />
+                                    {/* Decorative Elements */}
+                                    <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                                    <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+
+                                    <View style={styles.statIcon}>
+                                        <CheckCircle2 size={22} color="#fff" />
                                     </View>
-                                    <Text style={[styles.statValue, { fontSize: 22 }]}>
-                                        {childAttendance === 0 ? '0' : `${Math.round(childAttendance)}%`}
-                                    </Text>
-                                    <Text style={[styles.statLabel, { fontSize: 12, opacity: 0.9 }]}>Attendance</Text>
+                                    <View>
+                                        <Text style={styles.statValue}>
+                                            {childAttendance === 0 ? '0%' : `${Math.round(childAttendance)}%`}
+                                        </Text>
+                                        <Text style={styles.statLabel}>Attendance</Text>
+                                    </View>
                                 </LinearGradient>
                             </HapticTouchable>
 
@@ -2057,28 +2136,40 @@ export default function HomeScreen() {
                                     colors={['#FF9F43', '#F59E0B']}
                                     start={{ x: 0, y: 0 }}
                                     end={{ x: 1, y: 1 }}
-                                    style={[styles.statCard, { shadowColor: '#FF9F43', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 8 }]}
+                                    style={[styles.statCard, { shadowColor: '#FF9F43', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
                                 >
-                                    <View style={[styles.statIcon, { backgroundColor: 'rgba(255,255,255,0.25)' }]}>
-                                        <TrendingUp size={24} color="#fff" />
+                                    {/* Decorative Elements */}
+                                    <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                                    <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+
+                                    <View style={styles.statIcon}>
+                                        <TrendingUp size={22} color="#fff" />
                                     </View>
-                                    <Text style={[styles.statValue, { fontSize: 22 }]}>{childPerformance}</Text>
-                                    <Text style={[styles.statLabel, { fontSize: 12, opacity: 0.9 }]}>Performance</Text>
+                                    <View>
+                                        <Text style={styles.statValue}>{childPerformance}</Text>
+                                        <Text style={styles.statLabel}>Performance</Text>
+                                    </View>
                                 </LinearGradient>
                             </HapticTouchable>
 
                             <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce({ pathname: '/(screens)/payfees', params: { childData: JSON.stringify(selectedChild) } })}>
                                 <LinearGradient
-                                    colors={childFeePending > 0 ? ['#FF6B6B', '#EE5A5A'] : ['#10B981', '#059669']}
+                                    colors={pendingFee > 0 ? ['#FF6B6B', '#EE5A5A'] : ['#10B981', '#059669']}
                                     start={{ x: 0, y: 0 }}
                                     end={{ x: 1, y: 1 }}
-                                    style={[styles.statCard, { shadowColor: childFeePending > 0 ? '#FF6B6B' : '#10B981', shadowOpacity: 0.4, shadowRadius: 12, shadowOffset: { width: 0, height: 6 }, elevation: 8 }]}
+                                    style={[styles.statCard, { shadowColor: pendingFee > 0 ? '#FF6B6B' : '#10B981', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
                                 >
-                                    <View style={[styles.statIcon, { backgroundColor: 'rgba(255,255,255,0.25)' }]}>
-                                        <DollarSign size={24} color="#fff" />
+                                    {/* Decorative Elements */}
+                                    <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                                    <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+
+                                    <View style={styles.statIcon}>
+                                        <DollarSign size={22} color="#fff" />
                                     </View>
-                                    <Text style={[styles.statValue, { fontSize: 22 }]}>{childFeeStatus}</Text>
-                                    <Text style={[styles.statLabel, { fontSize: 12, opacity: 0.9 }]}>Fee Status</Text>
+                                    <View>
+                                        <Text style={styles.statValue}>{feeStatusDisplay}</Text>
+                                        <Text style={styles.statLabel}>Fee Status</Text>
+                                    </View>
                                 </LinearGradient>
                             </HapticTouchable>
                         </View>
@@ -2124,6 +2215,9 @@ export default function HomeScreen() {
                                                     styles.actionButton,
                                                     { backgroundColor: action.bgColor, width: itemWidth }
                                                 ]}>
+                                                    {/* Decorative Graphics */}
+                                                    <View style={{ position: 'absolute', top: -15, right: -15, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.2)' }} />
+                                                    <View style={{ position: 'absolute', bottom: -20, left: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.15)' }} />
                                                     <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
                                                         <action.icon size={22} color={action.color} />
                                                         {action.badge && (
@@ -2405,7 +2499,7 @@ export default function HomeScreen() {
                 return res.data;
             },
             enabled: !!schoolId && !!userId,
-            staleTime: 1000 * 60 * 2,
+            ...CACHE_CONFIG.MODERATE,
         });
 
         const notices = recentNotices?.notices?.map((n) => ({
@@ -2481,24 +2575,51 @@ export default function HomeScreen() {
                 <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.section}>
                     <View style={styles.statsGrid}>
                         <HapticTouchable style={{ flex: 1 }}>
-                            <LinearGradient colors={['#667eea', '#764ba2']} style={styles.statCard}>
-                                <View style={styles.statIcon}><Calendar size={24} color="#fff" /></View>
-                                <Text style={styles.statValue}>{totalTrips}</Text>
-                                <Text style={styles.statLabel}>Today's Trips</Text>
+                            <LinearGradient
+                                colors={['#667eea', '#764ba2']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={[styles.statCard, { shadowColor: '#667eea', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                            >
+                                <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                                <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+                                <View style={styles.statIcon}><Calendar size={22} color="#fff" /></View>
+                                <View>
+                                    <Text style={styles.statValue}>{totalTrips}</Text>
+                                    <Text style={styles.statLabel}>Today's Trips</Text>
+                                </View>
                             </LinearGradient>
                         </HapticTouchable>
                         <HapticTouchable style={{ flex: 1 }}>
-                            <LinearGradient colors={['#4ECDC4', '#44A08D']} style={styles.statCard}>
-                                <View style={styles.statIcon}><CheckCircle2 size={24} color="#fff" /></View>
-                                <Text style={styles.statValue}>{completedTrips}</Text>
-                                <Text style={styles.statLabel}>Completed</Text>
+                            <LinearGradient
+                                colors={['#4ECDC4', '#26A69A']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={[styles.statCard, { shadowColor: '#4ECDC4', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                            >
+                                <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                                <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+                                <View style={styles.statIcon}><CheckCircle2 size={22} color="#fff" /></View>
+                                <View>
+                                    <Text style={styles.statValue}>{completedTrips}</Text>
+                                    <Text style={styles.statLabel}>Completed</Text>
+                                </View>
                             </LinearGradient>
                         </HapticTouchable>
                         <HapticTouchable style={{ flex: 1 }}>
-                            <LinearGradient colors={['#f093fb', '#f5576c']} style={styles.statCard}>
-                                <View style={styles.statIcon}><Users size={24} color="#fff" /></View>
-                                <Text style={styles.statValue}>{activeTrip ? 'Active' : 'Idle'}</Text>
-                                <Text style={styles.statLabel}>Status</Text>
+                            <LinearGradient
+                                colors={activeTrip ? ['#10B981', '#059669'] : ['#f093fb', '#f5576c']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={[styles.statCard, { shadowColor: activeTrip ? '#10B981' : '#f093fb', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                            >
+                                <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                                <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+                                <View style={styles.statIcon}><Users size={22} color="#fff" /></View>
+                                <View>
+                                    <Text style={styles.statValue}>{activeTrip ? 'Active' : 'Idle'}</Text>
+                                    <Text style={styles.statLabel}>Status</Text>
+                                </View>
                             </LinearGradient>
                         </HapticTouchable>
                     </View>
@@ -2717,6 +2838,10 @@ export default function HomeScreen() {
                             <Animated.View key={action.label} entering={FadeInDown.delay(300 + index * 50).duration(400)}>
                                 <HapticTouchable onPress={() => action.href && navigateOnce(action.href)} disabled={!action.href}>
                                     <View style={[styles.actionButton, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5 }]}>
+                                        {/* Decorative Graphics */}
+                                        <View style={{ position: 'absolute', top: -15, right: -15, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.2)' }} />
+                                        <View style={{ position: 'absolute', bottom: -20, left: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.15)' }} />
+
                                         <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
                                             <action.icon size={22} color={action.color} />
                                         </View>
@@ -2961,7 +3086,7 @@ export default function HomeScreen() {
                 return res.data;
             },
             enabled: !!schoolId && !!userId,
-            staleTime: 1000 * 60 * 2,
+            ...CACHE_CONFIG.MODERATE,
         });
 
         const notices = recentNotices?.notices?.map((n) => ({
@@ -3035,24 +3160,51 @@ export default function HomeScreen() {
                 <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.section}>
                     <View style={styles.statsGrid}>
                         <HapticTouchable style={{ flex: 1 }}>
-                            <LinearGradient colors={['#667eea', '#764ba2']} style={styles.statCard}>
-                                <View style={styles.statIcon}><Calendar size={24} color="#fff" /></View>
-                                <Text style={styles.statValue}>{trips.length}</Text>
-                                <Text style={styles.statLabel}>Today's Trips</Text>
+                            <LinearGradient
+                                colors={['#667eea', '#764ba2']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={[styles.statCard, { shadowColor: '#667eea', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                            >
+                                <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                                <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+                                <View style={styles.statIcon}><Calendar size={22} color="#fff" /></View>
+                                <View>
+                                    <Text style={styles.statValue}>{trips.length}</Text>
+                                    <Text style={styles.statLabel}>Today's Trips</Text>
+                                </View>
                             </LinearGradient>
                         </HapticTouchable>
                         <HapticTouchable style={{ flex: 1 }}>
-                            <LinearGradient colors={['#4ECDC4', '#44A08D']} style={styles.statCard}>
-                                <View style={styles.statIcon}><CheckCircle2 size={24} color="#fff" /></View>
-                                <Text style={styles.statValue}>{completedTrips}</Text>
-                                <Text style={styles.statLabel}>Completed</Text>
+                            <LinearGradient
+                                colors={['#4ECDC4', '#26A69A']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={[styles.statCard, { shadowColor: '#4ECDC4', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                            >
+                                <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                                <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+                                <View style={styles.statIcon}><CheckCircle2 size={22} color="#fff" /></View>
+                                <View>
+                                    <Text style={styles.statValue}>{completedTrips}</Text>
+                                    <Text style={styles.statLabel}>Completed</Text>
+                                </View>
                             </LinearGradient>
                         </HapticTouchable>
                         <HapticTouchable style={{ flex: 1 }}>
-                            <LinearGradient colors={['#f093fb', '#f5576c']} style={styles.statCard}>
-                                <View style={styles.statIcon}><Users size={24} color="#fff" /></View>
-                                <Text style={styles.statValue}>{totalStudents}</Text>
-                                <Text style={styles.statLabel}>Students</Text>
+                            <LinearGradient
+                                colors={['#f093fb', '#f5576c']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={[styles.statCard, { shadowColor: '#f093fb', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                            >
+                                <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                                <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+                                <View style={styles.statIcon}><Users size={22} color="#fff" /></View>
+                                <View>
+                                    <Text style={styles.statValue}>{totalStudents}</Text>
+                                    <Text style={styles.statLabel}>Students</Text>
+                                </View>
                             </LinearGradient>
                         </HapticTouchable>
                     </View>
@@ -3065,6 +3217,10 @@ export default function HomeScreen() {
                             <Animated.View key={action.label} entering={FadeInDown.delay(300 + index * 50).duration(400)}>
                                 <HapticTouchable onPress={() => action.href && navigateOnce(action.href)} disabled={!action.href}>
                                     <View style={[styles.actionButton, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5 }]}>
+                                        {/* Decorative Graphics */}
+                                        <View style={{ position: 'absolute', top: -15, right: -15, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.2)' }} />
+                                        <View style={{ position: 'absolute', bottom: -20, left: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.15)' }} />
+
                                         <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
                                             <action.icon size={22} color={action.color} />
                                         </View>
@@ -3193,7 +3349,7 @@ export default function HomeScreen() {
                 return Array.isArray(res.data) ? res.data : (res.data?.academicYears || []);
             },
             enabled: !!schoolId,
-            staleTime: 1000 * 60 * 10, // Cache for 10 minutes
+            ...CACHE_CONFIG.STATIC,
         });
 
         // Get active academic year from fetched data
@@ -3268,7 +3424,7 @@ export default function HomeScreen() {
                 return res.data;
             },
             enabled: !!schoolId && !!userId,
-            staleTime: 1000 * 60 * 2,
+            ...CACHE_CONFIG.MODERATE,
         });
 
         const notices = recentNotices?.notices?.map((n) => ({
@@ -3571,7 +3727,7 @@ export default function HomeScreen() {
                 return Array.isArray(res.data) ? res.data : (res.data?.academicYears || []);
             },
             enabled: !!schoolId,
-            staleTime: 1000 * 60 * 10, // Cache for 10 minutes
+            ...CACHE_CONFIG.STATIC,
         });
 
         // Get active academic year from fetched data
@@ -3615,7 +3771,7 @@ export default function HomeScreen() {
                 return res.data;
             },
             enabled: !!schoolId && !!userId,
-            staleTime: 1000 * 60 * 2,
+            ...CACHE_CONFIG.MODERATE,
         });
 
         const notices = recentNotices?.notices?.map((n) => ({
@@ -4658,45 +4814,51 @@ const styles = StyleSheet.create({
     },
     statsGrid: {
         flexDirection: 'row',
-        gap: 10,
+        gap: 12,
+        paddingHorizontal: 2,
     },
     statCard: {
         flex: 1,
-        padding: 14,
-        borderRadius: 16,
-        alignItems: 'center',
-        minHeight: 110,
-        justifyContent: 'center',
+        padding: 16,
+        borderRadius: 20,
+        minHeight: 130,
+        justifyContent: 'space-between',
+        overflow: 'hidden',
+        position: 'relative',
     },
     statIcon: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        backgroundColor: 'rgba(255,255,255,0.3)',
+        width: 44,
+        height: 44,
+        borderRadius: 14,
+        backgroundColor: 'rgba(255,255,255,0.2)',
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.3)',
     },
     statIconBg: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        backgroundColor: 'rgba(255,255,255,0.25)',
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        backgroundColor: 'rgba(255,255,255,0.2)',
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 8,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.25)',
     },
     statValue: {
-        fontSize: 16,
-        fontWeight: '700',
+        fontSize: 28,
+        fontWeight: '800',
         color: '#fff',
-        marginBottom: 2,
-        textAlign: 'center',
+        marginTop: 12,
+        letterSpacing: -0.5,
     },
     statLabel: {
-        fontSize: 11,
-        color: 'rgba(255,255,255,0.9)',
+        fontSize: 12,
+        color: 'rgba(255,255,255,0.85)',
         fontWeight: '600',
+        letterSpacing: 0.3,
+        marginTop: 2,
     },
     // Default 2x2 grid for most roles
     actionsGrid: {
@@ -4706,13 +4868,15 @@ const styles = StyleSheet.create({
         marginTop: 12,
     },
     actionButton: {
-        // 2 columns: screen - section padding (12 or 16 on each side) - gap / 2
+        // 2 columns
         width: (SCREEN_WIDTH - (isSmallDevice ? 24 : 32) - 12) / 2,
         padding: 16,
-        borderRadius: 16,
+        borderRadius: 20,
         alignItems: 'center',
         justifyContent: 'center',
-        minHeight: 100,
+        minHeight: 120, // Taller for better proportions
+        overflow: 'hidden',
+        position: 'relative',
     },
     // 3x3 grid for Director/Principal
     actionsGrid3x3: {
@@ -4723,24 +4887,27 @@ const styles = StyleSheet.create({
     },
     actionButton3x3: {
         width: (SCREEN_WIDTH - 40 - 20) / 3, // 3 columns
-        padding: 16,
-        borderRadius: 16,
+        padding: 14,
+        borderRadius: 18,
         alignItems: 'center',
         justifyContent: 'center',
+        minHeight: 100,
     },
     actionIcon: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
+        width: 50,
+        height: 50,
+        borderRadius: 16,
         justifyContent: 'center',
         alignItems: 'center',
-        marginBottom: 8,
+        marginBottom: 10,
     },
     actionLabel: {
-        fontSize: 13,
+        fontSize: 14,
         fontWeight: '600',
         color: '#333',
         textAlign: 'center',
+        marginTop: 2,
+        lineHeight: 18,
     },
     eventsContainer: {
         gap: 12,
@@ -5113,7 +5280,7 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
             };
         },
         enabled: !!schoolId && !!userId,
-        staleTime: 1000 * 60 * 2, // 2 minutes
+        ...CACHE_CONFIG.MODERATE,
     });
 
     // Extract data
@@ -5335,35 +5502,53 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
             <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.section}>
                 <View style={styles.statsGrid}>
                     <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/teachers/stats-calendar')}>
-                        <LinearGradient colors={['#0EA5E9', '#0284C7']} style={[styles.statCard, { overflow: 'hidden' }]}>
-                            {/* Pattern */}
-                            <View style={{ position: 'absolute', top: -10, right: -10, width: 50, height: 50, borderRadius: 25, backgroundColor: 'rgba(255,255,255,0.1)' }} />
-                            <View style={{ position: 'absolute', bottom: -10, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.1)' }} />
-
-                            <View style={styles.statIcon}><CalendarDays size={24} color="#fff" /></View>
-                            <Text style={styles.statValue}>{totalDaysWorked}</Text>
-                            <Text style={styles.statLabel}>Days Present</Text>
+                        <LinearGradient
+                            colors={['#0EA5E9', '#0284C7']}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={[styles.statCard, { shadowColor: '#0EA5E9', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                        >
+                            <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                            <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+                            <View style={styles.statIcon}><CalendarDays size={22} color="#fff" /></View>
+                            <View>
+                                <Text style={styles.statValue}>{totalDaysWorked}</Text>
+                                <Text style={styles.statLabel}>Days Present</Text>
+                            </View>
                         </LinearGradient>
                     </HapticTouchable>
 
                     <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/teachers/stats-calendar')}>
-                        <LinearGradient colors={['#F59E0B', '#D97706']} style={[styles.statCard, { overflow: 'hidden' }]}>
-                            <View style={{ position: 'absolute', top: -20, left: -10, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.15)' }} />
-
-                            <View style={styles.statIcon}><Award size={24} color="#fff" /></View>
-                            <Text style={styles.statValue}>{Math.round(attendancePercent)}%</Text>
-                            <Text style={styles.statLabel}>Attendance</Text>
+                        <LinearGradient
+                            colors={['#F59E0B', '#D97706']}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={[styles.statCard, { shadowColor: '#F59E0B', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                        >
+                            <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                            <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+                            <View style={styles.statIcon}><Award size={22} color="#fff" /></View>
+                            <View>
+                                <Text style={styles.statValue}>{Math.round(attendancePercent)}%</Text>
+                                <Text style={styles.statLabel}>Attendance</Text>
+                            </View>
                         </LinearGradient>
                     </HapticTouchable>
 
                     <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/teachers/stats-calendar')}>
-                        <LinearGradient colors={['#EF4444', '#DC2626']} style={[styles.statCard, { overflow: 'hidden' }]}>
-                            <View style={{ position: 'absolute', bottom: -15, right: -15, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.1)' }} />
-                            <View style={{ position: 'absolute', top: 10, left: -10, width: 30, height: 30, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.1)' }} />
-
-                            <View style={styles.statIcon}><Umbrella size={24} color="#fff" /></View>
-                            <Text style={styles.statValue}>{totalLeavesTaken}</Text>
-                            <Text style={styles.statLabel}>Leaves Taken</Text>
+                        <LinearGradient
+                            colors={['#EF4444', '#DC2626']}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={[styles.statCard, { shadowColor: '#EF4444', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                        >
+                            <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                            <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+                            <View style={styles.statIcon}><Umbrella size={22} color="#fff" /></View>
+                            <View>
+                                <Text style={styles.statValue}>{totalLeavesTaken}</Text>
+                                <Text style={styles.statLabel}>Leaves Taken</Text>
+                            </View>
                         </LinearGradient>
                     </HapticTouchable>
                 </View>
@@ -5381,6 +5566,10 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
                             <Animated.View key={action.label} entering={FadeInDown.delay(500 + index * 50).duration(400)}>
                                 <HapticTouchable onPress={() => action.params ? navigateOnce(action.href, action.params) : navigateOnce(action.href || '')}>
                                     <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}>
+                                        {/* Decorative Graphics */}
+                                        <View style={{ position: 'absolute', top: -15, right: -15, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.2)' }} />
+                                        <View style={{ position: 'absolute', bottom: -20, left: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.15)' }} />
+
                                         <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}><action.icon size={22} color={action.color} /></View>
                                         <Text style={styles.actionLabel} numberOfLines={1}>{action.label}</Text>
                                     </View>

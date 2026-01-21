@@ -1660,7 +1660,7 @@ export default function HomeScreen() {
             })) || [],
             [data]);
 
-        const icon = require("../../assets/icon.png");
+        const icon = require("../../assets/avatar_face.png");
         const parentData = useMemo(() => ({
             name: "Sarah Johnson",
             email: "sarah.johnson@email.com",

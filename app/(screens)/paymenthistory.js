@@ -54,6 +54,7 @@ export default function PaymentHistoryScreen() {
     const [selectedReceipt, setSelectedReceipt] = useState(null);
     const [receiptModalVisible, setReceiptModalVisible] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);
+    const [filterMode, setFilterMode] = useState('ALL'); // 'ALL' | 'ONLINE' | 'CASH'
 
     const queryClient = useQueryClient();
 
@@ -244,6 +245,14 @@ Thank you for your payment!
         lastPayment: payments?.[0],
     };
 
+    // Filter payments
+    const filteredPayments = payments?.filter(payment => {
+        if (filterMode === 'ALL') return true;
+        if (filterMode === 'CASH') return ['CASH', 'CHEQUE'].includes(payment.paymentMethod);
+        if (filterMode === 'ONLINE') return !['CASH', 'CHEQUE'].includes(payment.paymentMethod);
+        return true;
+    });
+
     if (!childData) {
         return (
             <View style={styles.loaderContainer}>
@@ -345,7 +354,30 @@ Thank you for your payment!
                                 <Text style={styles.sectionTitle}>All Payments</Text>
                             </View>
 
-                            {payments.map((payment, index) => {
+                            {/* Filter Tabs */}
+                            <ScrollView
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                contentContainerStyle={{ gap: 8, paddingBottom: 16 }}
+                            >
+                                {['ALL', 'ONLINE', 'CASH'].map((mode) => (
+                                    <HapticTouchable key={mode} onPress={() => setFilterMode(mode)}>
+                                        <View style={[
+                                            styles.filterChip,
+                                            filterMode === mode && styles.filterChipActive
+                                        ]}>
+                                            <Text style={[
+                                                styles.filterChipText,
+                                                filterMode === mode && styles.filterChipTextActive
+                                            ]}>
+                                                {mode === 'ALL' ? 'All Transactions' : mode === 'CASH' ? 'Cash/Cheque' : 'Online'}
+                                            </Text>
+                                        </View>
+                                    </HapticTouchable>
+                                ))}
+                            </ScrollView>
+
+                            {filteredPayments?.map((payment, index) => {
                                 const MethodIcon = getPaymentMethodIcon(payment.paymentMethod);
 
                                 return (
@@ -796,12 +828,32 @@ const styles = StyleSheet.create({
     receiptTotalLabel: { fontSize: 15, fontWeight: '700', color: '#111' },
     receiptTotalValue: { fontSize: 18, fontWeight: '700', color: '#0469ff' },
     receiptFooter: { alignItems: 'center', marginTop: 24, marginBottom: 16 },
-    receiptFooterText: { fontSize: 12, color: '#999' },
     receiptFooterSubtext: {
         fontSize: 11,
         color: '#ccc',
         marginTop: 4,
     },
+    filterChip: {
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        borderRadius: 20,
+        backgroundColor: '#f5f5f5',
+        borderWidth: 1,
+        borderColor: '#e5e7eb',
+    },
+    filterChipActive: {
+        backgroundColor: '#0469ff',
+        borderColor: '#0469ff',
+    },
+    filterChipText: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#666',
+    },
+    filterChipTextActive: {
+        color: '#fff',
+    },
+
     receiptActions: {
         flexDirection: 'row',
         gap: 12,

@@ -345,14 +345,28 @@ class FCMService {
             // FALLBACK: If "notification" payload is missing (Data-only), show Local Notification
             if (!remoteMessage.notification && remoteMessage.data?.title) {
                 // console.log('⚠️ Showing Local Notification for Data-Only Message (Service)');
+
+                // Build notification content with optional image
+                const notificationContent = {
+                    title: remoteMessage.data.title,
+                    body: remoteMessage.data.body || remoteMessage.data.message,
+                    data: remoteMessage.data,
+                    sound: true,
+                    vibrate: [0, 250, 250, 250],
+                };
+
+                // Add image attachment if imageUrl is provided (works on iOS)
+                const imageUrl = remoteMessage.data.imageUrl;
+                if (imageUrl) {
+                    console.log(imageUrl, 'found');
+
+                    notificationContent.attachments = [
+                        { url: imageUrl, identifier: 'image' }
+                    ];
+                }
+
                 await Notifications.scheduleNotificationAsync({
-                    content: {
-                        title: remoteMessage.data.title,
-                        body: remoteMessage.data.body || remoteMessage.data.message,
-                        data: remoteMessage.data,
-                        sound: true,
-                        vibrate: [0, 250, 250, 250],
-                    },
+                    content: notificationContent,
                     trigger: null, // Show immediately
                 });
             }

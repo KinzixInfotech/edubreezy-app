@@ -11,7 +11,9 @@ import {
     Linking,
     Alert,
     Modal,
+    Dimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
@@ -33,7 +35,11 @@ import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
 
 
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const isSmallDevice = SCREEN_WIDTH < 375;
+
 export default function HomeworkScreen() {
+    const insets = useSafeAreaInsets();
     const queryClient = useQueryClient();
     const [refreshing, setRefreshing] = useState(false);
     const [filterModalVisible, setFilterModalVisible] = useState(false);
@@ -412,8 +418,9 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 16,
-        paddingTop: 50,
+        paddingTop: isSmallDevice ? 40 : 50,
         paddingBottom: 16,
+        marginTop: isSmallDevice ? 8 : 0,
         borderBottomWidth: 1,
         borderBottomColor: '#f0f0f0',
         backgroundColor: '#fff',

@@ -520,7 +520,7 @@ const styles = StyleSheet.create({
   categoryContainer: {
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
-    maxHeight: 56,
+    // Removed maxHeight: 56 to prevent filters from being cut off/collapsed
   },
   categoryContent: {
     paddingHorizontal: 16,

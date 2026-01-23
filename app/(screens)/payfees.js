@@ -61,14 +61,16 @@ export default function PayFeesScreen() {
   const schoolId = userData?.schoolId;
 
 
-  // Fetch active academic year
-  const { data: academicYear } = useQuery({
-    queryKey: ['academic-year', schoolId],
+  // Fetch active academic year - ensure fresh fetch on mount
+  const { data: academicYear, isLoading: academicYearLoading } = useQuery({
+    queryKey: ['academic-year-fees', schoolId],
     queryFn: async () => {
       const res = await api.get(`/schools/academic-years?schoolId=${schoolId}`);
       return res.data?.find(y => y.isActive);
     },
     enabled: !!schoolId,
+    refetchOnMount: 'always', // Always refetch on screen mount to ensure fresh data
+    staleTime: 1000 * 60 * 5,
   });
 
   // Fetch student fee details for active academic year
@@ -80,6 +82,7 @@ export default function PayFeesScreen() {
     },
     enabled: !!childData && !!academicYear?.id,
     staleTime: 1000 * 60 * 2,
+    refetchOnMount: 'always', // Ensure fresh load
   });
 
   // Payment mutation
@@ -287,7 +290,7 @@ export default function PayFeesScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" />
         }
       >
-        {feeLoading ? (
+        {(feeLoading || academicYearLoading) ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#0469ff" />
           </View>

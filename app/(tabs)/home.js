@@ -5501,7 +5501,7 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
             {/* Quick Stats - Enhanced */}
             <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.section}>
                 <View style={styles.statsGrid}>
-                    <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/teachers/stats-calendar')}>
+                    <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/teachers/attendance')}>
                         <LinearGradient
                             colors={['#0EA5E9', '#0284C7']}
                             start={{ x: 0, y: 0 }}
@@ -5518,7 +5518,7 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
                         </LinearGradient>
                     </HapticTouchable>
 
-                    <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/teachers/stats-calendar')}>
+                    <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/teachers/attendance')}>
                         <LinearGradient
                             colors={['#F59E0B', '#D97706']}
                             start={{ x: 0, y: 0 }}
@@ -5535,7 +5535,7 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
                         </LinearGradient>
                     </HapticTouchable>
 
-                    <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/teachers/stats-calendar')}>
+                    <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/teachers/attendance')}>
                         <LinearGradient
                             colors={['#EF4444', '#DC2626']}
                             start={{ x: 0, y: 0 }}

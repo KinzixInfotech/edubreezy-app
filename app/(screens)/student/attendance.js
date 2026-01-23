@@ -67,15 +67,18 @@ export default function StudentAttendanceScreen() {
     const month = currentMonth.getMonth() + 1;
     const year = currentMonth.getFullYear();
 
-    // Fetch attendance stats
+    // Fetch attendance stats - load 6 months at once to prevent refetch on month navigation
     const { data: statsData, isLoading, refetch } = useQuery({
-        queryKey: ['student-attendance', schoolId, userId, month, year],
+        // Cache key uses only user/school - not month/year since we load 6 months at once
+        queryKey: ['student-attendance-6months', schoolId, userId],
         queryFn: async () => {
-            const res = await api.get(`/schools/${schoolId}/attendance/stats?userId=${userId}&month=${month}&year=${year}`);
+            // Request 6 months of data in one API call
+            const res = await api.get(`/schools/${schoolId}/attendance/stats?userId=${userId}&months=6`);
             return res.data;
         },
         enabled: !!schoolId && !!userId,
-        staleTime: 1000 * 60 * 5,
+        staleTime: 1000 * 60 * 10, // Cache for 10 minutes - no refetch on month navigation
+        gcTime: 1000 * 60 * 30, // Keep in cache for 30 minutes
     });
 
     const monthlyStats = statsData?.monthlyStats || {};

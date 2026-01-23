@@ -76,7 +76,6 @@ const LoginSchema = z.object({
 // School info card component - Professional Design with Switch option
 const SchoolInfoCard = ({ schoolData, onSwitchSchool }) => {
     if (!schoolData) return null;
-
     return (
         <Animated.View
             entering={FadeInDown.delay(200).duration(600).springify()}
@@ -631,29 +630,6 @@ export default function LoginScreen() {
                             </TouchableOpacity>
                         </Animated.View>
 
-                        {/* Footer - Contact Admin */}
-                        <View style={styles.footer}>
-                            <Text style={styles.footerText}>
-                                Don't have an account?{' '}
-                            </Text>
-                            <TouchableOpacity activeOpacity={0.7}>
-                                <Text style={styles.footerLink}>Contact Admin</Text>
-                            </TouchableOpacity>
-                        </View>
-
-                        {/* Bottom Branding */}
-                        <Animated.View
-                            entering={FadeIn.delay(1000).duration(500)}
-                            style={styles.branding}
-                        >
-                            <View style={styles.brandingContent}>
-                                {/* <Ionicons name="school" size={18} color="#9CA3AF" /> */}
-                                <Text style={styles.brandingText}>edubreezy</Text>
-                            </View>
-                            <Text style={styles.brandingSubtext}>
-                                Modern School Management
-                            </Text>
-                        </Animated.View>
                     </View>
                 </View>
             </ScrollView>

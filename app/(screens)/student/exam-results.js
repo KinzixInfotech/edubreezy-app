@@ -46,26 +46,19 @@ export default function StudentExamResultsScreen() {
     });
 
     const schoolId = userData?.schoolId;
-    const userId = userData?.studentData?.userId || userData?.studentdatafull?.userId || userData?.id;
-    const studentRecordId = userData?.studentData?.id || userData?.studentdatafull?.id;
-    // classId can be at different paths depending on full vs minimal user data
-    const classId = userData?.studentData?.classId ||
-        userData?.studentData?.class?.id ||
-        userData?.class?.id ||
-        userData?.classs?.id;
+    // Use userId for exam API - this is the same pattern that works in home.js StudentView
+    const userId = userData?.id;
 
     // Fetch exam results for student using same API as parent module
     const { data: examData, isLoading: resultsLoading, refetch } = useQuery({
-        queryKey: ['student-exam-results', schoolId, studentRecordId || userId],
+        queryKey: ['student-exam-results', schoolId, userId],
         queryFn: async () => {
-            // Use the same API as parent module which returns pre-filtered results
-            const studentId = studentRecordId || userId;
-            console.log('📊 Fetching student results for ID:', studentId);
-            const res = await api.get(`/schools/${schoolId}/examination/student-results?studentId=${studentId}`);
+            console.log('📊 Fetching student results for ID:', userId);
+            const res = await api.get(`/schools/${schoolId}/examination/student-results?studentId=${userId}`);
             console.log('📊 Got exam data:', res.data);
             return res.data;
         },
-        enabled: !!schoolId && !!(studentRecordId || userId),
+        enabled: !!schoolId && !!userId,
         staleTime: 1000 * 60 * 5,
     });
 

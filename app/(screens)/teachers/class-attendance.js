@@ -155,22 +155,29 @@ export default function TeacherClassAttendance() {
         staleTime: 1000 * 60 * 2,
     });
 
-    // Fetch selected student's attendance details for current month
+    // Fetch selected student's attendance details - load 6 months at once
     const studentId = selectedStudent?.userId || selectedStudent?.id;
 
     const { data: studentStatsData, isLoading: studentStatsLoading } = useQuery({
-        queryKey: ['student-attendance-detail', studentId, currentMonth.getMonth(), currentMonth.getFullYear()],
+        // Cache key uses studentId only - we load all 6 months data at once
+        queryKey: ['student-attendance-detail-6months', studentId],
         queryFn: async () => {
             if (!studentId) return null;
-            const month = currentMonth.getMonth() + 1;
-            const year = currentMonth.getFullYear();
+            // Calculate date range: 3 months back to 3 months forward
+            const now = new Date();
+            const startMonth = now.getMonth() - 2; // 3 months back (including current)
+            const startYear = now.getFullYear() + Math.floor(startMonth / 12);
+            const actualStartMonth = ((startMonth % 12) + 12) % 12 + 1;
+
+            // Get 6 months of data in one request
             const res = await api.get(
-                `/schools/${schoolId}/attendance/stats?userId=${studentId}&month=${month}&year=${year}`
+                `/schools/${schoolId}/attendance/stats?userId=${studentId}&months=6`
             );
             return res.data;
         },
         enabled: !!studentId && !!schoolId,
-        staleTime: 1000 * 60 * 5, // Cache for 5 minutes
+        staleTime: 1000 * 60 * 10, // Cache for 10 minutes - no refetch on month navigation
+        gcTime: 1000 * 60 * 30, // Keep in cache for 30 minutes
     });
 
     const students = studentsData?.students || [];

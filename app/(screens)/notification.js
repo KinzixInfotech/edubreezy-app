@@ -127,15 +127,19 @@ export default function NotificationScreen() {
     const userId = userData?.id;
     const schoolId = userData?.schoolId;
 
-    // Fetch Notifications
+    // Fetch Notifications - optimized with caching
     const { data, isLoading, refetch } = useQuery({
-        queryKey: ['notifications', userId],
+        queryKey: ['notifications', userId, schoolId],
         queryFn: async () => {
             if (!userId) return { notifications: { today: [], yesterday: [], earlier: [] }, unreadCount: 0 };
             const res = await api.get(`/notifications?userId=${userId}&schoolId=${schoolId}&limit=50`);
             return res.data;
         },
-        enabled: !!userId,
+        enabled: !!userId && !!schoolId,
+        staleTime: 1000 * 60 * 2, // 2 min stale time - prevents refetch on remount
+        gcTime: 1000 * 60 * 30, // 30 min garbage collection
+        refetchOnMount: false, // Don't refetch on every mount
+        refetchOnWindowFocus: false, // Don't refetch on app focus
     });
 
     // Mutations

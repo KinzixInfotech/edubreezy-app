@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
     View, Text, StyleSheet, Pressable, ScrollView, RefreshControl,
-    Alert, ActivityIndicator, AppState, Platform, Modal, TextInput
+    Alert, ActivityIndicator, AppState, Platform, Modal, TextInput,
+    KeyboardAvoidingView
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Location from 'expo-location';
@@ -977,6 +978,13 @@ export default function SelfAttendance() {
                     <FileText size={20} color="#3B82F6" />
                     <Text style={styles.secondaryButtonText}>Apply Leave</Text>
                 </Pressable>
+                <Pressable
+                    style={styles.secondaryButton}
+                    onPress={() => setShowRegularizationModal(true)}
+                >
+                    <Calendar size={20} color="#F59E0B" />
+                    <Text style={styles.secondaryButtonText}>Regularization</Text>
+                </Pressable>
             </Animated.View>
 
             {/* Windows Info - Enhanced with contextual messages */}
@@ -1112,146 +1120,276 @@ export default function SelfAttendance() {
                 animationType="slide"
                 onRequestClose={() => setShowLeaveModal(false)}
             >
-                <View style={styles.modalOverlay}>
-                    <View style={styles.modalContent}>
-                        <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>Apply for Leave</Text>
-                            <Pressable onPress={() => setShowLeaveModal(false)}>
-                                <CloseIcon size={24} color="#666" />
-                            </Pressable>
-                        </View>
-
-                        <ScrollView style={styles.modalForm} contentContainerStyle={{
-                            paddingBottom: 30,
-                        }}>
-                            <Text style={styles.inputLabel}>Leave Type</Text>
-                            <View style={styles.pickerContainer}>
-                                {['CASUAL', 'SICK', 'EARNED', 'EMERGENCY'].map((type) => (
-                                    <Pressable
-                                        key={type}
-                                        style={[
-                                            styles.pickerOption,
-                                            leaveForm.leaveType === type && styles.pickerOptionActive
-                                        ]}
-                                        onPress={() => setLeaveForm({ ...leaveForm, leaveType: type })}
-                                    >
-                                        <Text style={[
-                                            styles.pickerOptionText,
-                                            leaveForm.leaveType === type && styles.pickerOptionTextActive
-                                        ]}>
-                                            {type}
-                                        </Text>
-                                    </Pressable>
-                                ))}
+                <KeyboardAvoidingView
+                    style={{ flex: 1 }}
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+                >
+                    <View style={styles.modalOverlay}>
+                        <View style={styles.modalContent}>
+                            <View style={styles.modalHeader}>
+                                <Text style={styles.modalTitle}>Apply for Leave</Text>
+                                <Pressable onPress={() => setShowLeaveModal(false)}>
+                                    <CloseIcon size={24} color="#666" />
+                                </Pressable>
                             </View>
 
-                            <Text style={styles.inputLabel}>Start Date *</Text>
-                            <Pressable
-                                style={[styles.dateInput, errors.startDate && styles.inputError]}
-                                onPress={() => setShowStartDatePicker(true)}
-                            >
-                                <Calendar size={18} color="#666" />
-                                <Text style={styles.dateText}>{formatDate(leaveForm.startDate)}</Text>
-                                <ChevronRight size={18} color="#666" />
-                            </Pressable>
-                            {errors.startDate && <Text style={styles.errorText}>{errors.startDate}</Text>}
+                            <ScrollView style={styles.modalForm} contentContainerStyle={{
+                                paddingBottom: 30,
+                            }}>
+                                <Text style={styles.inputLabel}>Leave Type</Text>
+                                <View style={styles.pickerContainer}>
+                                    {['CASUAL', 'SICK', 'EARNED', 'EMERGENCY'].map((type) => (
+                                        <Pressable
+                                            key={type}
+                                            style={[
+                                                styles.pickerOption,
+                                                leaveForm.leaveType === type && styles.pickerOptionActive
+                                            ]}
+                                            onPress={() => setLeaveForm({ ...leaveForm, leaveType: type })}
+                                        >
+                                            <Text style={[
+                                                styles.pickerOptionText,
+                                                leaveForm.leaveType === type && styles.pickerOptionTextActive
+                                            ]}>
+                                                {type}
+                                            </Text>
+                                        </Pressable>
+                                    ))}
+                                </View>
 
-                            {showStartDatePicker && (
-                                <DateTimePicker
-                                    value={leaveForm.startDate ? new Date(leaveForm.startDate) : new Date()}
-                                    mode="date"
-                                    display="default"
-                                    onChange={(event, selectedDate) => {
-                                        setShowStartDatePicker(false);
-                                        if (selectedDate) {
-                                            setLeaveForm({ ...leaveForm, startDate: selectedDate.toISOString().split('T')[0] });
-                                        }
-                                    }}
-                                />
-                            )}
+                                <Text style={styles.inputLabel}>Start Date *</Text>
+                                <Pressable
+                                    style={[styles.dateInput, errors.startDate && styles.inputError]}
+                                    onPress={() => setShowStartDatePicker(true)}
+                                >
+                                    <Calendar size={18} color="#666" />
+                                    <Text style={styles.dateText}>{formatDate(leaveForm.startDate)}</Text>
+                                    <ChevronRight size={18} color="#666" />
+                                </Pressable>
+                                {errors.startDate && <Text style={styles.errorText}>{errors.startDate}</Text>}
 
-                            <Text style={styles.inputLabel}>End Date *</Text>
-                            <Pressable
-                                style={[styles.dateInput, errors.endDate && styles.inputError]}
-                                onPress={() => setShowEndDatePicker(true)}
-                            >
-                                <Calendar size={18} color="#666" />
-                                <Text style={styles.dateText}>{formatDate(leaveForm.endDate)}</Text>
-                                <ChevronRight size={18} color="#666" />
-                            </Pressable>
-                            {errors.endDate && <Text style={styles.errorText}>{errors.endDate}</Text>}
-
-                            {showEndDatePicker && (
-                                <DateTimePicker
-                                    value={leaveForm.endDate ? new Date(leaveForm.endDate) : new Date()}
-                                    mode="date"
-                                    display="default"
-                                    minimumDate={leaveForm.startDate ? new Date(leaveForm.startDate) : new Date()}
-                                    onChange={(event, selectedDate) => {
-                                        setShowEndDatePicker(false);
-                                        if (selectedDate) {
-                                            setLeaveForm({ ...leaveForm, endDate: selectedDate.toISOString().split('T')[0] });
-                                        }
-                                    }}
-                                />
-                            )}
-
-                            <Text style={styles.inputLabel}>Reason *</Text>
-                            <TextInput
-                                style={[styles.input, styles.textArea, errors.reason && styles.inputError]}
-                                placeholder="Enter reason for leave (min 10 characters)"
-                                value={leaveForm.reason}
-                                onChangeText={(text) => setLeaveForm({ ...leaveForm, reason: text })}
-                                multiline
-                                numberOfLines={4}
-                            />
-                            {errors.reason && <Text style={styles.errorText}>{errors.reason}</Text>}
-
-                            <Text style={styles.inputLabel}>Emergency Contact (Optional)</Text>
-                            <TextInput
-                                style={styles.input}
-                                placeholder="Contact name"
-                                value={leaveForm.emergencyContact}
-                                onChangeText={(text) => setLeaveForm({ ...leaveForm, emergencyContact: text })}
-                            />
-
-                            <Text style={styles.inputLabel}>Emergency Phone (Optional)</Text>
-                            <TextInput
-                                style={styles.input}
-                                placeholder="Contact number"
-                                value={leaveForm.emergencyContactPhone}
-                                onChangeText={(text) => setLeaveForm({ ...leaveForm, emergencyContactPhone: text })}
-                                keyboardType="phone-pad"
-                            />
-                        </ScrollView>
-
-                        <View style={styles.modalActions}>
-                            <Pressable
-                                style={[styles.modalButton, styles.modalButtonSecondary]}
-                                onPress={() => {
-                                    setShowLeaveModal(false);
-                                    setErrors({});
-                                }}
-                            >
-                                <Text style={styles.modalButtonTextSecondary}>Cancel</Text>
-                            </Pressable>
-                            <Pressable
-                                style={[styles.modalButton, styles.modalButtonPrimary]}
-                                onPress={handleLeaveSubmit}
-                                disabled={leaveRequestMutation.isPending}
-                            >
-                                {leaveRequestMutation.isPending ? (
-                                    <ActivityIndicator color="#fff" />
-                                ) : (
-                                    <>
-                                        <Send size={18} color="#fff" />
-                                        <Text style={styles.modalButtonTextPrimary}>Submit</Text>
-                                    </>
+                                {showStartDatePicker && (
+                                    <DateTimePicker
+                                        value={leaveForm.startDate ? new Date(leaveForm.startDate) : new Date()}
+                                        mode="date"
+                                        display="default"
+                                        onChange={(event, selectedDate) => {
+                                            setShowStartDatePicker(false);
+                                            if (selectedDate) {
+                                                setLeaveForm({ ...leaveForm, startDate: selectedDate.toISOString().split('T')[0] });
+                                            }
+                                        }}
+                                    />
                                 )}
-                            </Pressable>
+
+                                <Text style={styles.inputLabel}>End Date *</Text>
+                                <Pressable
+                                    style={[styles.dateInput, errors.endDate && styles.inputError]}
+                                    onPress={() => setShowEndDatePicker(true)}
+                                >
+                                    <Calendar size={18} color="#666" />
+                                    <Text style={styles.dateText}>{formatDate(leaveForm.endDate)}</Text>
+                                    <ChevronRight size={18} color="#666" />
+                                </Pressable>
+                                {errors.endDate && <Text style={styles.errorText}>{errors.endDate}</Text>}
+
+                                {showEndDatePicker && (
+                                    <DateTimePicker
+                                        value={leaveForm.endDate ? new Date(leaveForm.endDate) : new Date()}
+                                        mode="date"
+                                        display="default"
+                                        minimumDate={leaveForm.startDate ? new Date(leaveForm.startDate) : new Date()}
+                                        onChange={(event, selectedDate) => {
+                                            setShowEndDatePicker(false);
+                                            if (selectedDate) {
+                                                setLeaveForm({ ...leaveForm, endDate: selectedDate.toISOString().split('T')[0] });
+                                            }
+                                        }}
+                                    />
+                                )}
+
+                                <Text style={styles.inputLabel}>Reason *</Text>
+                                <TextInput
+                                    style={[styles.input, styles.textArea, errors.reason && styles.inputError]}
+                                    placeholder="Enter reason for leave (min 10 characters)"
+                                    value={leaveForm.reason}
+                                    onChangeText={(text) => setLeaveForm({ ...leaveForm, reason: text })}
+                                    multiline
+                                    numberOfLines={4}
+                                />
+                                {errors.reason && <Text style={styles.errorText}>{errors.reason}</Text>}
+
+                                <Text style={styles.inputLabel}>Emergency Contact (Optional)</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="Contact name"
+                                    value={leaveForm.emergencyContact}
+                                    onChangeText={(text) => setLeaveForm({ ...leaveForm, emergencyContact: text })}
+                                />
+
+                                <Text style={styles.inputLabel}>Emergency Phone (Optional)</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    placeholder="Contact number"
+                                    value={leaveForm.emergencyContactPhone}
+                                    onChangeText={(text) => setLeaveForm({ ...leaveForm, emergencyContactPhone: text })}
+                                    keyboardType="phone-pad"
+                                />
+                            </ScrollView>
+
+                            <View style={styles.modalActions}>
+                                <Pressable
+                                    style={[styles.modalButton, styles.modalButtonSecondary]}
+                                    onPress={() => {
+                                        setShowLeaveModal(false);
+                                        setErrors({});
+                                    }}
+                                >
+                                    <Text style={styles.modalButtonTextSecondary}>Cancel</Text>
+                                </Pressable>
+                                <Pressable
+                                    style={[styles.modalButton, styles.modalButtonPrimary]}
+                                    onPress={handleLeaveSubmit}
+                                    disabled={leaveRequestMutation.isPending}
+                                >
+                                    {leaveRequestMutation.isPending ? (
+                                        <ActivityIndicator color="#fff" />
+                                    ) : (
+                                        <>
+                                            <Send size={18} color="#fff" />
+                                            <Text style={styles.modalButtonTextPrimary}>Submit</Text>
+                                        </>
+                                    )}
+                                </Pressable>
+                            </View>
                         </View>
                     </View>
-                </View>
+                </KeyboardAvoidingView>
+            </Modal>
+
+            {/* Regularization Request Modal - with KeyboardAvoidingView and IST timezone fix */}
+            <Modal
+                visible={showRegularizationModal}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setShowRegularizationModal(false)}
+            >
+                <KeyboardAvoidingView
+                    style={{ flex: 1 }}
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+                >
+                    <View style={styles.modalOverlay}>
+                        <View style={styles.modalContent}>
+                            <View style={styles.modalHeader}>
+                                <Text style={styles.modalTitle}>Request Regularization</Text>
+                                <Pressable onPress={() => setShowRegularizationModal(false)}>
+                                    <CloseIcon size={24} color="#666" />
+                                </Pressable>
+                            </View>
+
+                            <ScrollView style={styles.modalForm} contentContainerStyle={{ paddingBottom: 30 }}>
+                                <View style={styles.infoBox}>
+                                    <Info size={18} color="#1E40AF" />
+                                    <Text style={styles.infoBoxText}>
+                                        Submit a regularization request for days when you couldn't check in/out properly. Only past dates can be regularized.
+                                    </Text>
+                                </View>
+
+                                <Text style={styles.inputLabel}>Date to Regularize *</Text>
+                                <Pressable
+                                    style={[styles.dateInput, errors.date && styles.inputError]}
+                                    onPress={() => setShowRegDatePicker(true)}
+                                >
+                                    <Calendar size={18} color="#666" />
+                                    <Text style={styles.dateText}>
+                                        {regularizationForm.date ? new Date(regularizationForm.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Select date'}
+                                    </Text>
+                                    <ChevronRight size={18} color="#666" />
+                                </Pressable>
+                                {errors.date && <Text style={styles.errorText}>{errors.date}</Text>}
+
+                                {showRegDatePicker && (
+                                    <DateTimePicker
+                                        value={regularizationForm.date ? new Date(regularizationForm.date) : new Date()}
+                                        mode="date"
+                                        display="default"
+                                        maximumDate={new Date(Date.now() - 24 * 60 * 60 * 1000)}
+                                        onChange={(event, selectedDate) => {
+                                            setShowRegDatePicker(false);
+                                            if (selectedDate) {
+                                                // Fix timezone: Use IST offset to ensure correct date
+                                                const istOffset = 5.5 * 60 * 60 * 1000; // IST is UTC+5:30
+                                                const localDate = new Date(selectedDate.getTime() + istOffset);
+                                                const dateStr = localDate.toISOString().split('T')[0];
+                                                setRegularizationForm({ ...regularizationForm, date: dateStr });
+                                            }
+                                        }}
+                                    />
+                                )}
+
+                                <Text style={styles.inputLabel}>Requested Status *</Text>
+                                <View style={styles.pickerContainer}>
+                                    {['PRESENT', 'HALF_DAY', 'ON_LEAVE'].map((status) => (
+                                        <Pressable
+                                            key={status}
+                                            style={[
+                                                styles.pickerOption,
+                                                regularizationForm.requestedStatus === status && styles.pickerOptionActive
+                                            ]}
+                                            onPress={() => setRegularizationForm({ ...regularizationForm, requestedStatus: status })}
+                                        >
+                                            <Text style={[
+                                                styles.pickerOptionText,
+                                                regularizationForm.requestedStatus === status && styles.pickerOptionTextActive
+                                            ]}>
+                                                {status.replace('_', ' ')}
+                                            </Text>
+                                        </Pressable>
+                                    ))}
+                                </View>
+
+                                <Text style={styles.inputLabel}>Reason *</Text>
+                                <TextInput
+                                    style={[styles.input, styles.textArea, errors.reason && styles.inputError]}
+                                    placeholder="Explain why regularization is needed (min 15 characters)"
+                                    value={regularizationForm.reason}
+                                    onChangeText={(text) => setRegularizationForm({ ...regularizationForm, reason: text })}
+                                    multiline
+                                    numberOfLines={4}
+                                />
+                                {errors.reason && <Text style={styles.errorText}>{errors.reason}</Text>}
+                            </ScrollView>
+
+                            <View style={styles.modalActions}>
+                                <Pressable
+                                    style={[styles.modalButton, styles.modalButtonSecondary]}
+                                    onPress={() => {
+                                        setShowRegularizationModal(false);
+                                        setErrors({});
+                                    }}
+                                >
+                                    <Text style={styles.modalButtonTextSecondary}>Cancel</Text>
+                                </Pressable>
+                                <Pressable
+                                    style={[styles.modalButton, styles.modalButtonPrimary]}
+                                    onPress={handleRegularizationSubmit}
+                                    disabled={regularizationMutation.isPending}
+                                >
+                                    {regularizationMutation.isPending ? (
+                                        <ActivityIndicator color="#fff" />
+                                    ) : (
+                                        <>
+                                            <Send size={18} color="#fff" />
+                                            <Text style={styles.modalButtonTextPrimary}>Submit</Text>
+                                        </>
+                                    )}
+                                </Pressable>
+                            </View>
+                        </View>
+                    </View>
+                </KeyboardAvoidingView>
             </Modal>
 
             <View style={{ height: 40 }} />

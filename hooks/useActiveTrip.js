@@ -12,10 +12,59 @@ export function useActiveTrip() {
     const [localActiveTrip, setLocalActiveTrip] = useState(null);
     const [isChecking, setIsChecking] = useState(true);
 
-    // Check for stored active trip on mount
+    // Check for stored active trip on mount AND validate it's still active
     useEffect(() => {
-        checkStoredTrip();
+        validateAndCleanupStaleTrip();
     }, []);
+
+    // Validate stored trip with API - if ended, cleanup background task
+    const validateAndCleanupStaleTrip = async () => {
+        try {
+            const trip = await getActiveTrip();
+            const isTaskRunning = await isBackgroundTaskRunning();
+
+            console.log('🔍 Checking active trip on startup:', { trip: trip?.tripId, isTaskRunning });
+
+            if (!trip && isTaskRunning) {
+                // Background task running but no stored trip - force stop
+                console.log('⚠️ Background task running without trip data - stopping');
+                const { stopBackgroundLocationTask } = require('../lib/transport-location-task');
+                await stopBackgroundLocationTask();
+                return;
+            }
+
+            if (trip) {
+                // Validate trip is still IN_PROGRESS via API
+                try {
+                    const res = await api.get(`/schools/transport/trips/${trip.tripId}`);
+                    const apiTrip = res.data.trip;
+
+                    if (apiTrip?.status !== 'IN_PROGRESS') {
+                        // Trip has ended - cleanup everything
+                        console.log('⚠️ Stored trip is no longer active (status:', apiTrip?.status, ') - cleaning up');
+                        const { stopBackgroundLocationTask } = require('../lib/transport-location-task');
+                        await stopBackgroundLocationTask();
+                        setLocalActiveTrip(null);
+                        return;
+                    }
+
+                    // Trip is valid and in progress
+                    console.log('✅ Active trip validated:', trip.tripId);
+                    setLocalActiveTrip(trip);
+                } catch (apiError) {
+                    // API error (404, network, etc) - trip might not exist
+                    console.log('⚠️ Could not validate trip - cleaning up:', apiError.message);
+                    const { stopBackgroundLocationTask } = require('../lib/transport-location-task');
+                    await stopBackgroundLocationTask();
+                    setLocalActiveTrip(null);
+                }
+            }
+        } catch (error) {
+            console.error('Error validating stored trip:', error);
+        } finally {
+            setIsChecking(false);
+        }
+    };
 
     const checkStoredTrip = async () => {
         try {
@@ -41,7 +90,7 @@ export function useActiveTrip() {
         return () => subscription.remove();
     }, [localActiveTrip, resumeTrip]);
 
-    // Verify trip status with API
+    // Verify trip status with API (only on-demand, no polling)
     const { data: verifiedTrip, refetch: verifyTrip } = useQuery({
         queryKey: ['verify-active-trip', localActiveTrip?.tripId],
         queryFn: async () => {
@@ -50,9 +99,11 @@ export function useActiveTrip() {
                 const res = await api.get(`/schools/transport/trips/${localActiveTrip.tripId}`);
                 const trip = res.data.trip;
 
-                // If trip is no longer in progress, clean up
+                // If trip is no longer in progress, clean up including background task
                 if (trip.status !== 'IN_PROGRESS') {
-                    await SecureStore.deleteItemAsync('activeTrip');
+                    console.log('⚠️ Trip status changed to', trip.status, '- stopping background task');
+                    const { stopBackgroundLocationTask } = require('../lib/transport-location-task');
+                    await stopBackgroundLocationTask();
                     setLocalActiveTrip(null);
                     return null;
                 }
@@ -63,7 +114,9 @@ export function useActiveTrip() {
             }
         },
         enabled: !!localActiveTrip?.tripId,
-        refetchInterval: 30000, // Check every 30s
+        staleTime: Infinity, // Don't auto-refetch
+        refetchOnMount: false,
+        refetchOnWindowFocus: false,
     });
 
     const resumeTrip = useCallback(() => {
@@ -75,11 +128,25 @@ export function useActiveTrip() {
         }
     }, [localActiveTrip, router]);
 
+    // Force cleanup - can be called to stop any stale background tasks
+    const forceCleanup = useCallback(async () => {
+        try {
+            console.log('🧹 Force cleanup triggered');
+            const { stopBackgroundLocationTask } = require('../lib/transport-location-task');
+            await stopBackgroundLocationTask();
+            setLocalActiveTrip(null);
+            console.log('✅ Force cleanup completed');
+        } catch (error) {
+            console.error('Error during force cleanup:', error);
+        }
+    }, []);
+
     return {
         activeTrip: localActiveTrip,
         verifiedTrip,
         isChecking,
         resumeTrip,
-        refreshTrip: checkStoredTrip
+        refreshTrip: checkStoredTrip,
+        forceCleanup
     };
 }

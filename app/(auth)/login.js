@@ -442,11 +442,12 @@ export default function LoginScreen() {
             <StatusBar style="light" />
 
             <ScrollView
-                contentContainerStyle={{ flexGrow: 1 }}
+                contentContainerStyle={{ flexGrow: 1, backgroundColor: '#FFFFFF' }}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode="interactive"
                 bounces={false}
+                style={{ backgroundColor: PRIMARY_COLOR }}
             >
                 {/* Blue Header Background - Extends to safe area */}
                 <View style={[styles.headerBackground, { paddingTop: insets.top + 24 }]}>
@@ -713,6 +714,7 @@ const styles = StyleSheet.create({
         borderTopRightRadius: responsive(24, 32, 40),
         marginTop: -verticalScale(20),
         overflow: 'hidden',
+        minHeight: '100%',
     },
     keyboardAvoidingView: {
         flex: 1,

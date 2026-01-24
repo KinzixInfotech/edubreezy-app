@@ -185,6 +185,10 @@ export default function ActiveTripScreen() {
         if (!trip?.startedAt) return '0m';
         const start = new Date(trip.startedAt);
         const diff = Date.now() - start.getTime();
+
+        // Handle negative diff (future startedAt due to timezone issues)
+        if (diff < 0) return '0m';
+
         const minutes = Math.floor(diff / 60000);
         if (minutes < 60) return `${minutes}m`;
         const hours = Math.floor(minutes / 60);

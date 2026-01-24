@@ -1,6 +1,6 @@
 // app/_layout.jsx
 import { QueryClientProvider } from '@tanstack/react-query';
-import { Stack } from 'expo-router';
+import { Stack, usePathname, useSegments } from 'expo-router';
 import { queryClient } from '../lib/queryClient';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts, Roboto_400Regular, Roboto_500Medium, Roboto_700Bold } from '@expo-google-fonts/roboto';
@@ -14,11 +14,32 @@ import fcmService from '../services/fcmService';
 import { NotificationProvider, useNotification } from '../contexts/NotificationContext';
 import messaging from '@react-native-firebase/messaging';
 import { supabase } from '../lib/supabase';
+import NetInfo from '@react-native-community/netinfo';
+import NoInternetScreen from './components/NoInternetScreen';
 
 const BADGE_KEY = 'noticeBadgeCount';
 
 // Keep splash visible while fonts load
 SplashScreen.preventAutoHideAsync();
+
+// SAFETY TIMEOUT: Forcibly hide splash after 5 seconds to prevent deadlock
+// This is a fallback in case fonts or initialization hangs on some devices
+const SPLASH_TIMEOUT_MS = 5000;
+let splashHidden = false;
+
+const forceHideSplash = async () => {
+    if (splashHidden) return;
+    splashHidden = true;
+    try {
+        console.log('⚠️ Force hiding splash screen (timeout triggered)');
+        await SplashScreen.hideAsync();
+    } catch (error) {
+        console.warn('Force hide splash error (non-critical):', error);
+    }
+};
+
+// Set up timeout that will trigger if splash doesn't hide naturally
+const splashTimeoutId = setTimeout(forceHideSplash, SPLASH_TIMEOUT_MS);
 
 // ========================================================================
 // FIREBASE BACKGROUND HANDLER - COMMENTED OUT
@@ -39,6 +60,21 @@ function RootLayoutContent() {
     const appState = useRef(AppState.currentState);
     const [isAppActive, setIsAppActive] = useState(true);
     const isAppActiveRef = useRef(isAppActive);
+
+    // Network connectivity state
+    const [isConnected, setIsConnected] = useState(true);
+    const [isUserLoggedIn, setIsUserLoggedIn] = useState(false);
+    const wasOfflineRef = useRef(false);
+
+    // Get current route info
+    const pathname = usePathname();
+    const segments = useSegments();
+
+    // Excluded routes where we don't show NoInternet screen
+    const excludedRoutes = ['(auth)', 'login', 'profile', 'index'];
+    const isExcludedRoute = excludedRoutes.some(route =>
+        pathname?.includes(route) || segments?.includes(route)
+    );
 
     const [fontsLoaded] = useFonts({
         Roboto_400Regular,
@@ -239,14 +275,82 @@ function RootLayoutContent() {
     // Splash + fonts
     // -------------------------------
     const onLayoutRootView = useCallback(async () => {
-        if (fontsLoaded) {
-            await SplashScreen.hideAsync();
-            applyGlobalFont('Roboto_400Regular');
-            console.log('Fonts loaded and applied');
+        if (fontsLoaded && !splashHidden) {
+            splashHidden = true;
+            clearTimeout(splashTimeoutId); // Cancel the force-hide timeout
+            try {
+                await SplashScreen.hideAsync();
+                applyGlobalFont('Roboto_400Regular');
+                console.log('✅ Fonts loaded and splash hidden normally');
+            } catch (error) {
+                console.warn('Splash hide error (non-critical):', error);
+            }
         }
     }, [fontsLoaded]);
 
+    // ========================================================================
+    // NETWORK CONNECTIVITY MONITORING
+    // Shows NoInternet screen when offline (only if logged in & not on excluded routes)
+    // ========================================================================
+    useEffect(() => {
+        // Check if user is logged in
+        const checkUserLogin = async () => {
+            try {
+                const userStr = await SecureStore.getItemAsync('user');
+                setIsUserLoggedIn(!!userStr);
+            } catch (e) {
+                console.error('Error checking user login:', e);
+            }
+        };
+
+        checkUserLogin();
+
+        // Subscribe to network state changes
+        const unsubscribe = NetInfo.addEventListener(state => {
+            const connected = state.isConnected && state.isInternetReachable !== false;
+            console.log('🌐 Network state changed:', connected ? 'Online' : 'Offline');
+
+            if (!connected) {
+                wasOfflineRef.current = true;
+            }
+
+            setIsConnected(connected);
+        });
+
+        // Also check user login when app becomes active
+        const appStateSubscription = AppState.addEventListener('change', async (nextState) => {
+            if (nextState === 'active') {
+                await checkUserLogin();
+            }
+        });
+
+        return () => {
+            unsubscribe();
+            appStateSubscription.remove();
+        };
+    }, []);
+
+    // Handle retry button press
+    const handleRetry = useCallback(async () => {
+        const state = await NetInfo.fetch();
+        const connected = state.isConnected && state.isInternetReachable !== false;
+        setIsConnected(connected);
+    }, []);
+
     if (!fontsLoaded) return null;
+
+    // Determine if we should show NoInternet screen
+    // Conditions: User logged in + Offline + Not on excluded routes
+    const shouldShowNoInternet = !isConnected && isUserLoggedIn && !isExcludedRoute;
+
+    if (shouldShowNoInternet) {
+        return (
+            <View style={{ flex: 1 }}>
+                <StatusBar style='light' />
+                <NoInternetScreen onRetry={handleRetry} />
+            </View>
+        );
+    }
 
     return (
         <>

@@ -11,6 +11,7 @@ import {
     ActivityIndicator,
     TextInput,
     Modal,
+    Image,
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
@@ -31,11 +32,20 @@ import {
     Users,
     BarChart3,
     X as CloseIcon,
+    Phone,
+    MapPin,
+    User,
+    Mail,
+    BookOpen,
+    Heart,
+    Home,
+    Droplet,
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import { LineChart } from 'react-native-chart-kit';
 import api from '../../../lib/api';
 import HapticTouchable from '../../components/HapticTouch';
+import { StatusBar } from 'expo-status-bar';
 
 const getISTDateString = (dateInput = new Date()) => {
     let date;
@@ -180,6 +190,18 @@ export default function TeacherClassAttendance() {
         gcTime: 1000 * 60 * 30, // Keep in cache for 30 minutes
     });
 
+    // Fetch detailed student info when modal opens
+    const { data: studentDetailData, isLoading: studentDetailLoading } = useQuery({
+        queryKey: ['student-full-detail', schoolId, studentId],
+        queryFn: async () => {
+            if (!schoolId || !studentId) return null;
+            const res = await api.get(`/schools/${schoolId}/students/${studentId}`);
+            return res.data;
+        },
+        enabled: !!schoolId && !!studentId && showStudentModal,
+        staleTime: 1000 * 60 * 5,
+    });
+
     const students = studentsData?.students || [];
     const classStats = classStatsData?.classStats;
     const studentDetailStats = studentStatsData?.monthlyStats;
@@ -301,6 +323,7 @@ export default function TeacherClassAttendance() {
 
     return (
         <View style={styles.container}>
+            <StatusBar style="dark" />
             {/* Header */}
             <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>
@@ -601,6 +624,233 @@ export default function TeacherClassAttendance() {
                                             </View>
                                         </View>
                                     </View>
+
+                                    {/* Student Information Section */}
+                                    <View style={styles.sectionHeader}>
+                                        <Text style={styles.sectionTitle}>Student Information</Text>
+                                    </View>
+
+                                    {studentDetailLoading ? (
+                                        <View style={styles.loadingContainer}>
+                                            <ActivityIndicator size="small" color="#0469ff" />
+                                        </View>
+                                    ) : studentDetailData ? (
+                                        <View style={styles.studentInfoCard}>
+                                            {/* Profile Header */}
+                                            <View style={styles.profileHeader}>
+                                                {studentDetailData.profilePicture && studentDetailData.profilePicture !== 'default.png' ? (
+                                                    <Image
+                                                        source={{ uri: studentDetailData.profilePicture }}
+                                                        style={styles.profileImage}
+                                                    />
+                                                ) : (
+                                                    <View style={styles.profilePlaceholder}>
+                                                        <User size={40} color="#0469ff" />
+                                                    </View>
+                                                )}
+                                                <View style={styles.profileHeaderInfo}>
+                                                    <Text style={styles.profileName}>{studentDetailData.name}</Text>
+                                                    <Text style={styles.profileAdmission}>Adm. No: {studentDetailData.admissionNo || 'N/A'}</Text>
+                                                    <View style={styles.profileBadge}>
+                                                        <Text style={styles.profileBadgeText}>
+                                                            {studentDetailData.class?.name} - {studentDetailData.section?.name}
+                                                        </Text>
+                                                    </View>
+                                                </View>
+                                            </View>
+
+                                            {/* Basic Details */}
+                                            <View style={styles.infoSection}>
+                                                <Text style={styles.infoSectionTitle}>Basic Details</Text>
+
+                                                <View style={styles.infoRow}>
+                                                    <View style={styles.infoItem}>
+                                                        <View style={styles.infoIconWrapper}>
+                                                            <User size={16} color="#0469ff" />
+                                                        </View>
+                                                        <View>
+                                                            <Text style={styles.infoLabel}>Gender</Text>
+                                                            <Text style={styles.infoValue}>{studentDetailData.gender || 'N/A'}</Text>
+                                                        </View>
+                                                    </View>
+                                                    <View style={styles.infoItem}>
+                                                        <View style={styles.infoIconWrapper}>
+                                                            <CalendarIcon size={16} color="#0469ff" />
+                                                        </View>
+                                                        <View>
+                                                            <Text style={styles.infoLabel}>Date of Birth</Text>
+                                                            <Text style={styles.infoValue}>{studentDetailData.dob || 'N/A'}</Text>
+                                                        </View>
+                                                    </View>
+                                                </View>
+
+                                                <View style={styles.infoRow}>
+                                                    <View style={styles.infoItem}>
+                                                        <View style={styles.infoIconWrapper}>
+                                                            <Droplet size={16} color="#FF6B6B" />
+                                                        </View>
+                                                        <View>
+                                                            <Text style={styles.infoLabel}>Blood Group</Text>
+                                                            <Text style={styles.infoValue}>{studentDetailData.bloodGroup || 'N/A'}</Text>
+                                                        </View>
+                                                    </View>
+                                                    <View style={styles.infoItem}>
+                                                        <View style={styles.infoIconWrapper}>
+                                                            <Home size={16} color="#8B5CF6" />
+                                                        </View>
+                                                        <View>
+                                                            <Text style={styles.infoLabel}>House</Text>
+                                                            <Text style={styles.infoValue}>{studentDetailData.house || 'N/A'}</Text>
+                                                        </View>
+                                                    </View>
+                                                </View>
+                                            </View>
+
+                                            {/* Contact Information */}
+                                            <View style={styles.infoSection}>
+                                                <Text style={styles.infoSectionTitle}>Contact Information</Text>
+
+                                                <View style={styles.infoRowFull}>
+                                                    <View style={styles.infoIconWrapper}>
+                                                        <Phone size={16} color="#51CF66" />
+                                                    </View>
+                                                    <View style={styles.infoFull}>
+                                                        <Text style={styles.infoLabel}>Contact Number</Text>
+                                                        <Text style={styles.infoValue}>{studentDetailData.contactNumber || 'N/A'}</Text>
+                                                    </View>
+                                                </View>
+
+                                                <View style={styles.infoRowFull}>
+                                                    <View style={styles.infoIconWrapper}>
+                                                        <Mail size={16} color="#FFB020" />
+                                                    </View>
+                                                    <View style={styles.infoFull}>
+                                                        <Text style={styles.infoLabel}>Email</Text>
+                                                        <Text style={styles.infoValue}>{studentDetailData.email || 'N/A'}</Text>
+                                                    </View>
+                                                </View>
+
+                                                <View style={styles.infoRowFull}>
+                                                    <View style={styles.infoIconWrapper}>
+                                                        <MapPin size={16} color="#3B82F6" />
+                                                    </View>
+                                                    <View style={styles.infoFull}>
+                                                        <Text style={styles.infoLabel}>Address</Text>
+                                                        <Text style={styles.infoValue}>
+                                                            {[studentDetailData.address, studentDetailData.city, studentDetailData.state, studentDetailData.postalCode]
+                                                                .filter(Boolean).join(', ') || 'N/A'}
+                                                        </Text>
+                                                    </View>
+                                                </View>
+                                            </View>
+
+                                            {/* Parent/Guardian Details */}
+                                            <View style={styles.infoSection}>
+                                                <Text style={styles.infoSectionTitle}>Parent/Guardian Details</Text>
+
+                                                {studentDetailData.fatherName && (
+                                                    <View style={styles.parentCard}>
+                                                        <View style={styles.parentIcon}>
+                                                            <User size={20} color="#3B82F6" />
+                                                        </View>
+                                                        <View style={styles.parentInfo}>
+                                                            <Text style={styles.parentName}>{studentDetailData.fatherName}</Text>
+                                                            <Text style={styles.parentRelation}>Father</Text>
+                                                            {studentDetailData.fatherPhone && (
+                                                                <View style={styles.parentContact}>
+                                                                    <Phone size={12} color="#51CF66" />
+                                                                    <Text style={styles.parentPhone}>{studentDetailData.fatherPhone}</Text>
+                                                                </View>
+                                                            )}
+                                                        </View>
+                                                    </View>
+                                                )}
+
+                                                {studentDetailData.motherName && (
+                                                    <View style={styles.parentCard}>
+                                                        <View style={[styles.parentIcon, { backgroundColor: '#FCE7F3' }]}>
+                                                            <Heart size={20} color="#EC4899" />
+                                                        </View>
+                                                        <View style={styles.parentInfo}>
+                                                            <Text style={styles.parentName}>{studentDetailData.motherName}</Text>
+                                                            <Text style={styles.parentRelation}>Mother</Text>
+                                                            {studentDetailData.motherPhone && (
+                                                                <View style={styles.parentContact}>
+                                                                    <Phone size={12} color="#51CF66" />
+                                                                    <Text style={styles.parentPhone}>{studentDetailData.motherPhone}</Text>
+                                                                </View>
+                                                            )}
+                                                        </View>
+                                                    </View>
+                                                )}
+
+                                                {studentDetailData.guardianName && (
+                                                    <View style={styles.parentCard}>
+                                                        <View style={[styles.parentIcon, { backgroundColor: '#FEF3C7' }]}>
+                                                            <Users size={20} color="#F59E0B" />
+                                                        </View>
+                                                        <View style={styles.parentInfo}>
+                                                            <Text style={styles.parentName}>{studentDetailData.guardianName}</Text>
+                                                            <Text style={styles.parentRelation}>{studentDetailData.guardianRelation || 'Guardian'}</Text>
+                                                            {studentDetailData.guardianPhone && (
+                                                                <View style={styles.parentContact}>
+                                                                    <Phone size={12} color="#51CF66" />
+                                                                    <Text style={styles.parentPhone}>{studentDetailData.guardianPhone}</Text>
+                                                                </View>
+                                                            )}
+                                                        </View>
+                                                    </View>
+                                                )}
+                                            </View>
+
+                                            {/* Academic Info */}
+                                            <View style={styles.infoSection}>
+                                                <Text style={styles.infoSectionTitle}>Academic Information</Text>
+
+                                                <View style={styles.infoRow}>
+                                                    <View style={styles.infoItem}>
+                                                        <View style={styles.infoIconWrapper}>
+                                                            <BookOpen size={16} color="#0469ff" />
+                                                        </View>
+                                                        <View>
+                                                            <Text style={styles.infoLabel}>Class</Text>
+                                                            <Text style={styles.infoValue}>{studentDetailData.class?.name || 'N/A'}</Text>
+                                                        </View>
+                                                    </View>
+                                                    <View style={styles.infoItem}>
+                                                        <View style={styles.infoIconWrapper}>
+                                                            <Users size={16} color="#8B5CF6" />
+                                                        </View>
+                                                        <View>
+                                                            <Text style={styles.infoLabel}>Section</Text>
+                                                            <Text style={styles.infoValue}>{studentDetailData.section?.name || 'N/A'}</Text>
+                                                        </View>
+                                                    </View>
+                                                </View>
+
+                                                <View style={styles.infoRow}>
+                                                    <View style={styles.infoItem}>
+                                                        <View style={styles.infoIconWrapper}>
+                                                            <BarChart3 size={16} color="#51CF66" />
+                                                        </View>
+                                                        <View>
+                                                            <Text style={styles.infoLabel}>Roll Number</Text>
+                                                            <Text style={styles.infoValue}>{studentDetailData.rollNo || selectedStudent.rollNumber || 'N/A'}</Text>
+                                                        </View>
+                                                    </View>
+                                                    <View style={styles.infoItem}>
+                                                        <View style={styles.infoIconWrapper}>
+                                                            <CalendarIcon size={16} color="#FFB020" />
+                                                        </View>
+                                                        <View>
+                                                            <Text style={styles.infoLabel}>Admission Date</Text>
+                                                            <Text style={styles.infoValue}>{studentDetailData.admissionDate || 'N/A'}</Text>
+                                                        </View>
+                                                    </View>
+                                                </View>
+                                            </View>
+                                        </View>
+                                    ) : null}
 
                                     <View style={{ height: 40 }} />
                                 </>
@@ -928,5 +1178,151 @@ const styles = StyleSheet.create({
     legendText: {
         fontSize: 12,
         color: '#666',
+    },
+    // Student Info Card Styles
+    studentInfoCard: {
+        backgroundColor: '#fff',
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: '#f0f0f0',
+    },
+    profileHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingBottom: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#f0f0f0',
+        marginBottom: 16,
+    },
+    profileImage: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        marginRight: 16,
+    },
+    profilePlaceholder: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        backgroundColor: '#E3F2FD',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 16,
+    },
+    profileHeaderInfo: {
+        flex: 1,
+    },
+    profileName: {
+        fontSize: 20,
+        fontWeight: '700',
+        color: '#111',
+        marginBottom: 4,
+    },
+    profileAdmission: {
+        fontSize: 14,
+        color: '#666',
+        marginBottom: 8,
+    },
+    profileBadge: {
+        backgroundColor: '#E3F2FD',
+        paddingHorizontal: 12,
+        paddingVertical: 4,
+        borderRadius: 12,
+        alignSelf: 'flex-start',
+    },
+    profileBadgeText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#0469ff',
+    },
+    infoSection: {
+        marginBottom: 20,
+    },
+    infoSectionTitle: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#666',
+        marginBottom: 12,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    infoRow: {
+        flexDirection: 'row',
+        marginBottom: 12,
+    },
+    infoItem: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+    },
+    infoRowFull: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        marginBottom: 12,
+    },
+    infoFull: {
+        flex: 1,
+    },
+    infoIconWrapper: {
+        width: 32,
+        height: 32,
+        borderRadius: 8,
+        backgroundColor: '#f0f7ff',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 10,
+    },
+    infoLabel: {
+        fontSize: 11,
+        color: '#999',
+        marginBottom: 2,
+    },
+    infoValue: {
+        fontSize: 14,
+        fontWeight: '500',
+        color: '#111',
+    },
+    parentCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#f8f9fa',
+        padding: 12,
+        borderRadius: 12,
+        marginBottom: 10,
+    },
+    parentIcon: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: '#E3F2FD',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+    },
+    parentInfo: {
+        flex: 1,
+    },
+    parentName: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#111',
+    },
+    parentRelation: {
+        fontSize: 12,
+        color: '#666',
+        marginTop: 2,
+    },
+    parentContact: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 6,
+        gap: 6,
+    },
+    parentPhone: {
+        fontSize: 13,
+        color: '#51CF66',
+        fontWeight: '500',
     },
 });

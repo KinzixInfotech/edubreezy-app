@@ -22,7 +22,8 @@ import {
     CalendarDays,
     Umbrella,
     BellOff,
-    Play
+    Play,
+    AlertTriangle
 } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
@@ -45,8 +46,9 @@ import DelegationCheckModal from '../components/DelegationCheckModal';
 import BannerCarousel from '../components/BannerCarousel';
 import { useActiveTrip } from '../../hooks/useActiveTrip';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const isSmallDevice = SCREEN_WIDTH < 375;
+const isShortDevice = SCREEN_HEIGHT < 700;
 
 
 // Icon mapping
@@ -110,6 +112,9 @@ export default function HomeScreen() {
 
     // Navigation guard to prevent double-clicking
     const isNavigatingRef = useRef(false);
+
+    // Track if initial load has happened - prevents refetch on back navigation
+    const hasInitiallyLoadedRef = useRef(false);
 
     // Safe navigation function - prevents multiple navigations
     const navigateOnce = useCallback((path, params) => {
@@ -183,6 +188,24 @@ export default function HomeScreen() {
             Extrapolation.CLAMP
         );
         return { transform: [{ translateY }] };
+    });
+
+    // Avatar size animation - bigger when expanded, smaller when collapsed
+    const AVATAR_MAX_SIZE = 56;
+    const AVATAR_MIN_SIZE = 40;
+    const avatarAnimatedStyle = useAnimatedStyle(() => {
+        const size = interpolate(
+            scrollY.value,
+            [0, 100],
+            [AVATAR_MAX_SIZE, AVATAR_MIN_SIZE],
+            Extrapolation.CLAMP
+        );
+        const borderRadius = size / 2;
+        return {
+            width: size,
+            height: size,
+            borderRadius
+        };
     });
     const [showPermissionBanner, setShowPermissionBanner] = useState(false);
 
@@ -278,6 +301,11 @@ export default function HomeScreen() {
     }, [notificationData, userId]);
 
     useEffect(() => {
+        // Skip if already loaded - prevents refetch on back navigation
+        if (hasInitiallyLoadedRef.current && user) {
+            setLoading(false);
+            return;
+        }
         loadUser();
         checkNotificationPermission();
         // router.replace('/(screens)/wish')
@@ -307,12 +335,19 @@ export default function HomeScreen() {
         return () => subscription.unsubscribe();
     }, []);
 
-    const loadUser = async () => {
+    const loadUser = async (forceRefresh = false) => {
+        // Skip if already loaded and not forcing refresh
+        if (hasInitiallyLoadedRef.current && user && !forceRefresh) {
+            setLoading(false);
+            return;
+        }
+
         try {
             const stored = await SecureStore.getItemAsync('user');
             if (stored) {
                 const parsed = JSON.parse(stored);
                 setUser(parsed);
+                hasInitiallyLoadedRef.current = true; // Mark as loaded
             }
         } catch (error) {
             console.error('Failed to load user:', error);
@@ -440,12 +475,12 @@ export default function HomeScreen() {
 
     // const unreadCount = notificationData?.unreadCount || uiData.notifications.today.filter(n => !n.read).length;
 
-    // Pull to refresh handler
+    // Pull to refresh handler - forces data reload
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
         try {
             await queryClient.invalidateQueries();
-            await loadUser();
+            await loadUser(true); // Force refresh
         } catch (error) {
             console.error('Refresh failed:', error);
         } finally {
@@ -718,22 +753,24 @@ export default function HomeScreen() {
                 return <DriverView
                     refreshing={refreshing}
                     onRefresh={onRefresh}
+                    onScroll={scrollHandler}
+                    paddingTop={paddingTop}
                     schoolId={schoolId}
                     userId={userId}
                     prefetchedStaffData={transportStaff}
                     prefetchedTripsData={transportTripsData}
-                    header={headerComponent}
                     navigateOnce={navigateOnce}
                 />;
             case 'conductor':
                 return <ConductorView
                     refreshing={refreshing}
                     onRefresh={onRefresh}
+                    onScroll={scrollHandler}
+                    paddingTop={paddingTop}
                     schoolId={schoolId}
                     userId={userId}
                     prefetchedStaffData={transportStaff}
                     prefetchedTripsData={transportTripsData}
-                    header={headerComponent}
                     navigateOnce={navigateOnce}
                 />;
             case 'director':
@@ -2175,10 +2212,6 @@ export default function HomeScreen() {
                         </View>
                     )}
                 </Animated.View>
-
-
-
-
                 {/* Quick Actions */}
                 {
                     actionGroups && actionGroups.map((group, groupIndex) => (
@@ -2276,7 +2309,6 @@ export default function HomeScreen() {
                         )}
                     </View>
                 </Animated.View>
-
                 {/* Recent Notices */}
                 <Animated.View entering={FadeInDown.delay(800).duration(600)} style={[styles.section, { marginBottom: 30 }]}>
                     <View style={styles.sectionHeader}>
@@ -2338,11 +2370,10 @@ export default function HomeScreen() {
 
 
     // === DRIVER VIEW ===
-    const DriverView = ({ refreshing, onRefresh, schoolId, userId, prefetchedStaffData, prefetchedTripsData, header, navigateOnce }) => {
-        console.log('🚀 DriverView - using prefetched data');
-
+    const DriverView = ({ refreshing, onRefresh, onScroll, paddingTop, schoolId, userId, prefetchedStaffData, prefetchedTripsData, navigateOnce }) => {
         // Location tracking state
         const [isPollingLocation, setIsPollingLocation] = useState(false);
+        const [startingTripId, setStartingTripId] = useState(null); // Track which trip is being started
         const locationWatchRef = useRef(null);
         const appStateRef = useRef(AppState.currentState);
         const queryClient = useQueryClient();
@@ -2350,19 +2381,24 @@ export default function HomeScreen() {
         // Use prefetched data directly
         const staffData = prefetchedStaffData;
         const transportStaffId = staffData?.id;
-        const vehicle = staffData?.vehicleAssignments?.[0]?.vehicle;
-        const route = staffData?.vehicleAssignments?.[0]?.vehicle?.routes?.[0];
-        const routeStopsCount = route?.stops?.length || route?.busStops?.length || 0;
 
-        // Use prefetched trips data
+        // Get assignment from trips data (for on-demand trip creation)
         const tripsData = prefetchedTripsData;
         const trips = tripsData?.trips || [];
+        const assignment = tripsData?.assignment;
+
+        // Try to get vehicle from vehicleAssignments first, fallback to assignment
+        const vehicle = staffData?.vehicleAssignments?.[0]?.vehicle || assignment?.vehicle;
+        const route = staffData?.vehicleAssignments?.[0]?.vehicle?.routes?.[0] || assignment?.route;
+        const routeStopsCount = route?.stops?.length || route?.busStops?.length || 0;
 
         // Refetch function for manual refresh
-        const refetch = () => {
-            queryClient.invalidateQueries({ queryKey: ['transport-trips-home'] });
-            queryClient.invalidateQueries({ queryKey: ['transport-staff-home'] });
-        };
+        // Refetch function - use parent's onRefresh to avoid duplicate refreshes
+        const refetch = useCallback(() => {
+            if (onRefresh && typeof onRefresh === 'function') {
+                onRefresh();
+            }
+        }, [onRefresh]);
 
         // Filter: Show today's trips + any IN_PROGRESS trips from previous days
         const today = new Date().toISOString().split('T')[0];
@@ -2470,16 +2506,19 @@ export default function HomeScreen() {
             return () => stopLocationTracking();
         }, [activeTrip?.id, vehicle?.id]);
 
-        // Handle app state changes
+        // Handle app state changes - only restart location tracking, don't refetch (parent handles refresh)
         useEffect(() => {
             const subscription = AppState.addEventListener('change', (nextAppState) => {
                 if (appStateRef.current.match(/inactive|background/) && nextAppState === 'active') {
-                    refetch();
+                    // Restart location tracking if there's an active trip
+                    if (activeTrip && vehicle && !isPollingLocation) {
+                        startLocationTracking(activeTrip.id, vehicle.id);
+                    }
                 }
                 appStateRef.current = nextAppState;
             });
             return () => subscription.remove();
-        }, [refetch]);
+        }, [activeTrip?.id, vehicle?.id, isPollingLocation, startLocationTracking]);
 
         const quickActions = [
             { icon: Bus, label: 'My Vehicle', color: '#0469ff', bgColor: '#DBEAFE', href: '/(screens)/transport/my-vehicle' },
@@ -2489,6 +2528,65 @@ export default function HomeScreen() {
         ];
         // Get today's scheduled trips for this driver
         const todaysScheduledTrips = trips.filter(t => t.status === 'SCHEDULED');
+
+        // Check what trip types are already done/in-progress today
+        const todaysPickupDone = trips.some(t => t.tripType === 'PICKUP' && (t.status === 'COMPLETED' || t.status === 'IN_PROGRESS'));
+        const todaysDropDone = trips.some(t => t.tripType === 'DROP' && (t.status === 'COMPLETED' || t.status === 'IN_PROGRESS'));
+
+        // On-demand start trip function (creates trip on the fly)
+        const handleStartOnDemand = async (tripType) => {
+            if (!assignment) return;
+
+            // Double-check for DROP
+            if (tripType === 'DROP' && !todaysPickupDone) {
+                Alert.alert(
+                    '⚠️ PICKUP Not Completed',
+                    'The PICKUP trip for today hasn\'t been completed yet. Are you sure you want to start the DROP trip?',
+                    [
+                        { text: 'Cancel', style: 'cancel' },
+                        { text: 'Start Anyway', style: 'destructive', onPress: () => startOnDemandTrip(tripType) }
+                    ]
+                );
+                return;
+            }
+            startOnDemandTrip(tripType);
+        };
+
+        const startOnDemandTrip = async (tripType) => {
+            Alert.alert(
+                `Start ${tripType} Trip?`,
+                `You are about to start the ${tripType.toLowerCase()} trip for ${assignment.route?.name}.\n\nThis will begin live tracking and notify parents.`,
+                [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                        text: 'Start Trip',
+                        style: 'default',
+                        onPress: async () => {
+                            setStartingTripId(`ondemand-${tripType}`); // Show loading
+                            try {
+                                const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+                                const res = await api.post('/schools/transport/trips/start-on-demand', {
+                                    assignmentId: assignment.id,
+                                    tripType,
+                                    driverId: transportStaffId,
+                                    latitude: location.coords.latitude,
+                                    longitude: location.coords.longitude
+                                });
+                                if (res.data.success) {
+                                    refetch();
+                                    router.push({ pathname: '/(screens)/transport/active-trip', params: { tripId: res.data.trip.id } });
+                                }
+                            } catch (err) {
+                                console.error('Failed to start on-demand trip:', err);
+                                const errorMsg = err.response?.data?.message || err.response?.data?.error || 'Failed to start trip. Please try again.';
+                                Alert.alert('Error', errorMsg);
+                                setStartingTripId(null);
+                            }
+                        }
+                    }
+                ]
+            );
+        };
 
         // Fetch notices for driver
         const { data: recentNotices } = useQuery({
@@ -2510,9 +2608,80 @@ export default function HomeScreen() {
         })) || [];
 
         return (
-            <ScrollView style={styles.container} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" colors={['#0469ff']} />}>
-                {header}
+            <Animated.ScrollView
+                style={styles.container}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingTop: paddingTop }}
+                onScroll={onScroll}
+                scrollEventThrottle={16}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
+                        tintColor="#0469ff"
+                        colors={['#0469ff']}
+                        progressViewOffset={paddingTop + 10}
+                    />
+                }
+            >
+
+                <BannerCarousel schoolId={schoolId} role={user_acc?.role?.name} />
+
+                {/* Stats Cards - Moved below Bus Card */}
+                <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.section}>
+                    <View style={styles.statsGrid}>
+                        <HapticTouchable style={{ flex: 1 }}>
+                            <LinearGradient
+                                colors={['#667eea', '#764ba2']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={[styles.statCard, { shadowColor: '#667eea', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                            >
+                                <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                                <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+                                <View style={styles.statIcon}><Calendar size={22} color="#fff" /></View>
+                                <View>
+                                    <Text style={styles.statValue}>{totalTrips}</Text>
+                                    <Text style={styles.statLabel}>Today's Trips</Text>
+                                </View>
+                            </LinearGradient>
+                        </HapticTouchable>
+                        <HapticTouchable style={{ flex: 1 }}>
+                            <LinearGradient
+                                colors={['#4ECDC4', '#26A69A']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={[styles.statCard, { shadowColor: '#4ECDC4', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                            >
+                                <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                                <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+                                <View style={styles.statIcon}><CheckCircle2 size={22} color="#fff" /></View>
+                                <View>
+                                    <Text style={styles.statValue}>{completedTrips}</Text>
+                                    <Text style={styles.statLabel}>Completed</Text>
+                                </View>
+                            </LinearGradient>
+                        </HapticTouchable>
+                        <HapticTouchable style={{ flex: 1 }}>
+                            <LinearGradient
+                                colors={activeTrip ? ['#10B981', '#059669'] : ['#f093fb', '#f5576c']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={[styles.statCard, { shadowColor: activeTrip ? '#10B981' : '#f093fb', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                            >
+                                <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                                <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+                                <View style={styles.statIcon}><Users size={22} color="#fff" /></View>
+                                <View>
+                                    <Text style={styles.statValue}>{activeTrip ? 'Active' : 'Idle'}</Text>
+                                    <Text style={styles.statLabel}>Status</Text>
+                                </View>
+                            </LinearGradient>
+                        </HapticTouchable>
+                    </View>
+                </Animated.View>
                 {/* Bus Assignment Card - Moved to Top */}
+                {/* School Banner Carousel */}
                 {vehicle && (
                     <Animated.View entering={FadeInDown.delay(50).duration(600)} style={styles.section}>
                         <LinearGradient colors={['#0469ff', '#0052cc']} style={{ borderRadius: 20, padding: 20, shadowColor: "#0469ff", shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.25, shadowRadius: 16, elevation: 12 }}>
@@ -2571,60 +2740,6 @@ export default function HomeScreen() {
                     </Animated.View>
                 )}
 
-                {/* Stats Cards - Moved below Bus Card */}
-                <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.section}>
-                    <View style={styles.statsGrid}>
-                        <HapticTouchable style={{ flex: 1 }}>
-                            <LinearGradient
-                                colors={['#667eea', '#764ba2']}
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 1 }}
-                                style={[styles.statCard, { shadowColor: '#667eea', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
-                            >
-                                <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
-                                <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
-                                <View style={styles.statIcon}><Calendar size={22} color="#fff" /></View>
-                                <View>
-                                    <Text style={styles.statValue}>{totalTrips}</Text>
-                                    <Text style={styles.statLabel}>Today's Trips</Text>
-                                </View>
-                            </LinearGradient>
-                        </HapticTouchable>
-                        <HapticTouchable style={{ flex: 1 }}>
-                            <LinearGradient
-                                colors={['#4ECDC4', '#26A69A']}
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 1 }}
-                                style={[styles.statCard, { shadowColor: '#4ECDC4', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
-                            >
-                                <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
-                                <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
-                                <View style={styles.statIcon}><CheckCircle2 size={22} color="#fff" /></View>
-                                <View>
-                                    <Text style={styles.statValue}>{completedTrips}</Text>
-                                    <Text style={styles.statLabel}>Completed</Text>
-                                </View>
-                            </LinearGradient>
-                        </HapticTouchable>
-                        <HapticTouchable style={{ flex: 1 }}>
-                            <LinearGradient
-                                colors={activeTrip ? ['#10B981', '#059669'] : ['#f093fb', '#f5576c']}
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 1 }}
-                                style={[styles.statCard, { shadowColor: activeTrip ? '#10B981' : '#f093fb', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
-                            >
-                                <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
-                                <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
-                                <View style={styles.statIcon}><Users size={22} color="#fff" /></View>
-                                <View>
-                                    <Text style={styles.statValue}>{activeTrip ? 'Active' : 'Idle'}</Text>
-                                    <Text style={styles.statLabel}>Status</Text>
-                                </View>
-                            </LinearGradient>
-                        </HapticTouchable>
-                    </View>
-                </Animated.View>
-
                 {/* Start Trip Widget - Enhanced with PICKUP before DROP logic */}
                 {!activeTrip && todaysScheduledTrips.length > 0 && (() => {
                     // Check if PICKUP trip is completed for today
@@ -2641,16 +2756,27 @@ export default function HomeScreen() {
                     });
 
                     const handleStartTrip = async (trip) => {
-                        // Check if trying to start DROP without completing PICKUP
+                        // Show warning if trying to start DROP without completing PICKUP (but don't block)
                         if (trip.tripType === 'DROP' && !todaysPickupCompleted) {
                             Alert.alert(
-                                '🔒 Complete PICKUP First',
-                                'You need to complete the PICKUP trip before starting the DROP trip.',
-                                [{ text: 'OK', style: 'default' }]
+                                '⚠️ PICKUP Not Completed',
+                                'The PICKUP trip for today hasn\'t been completed yet. Are you sure you want to start the DROP trip?',
+                                [
+                                    { text: 'Cancel', style: 'cancel' },
+                                    {
+                                        text: 'Start Anyway',
+                                        style: 'destructive',
+                                        onPress: () => showStartConfirmation(trip)
+                                    }
+                                ]
                             );
                             return;
                         }
 
+                        showStartConfirmation(trip);
+                    };
+
+                    const showStartConfirmation = (trip) => {
                         // Confirmation dialog
                         Alert.alert(
                             `Start ${trip.tripType} Trip?`,
@@ -2661,6 +2787,7 @@ export default function HomeScreen() {
                                     text: 'Start Trip',
                                     style: 'default',
                                     onPress: async () => {
+                                        setStartingTripId(trip.id); // Show loading spinner
                                         try {
                                             const res = await api.post(`/schools/transport/trips/${trip.id}/start`, { driverId: transportStaffId });
                                             if (res.data.success) {
@@ -2670,6 +2797,7 @@ export default function HomeScreen() {
                                         } catch (err) {
                                             console.error('Failed to start trip:', err);
                                             Alert.alert('Error', err.response?.data?.error || 'Failed to start trip. Please try again.');
+                                            setStartingTripId(null); // Clear loading on error
                                         }
                                     }
                                 }
@@ -2738,12 +2866,13 @@ export default function HomeScreen() {
                                                 </View>
                                                 <View style={{ flex: 1, marginLeft: 14 }}>
                                                     <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                                        <Text style={{ fontSize: 17, fontWeight: '700', color: isDropLocked ? '#94A3B8' : '#1E293B' }}>
+                                                        <Text style={{ fontSize: 17, fontWeight: '700', color: isDropLocked ? '#92400E' : '#1E293B' }}>
                                                             {trip.route?.name || 'Route'}
                                                         </Text>
                                                         {isDropLocked && (
-                                                            <View style={{ marginLeft: 8, backgroundColor: '#FEE2E2', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}>
-                                                                <Text style={{ fontSize: 10, color: '#DC2626', fontWeight: '700' }}>🔒 Locked</Text>
+                                                            <View style={{ marginLeft: 8, backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                                                <AlertTriangle size={10} color="#D97706" />
+                                                                <Text style={{ fontSize: 10, color: '#D97706', fontWeight: '700' }}>PICKUP First</Text>
                                                             </View>
                                                         )}
                                                     </View>
@@ -2756,7 +2885,7 @@ export default function HomeScreen() {
                                             {/* Start Button */}
                                             <View style={{
                                                 marginTop: 14,
-                                                backgroundColor: isDropLocked ? '#94A3B8' : '#10B981',
+                                                backgroundColor: isDropLocked ? '#F59E0B' : '#10B981',
                                                 paddingVertical: 14,
                                                 borderRadius: 12,
                                                 flexDirection: 'row',
@@ -2764,8 +2893,16 @@ export default function HomeScreen() {
                                                 justifyContent: 'center',
                                                 gap: 8,
                                             }}>
-                                                {isDropLocked ? (
-                                                    <Text style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>🔒 Complete PICKUP First</Text>
+                                                {startingTripId === trip.id ? (
+                                                    <>
+                                                        <ActivityIndicator size="small" color="#fff" />
+                                                        <Text style={{ fontSize: 16, fontWeight: '700', color: '#fff' }}>Starting Trip...</Text>
+                                                    </>
+                                                ) : isDropLocked ? (
+                                                    <>
+                                                        <AlertTriangle size={18} color="#fff" />
+                                                        <Text style={{ fontSize: 15, fontWeight: '700', color: '#fff' }}>Start DROP (PICKUP pending)</Text>
+                                                    </>
                                                 ) : (
                                                     <>
                                                         <View style={{
@@ -2788,14 +2925,138 @@ export default function HomeScreen() {
 
                                 {/* Helpful tip */}
                                 {sortedTrips.some(t => t.tripType === 'DROP') && !todaysPickupCompleted && (
-                                    <View style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center', backgroundColor: '#DBEAFE', padding: 10, borderRadius: 10 }}>
-                                        <Text style={{ fontSize: 12, color: '#1E40AF', flex: 1 }}>💡 Complete the PICKUP trip first to unlock DROP</Text>
+                                    <View style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF3C7', padding: 10, borderRadius: 10, borderWidth: 1, borderColor: '#FCD34D' }}>
+                                        <AlertTriangle size={16} color="#D97706" />
+                                        <Text style={{ fontSize: 12, color: '#92400E', flex: 1, marginLeft: 8 }}>PICKUP not completed yet. You can still start DROP if needed.</Text>
                                     </View>
                                 )}
                             </View>
                         </Animated.View>
                     );
                 })()}
+
+                {/* ON-DEMAND Start Trip Widget - Shows when no scheduled trips but has assignment AND trips still pending */}
+                {!activeTrip && todaysScheduledTrips.length === 0 && assignment && !(todaysPickupDone && todaysDropDone) && (() => {
+                    return (
+                        <Animated.View entering={FadeInDown.delay(150).duration(600)} style={styles.section}>
+                            <View style={{ backgroundColor: '#F0FDF4', borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#86EFAC' }}>
+                                {/* Header */}
+                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                                    <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: '#DCFCE7', alignItems: 'center', justifyContent: 'center' }}>
+                                        <Play size={24} color="#16A34A" />
+                                    </View>
+                                    <View style={{ marginLeft: 14, flex: 1 }}>
+                                        <Text style={{ fontSize: 18, fontWeight: '700', color: '#166534' }}>Ready to Start</Text>
+                                        <Text style={{ fontSize: 13, color: '#15803D' }}>Tap to begin your trip</Text>
+                                    </View>
+                                </View>
+
+                                {/* Assignment Info Banner */}
+                                <View style={{ backgroundColor: '#DCFCE7', borderRadius: 12, padding: 12, marginBottom: 16, borderWidth: 1, borderColor: '#86EFAC' }}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                        <Bus size={20} color="#16A34A" />
+                                        <View style={{ marginLeft: 10, flex: 1 }}>
+                                            <Text style={{ fontSize: 14, fontWeight: '700', color: '#166534' }}>{assignment.vehicle?.licensePlate}</Text>
+                                            <Text style={{ fontSize: 12, color: '#15803D' }}>{assignment.route?.name}</Text>
+                                        </View>
+                                    </View>
+                                </View>
+
+                                {/* Start PICKUP Button */}
+                                {!todaysPickupDone && (
+                                    <HapticTouchable
+                                        onPress={() => handleStartOnDemand('PICKUP')}
+                                        disabled={startingTripId === 'ondemand-PICKUP'}
+                                        style={{ marginBottom: 12 }}
+                                    >
+                                        <View style={{
+                                            backgroundColor: '#10B981',
+                                            paddingVertical: 16,
+                                            borderRadius: 14,
+                                            flexDirection: 'row',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            gap: 10,
+                                        }}>
+                                            {startingTripId === 'ondemand-PICKUP' ? (
+                                                <>
+                                                    <ActivityIndicator size="small" color="#fff" />
+                                                    <Text style={{ fontSize: 16, fontWeight: '700', color: '#fff' }}>Starting Trip...</Text>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Text style={{ fontSize: 22 }}>🌅</Text>
+                                                    <Text style={{ fontSize: 17, fontWeight: '800', color: '#fff' }}>Start PICKUP Trip</Text>
+                                                </>
+                                            )}
+                                        </View>
+                                    </HapticTouchable>
+                                )}
+
+                                {/* Start DROP Button */}
+                                {!todaysDropDone && (
+                                    <HapticTouchable
+                                        onPress={() => handleStartOnDemand('DROP')}
+                                        disabled={startingTripId === 'ondemand-DROP'}
+                                    >
+                                        <View style={{
+                                            backgroundColor: todaysPickupDone ? '#8B5CF6' : '#F59E0B',
+                                            paddingVertical: 16,
+                                            borderRadius: 14,
+                                            flexDirection: 'row',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            gap: 10,
+                                        }}>
+                                            {startingTripId === 'ondemand-DROP' ? (
+                                                <>
+                                                    <ActivityIndicator size="small" color="#fff" />
+                                                    <Text style={{ fontSize: 16, fontWeight: '700', color: '#fff' }}>Starting Trip...</Text>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Text style={{ fontSize: 22 }}>🌆</Text>
+                                                    <Text style={{ fontSize: 17, fontWeight: '800', color: '#fff' }}>
+                                                        {todaysPickupDone ? 'Start DROP Trip' : 'Start DROP (PICKUP pending)'}
+                                                    </Text>
+                                                </>
+                                            )}
+                                        </View>
+                                    </HapticTouchable>
+                                )}
+
+                                {/* Helpful tip for DROP when PICKUP not done */}
+                                {!todaysPickupDone && (
+                                    <View style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center', backgroundColor: '#FEF3C7', padding: 10, borderRadius: 10, borderWidth: 1, borderColor: '#FCD34D' }}>
+                                        <AlertTriangle size={16} color="#D97706" />
+                                        <Text style={{ fontSize: 12, color: '#92400E', flex: 1, marginLeft: 8 }}>PICKUP not completed yet. You can still start DROP if needed.</Text>
+                                    </View>
+                                )}
+                            </View>
+                        </Animated.View>
+                    );
+                })()}
+
+                {/* All Trips Completed Widget - Shows when both PICKUP and DROP are done */}
+                {!activeTrip && assignment && todaysPickupDone && todaysDropDone && (
+                    <Animated.View entering={FadeInDown.delay(150).duration(600)} style={styles.section}>
+                        <View style={{ backgroundColor: '#F0FDF4', borderRadius: 20, padding: 24, borderWidth: 1, borderColor: '#86EFAC', alignItems: 'center' }}>
+                            <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#DCFCE7', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+                                <CheckCircle2 size={36} color="#16A34A" />
+                            </View>
+                            <Text style={{ fontSize: 20, fontWeight: '800', color: '#166534', marginBottom: 4 }}>All Done for Today! 🎉</Text>
+                            <Text style={{ fontSize: 14, color: '#15803D', textAlign: 'center' }}>Both PICKUP and DROP trips completed successfully.</Text>
+                            <View style={{ flexDirection: 'row', marginTop: 16, gap: 12 }}>
+                                <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 }}>
+                                    <Text style={{ fontSize: 13, color: '#166534', fontWeight: '600' }}>🌅 PICKUP ✓</Text>
+                                </View>
+                                <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 }}>
+                                    <Text style={{ fontSize: 13, color: '#166534', fontWeight: '600' }}>🌆 DROP ✓</Text>
+                                </View>
+                            </View>
+                        </View>
+                    </Animated.View>
+                )}
 
                 {activeTrip && (
                     <Animated.View entering={FadeInDown.delay(75).duration(600)} style={styles.section}>
@@ -2828,8 +3089,7 @@ export default function HomeScreen() {
                     </Animated.View>
                 )}
 
-                {/* School Banner Carousel */}
-                <BannerCarousel schoolId={schoolId} role={user_acc?.role?.name} />
+
 
                 <Animated.View entering={FadeInDown.delay(200).duration(600)} style={styles.section}>
                     <Text style={styles.sectionTitle}>Quick Actions</Text>
@@ -3050,28 +3310,31 @@ export default function HomeScreen() {
 
                 {/* Bottom Spacer */}
                 <View style={{ height: 100 }} />
-            </ScrollView>
+            </Animated.ScrollView>
         );
     };
 
     // === CONDUCTOR VIEW ===
-    const ConductorView = ({ refreshing, onRefresh, schoolId, userId, prefetchedStaffData, prefetchedTripsData, header, navigateOnce }) => {
+    const ConductorView = ({ refreshing, onRefresh, onScroll, paddingTop, schoolId, userId, prefetchedStaffData, prefetchedTripsData, navigateOnce }) => {
         const queryClient = useQueryClient();
 
         // Use prefetched data directly
         const staffData = prefetchedStaffData;
         const transportStaffId = staffData?.id;
-        const vehicle = staffData?.vehicleAssignments?.[0]?.vehicle;
 
         // Use prefetched trips data
         const tripsData = prefetchedTripsData;
         const trips = tripsData?.trips || [];
+        const assignment = tripsData?.assignment;
 
-        // Refetch function for manual refresh
-        const refetch = () => {
-            queryClient.invalidateQueries({ queryKey: ['transport-trips-home'] });
-            queryClient.invalidateQueries({ queryKey: ['transport-staff-home'] });
-        };
+        // Try to get vehicle from vehicleAssignments first, fallback to assignment
+        const vehicle = staffData?.vehicleAssignments?.[0]?.vehicle || assignment?.vehicle;
+        // Refetch function - use parent's onRefresh to avoid duplicate refreshes
+        const refetch = useCallback(() => {
+            if (onRefresh && typeof onRefresh === 'function') {
+                onRefresh();
+            }
+        }, [onRefresh]);
 
         const activeTrip = trips.find(t => t.status === 'IN_PROGRESS');
         const totalStudents = activeTrip?.route?.busStops?.reduce((sum, stop) => sum + (stop.students?.length || 0), 0) || 0;
@@ -3106,8 +3369,23 @@ export default function HomeScreen() {
         // Note: Loading is handled at HomeScreen level now
 
         return (
-            <ScrollView style={styles.container} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" colors={['#0469ff']} />}>
-                {header}
+            <Animated.ScrollView
+                style={styles.container}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingTop: paddingTop }}
+                onScroll={onScroll}
+                scrollEventThrottle={16}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
+                        tintColor="#0469ff"
+                        colors={['#0469ff']}
+                        progressViewOffset={paddingTop + 10}
+                    />
+                }
+            >
+                {/* Header is rendered outside the ScrollView by parent component */}
                 {/* Bus Assignment Card for Conductor */}
                 {vehicle && (
                     <Animated.View entering={FadeInDown.delay(50).duration(600)} style={styles.section}>
@@ -3335,7 +3613,7 @@ export default function HomeScreen() {
 
                 {/* Bottom Spacer */}
                 <View style={{ height: 100 }} />
-            </ScrollView>
+            </Animated.ScrollView>
         );
     };
 
@@ -3529,6 +3807,7 @@ export default function HomeScreen() {
                         onRefresh={onRefresh}
                         tintColor="#0469ff"
                         colors={['#0469ff']}
+                        progressViewOffset={paddingTop + 10}
                     />
                 }
             >
@@ -3867,6 +4146,7 @@ export default function HomeScreen() {
                         onRefresh={onRefresh}
                         tintColor="#0469ff"
                         colors={['#0469ff']}
+                        progressViewOffset={paddingTop + 10}
                     />
                 }
             >
@@ -4088,26 +4368,22 @@ export default function HomeScreen() {
 
                             <View style={[styles.headerLeft, { flexDirection: 'row', alignItems: 'center', width: '100%', paddingHorizontal: 20 }]}>
                                 <HapticTouchable onPress={() => navigateOnce('(tabs)/profile')}>
-                                    {user_acc?.profilePicture && user_acc.profilePicture !== 'default.png' ? (
-                                        <View style={[styles.avatarContainer, { borderColor: '#fff', borderWidth: 2, overflow: 'hidden', borderRadius: 50 }]}>
-                                            <Image source={{ uri: user_acc.profilePicture }} style={{ width: 50, height: 50, borderRadius: 25 }} />
-                                        </View>
-                                    ) : (
-                                        <View style={{
-                                            width: 50,
-                                            height: 50,
-                                            borderRadius: 25,
-                                            backgroundColor: '#f0f0f0',
-                                            borderWidth: 2,
-                                            borderColor: '#fff',
-                                            justifyContent: 'center',
-                                            alignItems: 'center',
-                                        }}>
-                                            <Text style={{ color: '#0469ff', fontSize: 20, fontWeight: '700' }}>
+                                    <Animated.View style={[avatarAnimatedStyle, {
+                                        backgroundColor: '#f0f0f0',
+                                        borderWidth: 2.5,
+                                        borderColor: '#fff',
+                                        justifyContent: 'center',
+                                        alignItems: 'center',
+                                        overflow: 'hidden',
+                                    }]}>
+                                        {user_acc?.profilePicture && user_acc.profilePicture !== 'default.png' ? (
+                                            <Image source={{ uri: user_acc.profilePicture }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
+                                        ) : (
+                                            <Text style={{ color: '#0469ff', fontSize: 22, fontWeight: '700' }}>
                                                 {getInitials(user_acc?.parentData?.name || user_acc?.name || 'User') || 'U'}
                                             </Text>
-                                        </View>
-                                    )}
+                                        )}
+                                    </Animated.View>
                                 </HapticTouchable>
 
                                 <View style={[styles.headerInfo, { marginLeft: 12, flex: 1, justifyContent: 'center' }]}>

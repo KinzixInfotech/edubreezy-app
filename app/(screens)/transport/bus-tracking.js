@@ -32,6 +32,7 @@ import * as SecureStore from 'expo-secure-store';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE, AnimatedRegion, Animated as AnimatedMarker } from 'react-native-maps';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
+import { StatusBar } from 'expo-status-bar';
 
 const { height, width } = Dimensions.get('window');
 
@@ -240,6 +241,7 @@ export default function BusTrackingScreen() {
 
     return (
         <View style={styles.container}>
+            <StatusBar style='dark' />
             {/* Header */}
             <View style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>

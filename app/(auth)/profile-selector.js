@@ -20,6 +20,7 @@ import { getProfilesForSchool, removeProfile, updateLastUsed, clearSchoolProfile
 import { tryRestoreSession, initTokenSync } from '../../lib/tokenManager';
 import HapticTouchable from '../components/HapticTouch';
 import { supabase } from '../../lib/supabase';
+import { stopBackgroundLocationTask } from '../../lib/transport-location-task';
 
 const { width } = Dimensions.get('window');
 const PROFILE_SIZE = 100;
@@ -212,6 +213,14 @@ export default function ProfileSelectorScreen() {
                 {
                     text: 'Switch School',
                     onPress: async () => {
+                        // Stop background location tracking if running
+                        try {
+                            await stopBackgroundLocationTask();
+                            console.log('✅ Background location task stopped on school switch');
+                        } catch (err) {
+                            console.log('⚠️ No background task to stop:', err);
+                        }
+
                         // Clear current school data and go to schoolcode screen
                         await clearCurrentSchool();
                         router.replace('/(auth)/schoolcode');
@@ -231,6 +240,14 @@ export default function ProfileSelectorScreen() {
                     text: 'Logout All',
                     style: 'destructive',
                     onPress: async () => {
+                        // Stop background location tracking if running
+                        try {
+                            await stopBackgroundLocationTask();
+                            console.log('✅ Background location task stopped on logout');
+                        } catch (err) {
+                            console.log('⚠️ No background task to stop:', err);
+                        }
+
                         await clearSchoolProfiles(schoolCode);
                         // After clearing all profiles, go to login for this school
                         router.replace({
@@ -254,6 +271,17 @@ export default function ProfileSelectorScreen() {
                     style: 'destructive',
                     onPress: async () => {
                         await removeProfile(schoolCode, profile.id);
+
+                        // If this was the only profile, stop background tasks
+                        if (profiles.length === 1) {
+                            try {
+                                await stopBackgroundLocationTask();
+                                console.log('✅ Last profile removed, background task stopped');
+                            } catch (err) {
+                                console.log('⚠️ Error stopping background task:', err);
+                            }
+                        }
+
                         await loadProfilesForCode(schoolCode);
                     },
                 },

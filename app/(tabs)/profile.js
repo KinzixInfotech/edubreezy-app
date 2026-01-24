@@ -1020,8 +1020,11 @@ export default function ProfileScreen() {
           </Animated.View>
           {/* Footer Info */}
           <View style={styles.footer}>
-            <Text style={styles.footerText}>Developed by Kinzix Infotech</Text>
-            <Text style={styles.footerText}>All rights reserved</Text>
+            <Text style={[styles.footerText, { marginBottom: 8 }]}>Developed by</Text>
+            <Image
+              source={require('../../assets/kinzix.png')}
+              style={{ width: 120, height: 30, resizeMode: 'contain', marginBottom: 4 }}
+            />
             <Text style={styles.footerVersion}>
               v{Constants.expoConfig?.version || Constants.manifest?.version || '1.0.0'}
             </Text>

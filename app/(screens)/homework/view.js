@@ -94,7 +94,7 @@ export default function HomeworkScreen() {
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
-        await queryClient.invalidateQueries(['homework']);
+        await queryClient.invalidateQueries({ queryKey: ['homework'] });
         setRefreshing(false);
     }, [queryClient]);
 

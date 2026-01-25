@@ -447,7 +447,7 @@ export default function LoginScreen() {
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode="interactive"
                 bounces={false}
-                style={{ backgroundColor: PRIMARY_COLOR }}
+                style={{ backgroundColor: '#FFFFFF' }}
             >
                 {/* Blue Header Background - Extends to safe area */}
                 <View style={[styles.headerBackground, { paddingTop: insets.top + 24 }]}>
@@ -455,7 +455,7 @@ export default function LoginScreen() {
                     <GridPattern />
 
                     {/* Shield Icon */}
-                    <Animated.View
+                    <Animated.View s
                         entering={FadeIn.delay(100).duration(500)}
                         style={styles.shieldContainer}
                     >
@@ -641,7 +641,7 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: PRIMARY_COLOR,
+        backgroundColor: '#FFFFFF',
     },
     headerBackground: {
         backgroundColor: PRIMARY_COLOR,

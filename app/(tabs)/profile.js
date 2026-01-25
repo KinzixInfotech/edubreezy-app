@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Modal, Dimensions, TouchableWithoutFeedback, Animated as RNAnimated, RefreshControl, Linking, Alert, TextInput, Platform, StatusBar } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
-import { Settings, Edit, LogOut, Mail, Phone, Calendar, MapPin, Award, BookOpen, School, X, Users, ClipboardList, FileText, Bell, Shield, Clock, Bus, Fuel, Gauge, UserCheck, ClipboardCheck, Megaphone } from 'lucide-react-native';
+import { Settings, Edit, LogOut, Mail, Phone, Calendar, MapPin, Award, BookOpen, School, X, Users, ClipboardList, FileText, Bell, Shield, Clock, Bus, Fuel, Gauge, UserCheck, ClipboardCheck, Megaphone, Camera } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../components/HapticTouch';
@@ -13,7 +13,9 @@ import * as Haptics from 'expo-haptics';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../../lib/api';
 import { getCurrentSchool } from '../../lib/profileManager';
+import { pickAndUploadImage } from '../../lib/uploadthing';
 import Constants from 'expo-constants';
+import { emitProfilePictureChange } from '../../lib/profileEvents';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const isSmallDevice = SCREEN_WIDTH < 375;
@@ -387,6 +389,7 @@ export default function ProfileScreen() {
   const [editNameModalVisible, setEditNameModalVisible] = useState(false);
   const [editNameValue, setEditNameValue] = useState('');
   const [savingName, setSavingName] = useState(false);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [isScrolledPastHeader, setIsScrolledPastHeader] = useState(false);
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
@@ -616,6 +619,66 @@ export default function ProfileScreen() {
     setImageViewerVisible(false);
   };
 
+  // Handle profile photo upload (only for non-students)
+  const handleProfilePhotoUpload = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    try {
+      const result = await pickAndUploadImage(
+        'profilePhoto',
+        {
+          userId: user?.id,
+          schoolId: user?.schoolId,
+          type: 'profile',
+        },
+        {
+          onStart: () => setIsUploadingPhoto(true),
+          onProgress: (progress) => console.log('Upload progress:', progress),
+          onComplete: async (uploadedFiles) => {
+            console.log('✅ Profile photo uploaded:', uploadedFiles);
+            if (uploadedFiles?.[0]?.url || uploadedFiles?.url) {
+              const photoUrl = uploadedFiles?.[0]?.url || uploadedFiles?.url;
+              try {
+                // Update user's profile picture in database using mobile endpoint
+                await api.put(`/mobile/user/${user.id}`, {
+                  profilePicture: photoUrl
+                });
+
+                // Refresh profile data
+                await refetch();
+
+                // Emit event to update tab bar and home header
+                emitProfilePictureChange(photoUrl);
+
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                Alert.alert('Success', 'Profile photo updated successfully!');
+              } catch (updateError) {
+                console.error('Error updating profile picture:', updateError);
+                Alert.alert('Error', 'Photo uploaded but failed to update profile. Please try again.');
+              }
+            }
+            setIsUploadingPhoto(false);
+          },
+          onError: (error) => {
+            console.error('Profile photo upload error:', error);
+            setIsUploadingPhoto(false);
+            Alert.alert('Upload Failed', 'Failed to upload photo. Please try again.');
+          },
+        }
+      );
+
+      // Handle case where user cancelled picker
+      if (result === null) {
+        setIsUploadingPhoto(false);
+      }
+    } catch (error) {
+      console.error('Profile photo upload error:', error);
+      setIsUploadingPhoto(false);
+      Alert.alert('Error', 'Something went wrong. Please try again.');
+    }
+  };
+
+
   if (loading || !storedUserId) {
     return (
       <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -710,11 +773,27 @@ export default function ProfileScreen() {
               <Text style={{ position: 'absolute', bottom: 30, left: '60%', fontSize: 28, color: 'rgba(255,255,255,0.1)', fontWeight: 'bold' }}>○</Text>
               <View style={{ position: 'absolute', top: -50, right: -50, width: 220, height: 220, borderRadius: 110, backgroundColor: 'rgba(255,255,255,0.05)' }} />
               <View style={{ position: 'absolute', bottom: -60, left: -40, width: 180, height: 180, borderRadius: 90, backgroundColor: 'rgba(255,255,255,0.05)' }} />
-              <HapticTouchable onPress={openImageViewer}>
+              <HapticTouchable
+                onPress={role === 'STUDENT' ? openImageViewer : handleProfilePhotoUpload}
+                onLongPress={openImageViewer}
+                disabled={isUploadingPhoto}
+              >
                 {profilePicture && profilePicture !== 'default.png' && profilePicture !== 'N/A' ? (
                   <View style={[styles.avatarContainer, { marginBottom: 16 }, isTablet && styles.avatarContainerTablet]}>
-                    <Image source={{ uri: profilePicture }} style={[styles.avatar, isTablet && styles.avatarTablet, { borderColor: '#fff' }]} />
-                    <View style={[styles.statusDot, isTablet && styles.statusDotTablet]} />
+                    {isUploadingPhoto ? (
+                      <View style={[styles.avatar, isTablet && styles.avatarTablet, { borderColor: '#fff', backgroundColor: 'rgba(0,0,0,0.3)', justifyContent: 'center', alignItems: 'center' }]}>
+                        <ActivityIndicator size="large" color="#fff" />
+                      </View>
+                    ) : (
+                      <Image source={{ uri: profilePicture }} style={[styles.avatar, isTablet && styles.avatarTablet, { borderColor: '#fff' }]} />
+                    )}
+                    {/* Camera badge for non-students */}
+                    {role !== 'STUDENT' && !isUploadingPhoto && (
+                      <View style={styles.cameraBadge}>
+                        <Camera size={14} color="#0469ff" />
+                      </View>
+                    )}
+                    {!isUploadingPhoto && <View style={[styles.statusDot, isTablet && styles.statusDotTablet]} />}
                   </View>
                 ) : (
                   <View style={[
@@ -722,17 +801,29 @@ export default function ProfileScreen() {
                     { marginBottom: 16 },
                     isTablet && styles.avatarContainerTablet
                   ]}>
-                    <View style={[
-                      styles.avatar,
-                      styles.avatarFallback,
-                      isTablet && styles.avatarTablet,
-                      { backgroundColor: '#fff' }
-                    ]}>
-                      <Text style={[styles.fallbackText, isTablet && styles.fallbackTextTablet, { color: roleColor }]}>
-                        {userName ? getInitials(userName) : 'U'}
-                      </Text>
-                    </View>
-                    <View style={[styles.statusDot, isTablet && styles.statusDotTablet]} />
+                    {isUploadingPhoto ? (
+                      <View style={[styles.avatar, styles.avatarFallback, isTablet && styles.avatarTablet, { backgroundColor: 'rgba(255,255,255,0.8)', justifyContent: 'center', alignItems: 'center' }]}>
+                        <ActivityIndicator size="large" color="#0469ff" />
+                      </View>
+                    ) : (
+                      <View style={[
+                        styles.avatar,
+                        styles.avatarFallback,
+                        isTablet && styles.avatarTablet,
+                        { backgroundColor: '#fff' }
+                      ]}>
+                        <Text style={[styles.fallbackText, isTablet && styles.fallbackTextTablet, { color: roleColor }]}>
+                          {userName ? getInitials(userName) : 'U'}
+                        </Text>
+                      </View>
+                    )}
+                    {/* Camera badge for non-students */}
+                    {role !== 'STUDENT' && !isUploadingPhoto && (
+                      <View style={styles.cameraBadge}>
+                        <Camera size={14} color="#0469ff" />
+                      </View>
+                    )}
+                    {!isUploadingPhoto && <View style={[styles.statusDot, isTablet && styles.statusDotTablet]} />}
                   </View>
                 )}
               </HapticTouchable>
@@ -1214,6 +1305,24 @@ const styles = StyleSheet.create({
     backgroundColor: '#10b981',
     borderWidth: isSmallDevice ? 2 : 3,
     borderColor: '#fff',
+  },
+  cameraBadge: {
+    position: 'absolute',
+    bottom: isSmallDevice ? 0 : 2,
+    left: isSmallDevice ? 0 : 2,
+    width: isSmallDevice ? 26 : 30,
+    height: isSmallDevice ? 26 : 30,
+    borderRadius: isSmallDevice ? 13 : 15,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: '#0469ff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 3,
   },
   userName: {
     fontSize: isSmallDevice ? 20 : 24,

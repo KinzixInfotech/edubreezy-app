@@ -84,6 +84,7 @@ export default function AssignHomeworkScreen() {
     const { data: teacherData, isLoading: teacherLoading } = useQuery({
         queryKey: ['teacher-data', schoolId, userId],
         queryFn: async () => {
+            if (!schoolId || !userId) return {};
             const res = await api.get(`/schools/${schoolId}/teachers/${userId}`);
             const teachers = res.data?.teacher || res.data;
             return Array.isArray(teachers) ? teachers[0] : teachers;
@@ -139,9 +140,9 @@ export default function AssignHomeworkScreen() {
     const { data: submissionsData, isLoading: submissionsLoading, refetch: refetchSubmissions } = useQuery({
         queryKey: ['homework-submissions', selectedHomework?.id],
         queryFn: async () => {
-            if (!selectedHomework?.id) return null;
+            if (!selectedHomework?.id) return { submissions: [], stats: null };
             const res = await api.get(`/schools/homework/${selectedHomework.id}/submissions`);
-            return res.data;
+            return res.data || { submissions: [], stats: null };
         },
         enabled: !!selectedHomework?.id && markingModal,
         staleTime: 0,
@@ -154,8 +155,8 @@ export default function AssignHomeworkScreen() {
             return res.data;
         },
         onSuccess: () => {
-            queryClient.invalidateQueries(['homework']);
-            queryClient.invalidateQueries(['teacher-homework']);
+            queryClient.invalidateQueries({ queryKey: ['homework'] });
+            queryClient.invalidateQueries({ queryKey: ['teacher-homework'] });
             Alert.alert(
                 'Success! 🎉',
                 `Homework assigned to ${studentsCount} student(s)`,
@@ -177,8 +178,8 @@ export default function AssignHomeworkScreen() {
             return res.data;
         },
         onSuccess: () => {
-            queryClient.invalidateQueries(['homework-submissions']);
-            queryClient.invalidateQueries(['teacher-homework']);
+            queryClient.invalidateQueries({ queryKey: ['homework-submissions'] });
+            queryClient.invalidateQueries({ queryKey: ['teacher-homework'] });
             Alert.alert('Success', 'Submissions updated');
             setMarkingModal(false);
             setSubmissionChanges({});
@@ -316,7 +317,7 @@ export default function AssignHomeworkScreen() {
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
-        await queryClient.invalidateQueries(['teacher-data']);
+        await queryClient.invalidateQueries({ queryKey: ['teacher-data'] });
         if (activeTab === 1) await refetchHomework();
         setRefreshing(false);
     }, [queryClient, activeTab]);

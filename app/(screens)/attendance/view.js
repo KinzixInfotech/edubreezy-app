@@ -47,7 +47,7 @@ export default function AttendanceViewScreen() {
     const summary = data?.summary || { total: 0, present: 0, absent: 0, late: 0, percentage: 0 };
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
-    // Filter attendance by search query
+    // Filter attendance by search query   
     const filteredAttendance = useMemo(() => {
         if (!searchQuery.trim()) return attendance;
         const query = searchQuery.toLowerCase();

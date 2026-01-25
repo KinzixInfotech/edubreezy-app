@@ -10,6 +10,7 @@ export default {
         icon: "./assets/icon.png",
         userInterfaceStyle: "light",
         newArchEnabled: true,
+
         splash: {
             image: "./assets/splash.png",
             resizeMode: "contain",
@@ -26,14 +27,14 @@ export default {
                     "location",
                     "remote-notification"
                 ],
-                NSLocationAlwaysAndWhenInUseUsageDescription: "EduBreezy needs access to your location to track bus routes and provide real-time updates to parents.",
-                NSLocationWhenInUseUsageDescription: "EduBreezy needs access to your location to show your position on the map.",
-                NSLocationAlwaysUsageDescription: "EduBreezy needs background location access to track bus routes even when the app is closed."
+                NSLocationAlwaysAndWhenInUseUsageDescription:
+                    "EduBreezy needs access to your location to track bus routes and provide real-time updates to parents.",
+                NSLocationWhenInUseUsageDescription:
+                    "EduBreezy needs access to your location to show your position on the map.",
+                NSLocationAlwaysUsageDescription:
+                    "EduBreezy needs background location access to track bus routes even when the app is closed."
             },
             bundleIdentifier: "com.kinzix.edubreezy",
-            googleServicesFile: "./GoogleService-Info.plist"
-        },
-        android: {
             package: "com.kinzix.edubreezy",
             adaptiveIcon: {
                 foregroundImage: "./assets/adaptive-icon.png",
@@ -63,11 +64,22 @@ export default {
         },
         web: {
             favicon: "./assets/favicon.png"
-        },
+        }, googleServicesFile: "./GoogleService-Info.plist"
+    },
+    android: {
         plugins: [
             "@react-native-firebase/app",
             "@react-native-firebase/messaging",
-            "expo-notifications",
+            [
+                "expo-notifications",
+                {
+                    ios: {
+                        allowAlert: true,
+                        allowBadge: true,
+                        allowSound: true
+                    }
+                }
+            ],
             "expo-background-fetch",
             [
                 "expo-location",

@@ -293,25 +293,27 @@ const NoticeBoardScreen = () => {
 
       {/* Category Pills (only for received tab) */}
       {activeTab === 'received' && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.categoryContainer}
-          contentContainerStyle={styles.categoryContent}
-        >
-          {categories.map((cat) => (
-            <HapticTouchable
-              key={cat}
-              onPress={() => setSelectedCategory(cat)}
-            >
-              <View style={[styles.categoryPill, selectedCategory === cat && styles.categoryPillActive]}>
-                <Text style={[styles.categoryText, selectedCategory === cat && styles.categoryTextActive]}>
-                  {cat}
-                </Text>
-              </View>
-            </HapticTouchable>
-          ))}
-        </ScrollView>
+        <View style={styles.categoryWrapper}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.categoryContent}
+            bounces={false}
+          >
+            {categories.map((cat) => (
+              <HapticTouchable
+                key={cat}
+                onPress={() => setSelectedCategory(cat)}
+              >
+                <View style={[styles.categoryPill, selectedCategory === cat && styles.categoryPillActive]}>
+                  <Text style={[styles.categoryText, selectedCategory === cat && styles.categoryTextActive]}>
+                    {cat}
+                  </Text>
+                </View>
+              </HapticTouchable>
+            ))}
+          </ScrollView>
+        </View>
       )}
 
       {/* Content */}
@@ -517,22 +519,24 @@ const styles = StyleSheet.create({
   activeTabText: {
     color: '#0469ff',
   },
-  categoryContainer: {
+  categoryWrapper: {
+    height: 52,
+    backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
-    // Removed maxHeight: 56 to prevent filters from being cut off/collapsed
   },
   categoryContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 8,
+    height: 52,
   },
   categoryPill: {
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 18,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 20,
     backgroundColor: '#f5f5f5',
-    marginRight: 8,
+    marginRight: 10,
   },
   categoryPillActive: {
     backgroundColor: '#0469ff',

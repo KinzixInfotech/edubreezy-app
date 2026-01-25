@@ -16,6 +16,7 @@ import messaging from '@react-native-firebase/messaging';
 import { supabase } from '../lib/supabase';
 import NetInfo from '@react-native-community/netinfo';
 import NoInternetScreen from './components/NoInternetScreen';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 const BADGE_KEY = 'noticeBadgeCount';
 
@@ -369,10 +370,12 @@ function RootLayoutContent() {
 
 export default function RootLayout() {
     return (
-        <QueryClientProvider client={queryClient}>
-            <NotificationProvider>
-                <RootLayoutContent />
-            </NotificationProvider>
-        </QueryClientProvider>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+            <QueryClientProvider client={queryClient}>
+                <NotificationProvider>
+                    <RootLayoutContent />
+                </NotificationProvider>
+            </QueryClientProvider>
+        </GestureHandlerRootView>
     );
 }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Image, StyleSheet, Dimensions, FlatList, TouchableOpacity, Text, Animated } from 'react-native';
+import { View, StyleSheet, Dimensions, FlatList, TouchableOpacity, Text, Animated } from 'react-native';
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as SecureStore from 'expo-secure-store';
 import api from '../../lib/api';
@@ -85,24 +86,57 @@ const BannerCarousel = ({ schoolId, role }) => {
     }, [isAutoPlay, images, activeIndex]);
 
     const fetchImages = async () => {
-        setIsLoading(true);
+        // Map app role to API role format
+        const apiRole = role === 'TEACHING_STAFF' ? 'TEACHERS' :
+            role === 'NON_TEACHING_STAFF' ? 'STAFF' :
+                role; // STUDENTS, PARENTS, etc.
+
+        const cacheKey = `carousel_cache_${schoolId}_${apiRole}`;
+
+        let cachedLoaded = false;
+
+        // 1. Try to load from cache first for immediate display
         try {
-            // Map app role to API role format if needed
-            const apiRole = role === 'TEACHING_STAFF' ? 'TEACHERS' :
-                role === 'NON_TEACHING_STAFF' ? 'STAFF' :
-                    role; // STUDENTS, PARENTS, etc.
+            const cachedData = await SecureStore.getItemAsync(cacheKey);
+            if (cachedData) {
+                const parsedData = JSON.parse(cachedData);
+                if (Array.isArray(parsedData) && parsedData.length > 0) {
+                    console.log('📱 Carousel: Loaded from cache');
+                    setImages(parsedData);
+                    setHasData(true);
+                    // Don't duplicate loading state if we have cache, 
+                    // but we still want to fetch fresh data in background
+                    setIsLoading(false);
+                    cachedLoaded = true;
+                }
+            }
+        } catch (e) {
+            console.log('Error reading carousel cache:', e);
+        }
+
+        // 2. Fetch fresh data from API (Stale-while-revalidate)
+        try {
+            // Only set loading to true if we didn't have cached data
+            // Use local variable because state update 'images' won't be reflected immediately in this closure
+            if (!cachedLoaded && images.length === 0) setIsLoading(true);
 
             const response = await api.get(`/schools/carousel?schoolId=${schoolId}&role=${apiRole}`);
 
-            if (Array.isArray(response.data) && response.data.length > 0) {
-                setImages(response.data);
-                setHasData(true);
-            } else {
-                setHasData(false);
+            if (Array.isArray(response.data)) {
+                if (response.data.length > 0) {
+                    setImages(response.data);
+                    setHasData(true);
+                    // 3. Update cache with fresh data
+                    await SecureStore.setItemAsync(cacheKey, JSON.stringify(response.data));
+                } else {
+                    // Only set hasData false if we don't have cached images either
+                    if (!cachedLoaded && images.length === 0) setHasData(false);
+                }
             }
         } catch (error) {
             console.error('Failed to fetch carousel images:', error);
-            setHasData(false);
+            // If we have cached images, suppress the error visually
+            if (!cachedLoaded && images.length === 0) setHasData(false);
         } finally {
             setIsLoading(false);
         }
@@ -154,9 +188,11 @@ const BannerCarousel = ({ schoolId, role }) => {
                         {/* Show skeleton while image is loading */}
                         {!loadedImages[item.id] && <SkeletonLoader />}
                         <Image
-                            source={{ uri: item.imageUrl }}
+                            source={item.imageUrl}
                             style={[styles.image, !loadedImages[item.id] && styles.hiddenImage]}
-                            resizeMode="cover"
+                            contentFit="cover"
+                            transition={300}
+                            cachePolicy="memory-disk"
                             onLoad={() => handleImageLoad(item.id)}
                         />
                         {item.caption && loadedImages[item.id] && (

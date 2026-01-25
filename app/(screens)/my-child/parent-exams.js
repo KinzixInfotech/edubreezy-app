@@ -79,11 +79,10 @@ export default function ParentExamsScreen() {
                 if (childId) {
                     const key = `${EXAM_LAST_VIEWED_KEY}_${childId}`;
                     await SecureStore.setItemAsync(key, new Date().toISOString());
-                    queryClient.invalidateQueries(['parent-exams-badge']);
                 }
             };
             markAsViewed();
-        }, [childId, queryClient])
+        }, [childId])
     );
 
     const onRefresh = useCallback(async () => {

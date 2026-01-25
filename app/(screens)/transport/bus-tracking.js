@@ -1,5 +1,5 @@
 // Bus Tracking Screen for Parents - with Live Google Maps
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
 import {
     View,
     Text,
@@ -29,15 +29,15 @@ import {
     Moon,
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE, AnimatedRegion, Animated as AnimatedMarker } from 'react-native-maps';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
 import { StatusBar } from 'expo-status-bar';
 
 const { height, width } = Dimensions.get('window');
 
-// Bus marker images based on status
-const BusMarkerView = ({ status, isStale }) => (
+// Memoized bus marker to prevent unnecessary re-renders (fixes iOS lag)
+const BusMarkerView = memo(({ status, isStale }) => (
     <View style={[styles.busMarker,
     isStale ? styles.busMarkerStale :
         status === 'MOVING' ? styles.busMarkerMoving :
@@ -46,7 +46,7 @@ const BusMarkerView = ({ status, isStale }) => (
     ]}>
         <Bus size={20} color="#fff" />
     </View>
-);
+));
 
 export default function BusTrackingScreen() {
     const params = useLocalSearchParams();
@@ -54,14 +54,6 @@ export default function BusTrackingScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const mapRef = useRef(null);
     const markerRef = useRef(null);
-
-    // Animated coordinate for smooth bus marker movement
-    const animatedCoordinate = useRef(new AnimatedRegion({
-        latitude: 20.5937,
-        longitude: 78.9629,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-    })).current;
 
     // Parse child data from params
     const childData = params.childData ? JSON.parse(params.childData) : null;
@@ -77,7 +69,7 @@ export default function BusTrackingScreen() {
 
     const schoolId = userData?.schoolId;
 
-    // Fetch child's transport assignment
+    // Fetch child's transport assignment - cached for 5 mins (doesn't change often)
     const { data: assignmentData, isLoading: assignmentLoading } = useQuery({
         queryKey: ['child-transport', schoolId, childData?.studentId],
         queryFn: async () => {
@@ -85,6 +77,8 @@ export default function BusTrackingScreen() {
             return res.data;
         },
         enabled: !!schoolId && !!childData?.studentId,
+        staleTime: 1000 * 60 * 5, // 5 minutes - route assignments rarely change
+        gcTime: 1000 * 60 * 30, // Keep in cache 30 mins
     });
 
     const assignment = assignmentData?.assignments?.[0];
@@ -146,29 +140,16 @@ export default function BusTrackingScreen() {
         ? new Date(Date.now() + etaMinutes * 60 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         : null;
 
-    // Animate map and marker to bus location when it updates
+    // Move map camera when bus location updates (native animation for smooth iOS performance)
     useEffect(() => {
-        if (location?.latitude && location?.longitude) {
-            // Animate marker smoothly to new position
-            animatedCoordinate.timing({
+        if (location?.latitude && location?.longitude && mapRef.current) {
+            // Use native animateToRegion for smoother iOS performance
+            mapRef.current.animateToRegion({
                 latitude: location.latitude,
                 longitude: location.longitude,
-                latitudeDelta: 0.01,
-                longitudeDelta: 0.01,
-                duration: 800,
-                useNativeDriver: false,
-            }).start();
-
-            // Also move the map camera
-            if (mapRef.current) {
-                mapRef.current.animateCamera({
-                    center: {
-                        latitude: location.latitude,
-                        longitude: location.longitude,
-                    },
-                    zoom: 17,
-                }, { duration: 800 });
-            }
+                latitudeDelta: 0.008,
+                longitudeDelta: 0.008,
+            }, 500); // Shorter duration = less lag
         }
     }, [location?.latitude, location?.longitude]);
 
@@ -329,7 +310,7 @@ export default function BusTrackingScreen() {
                                     />
                                 )}
 
-                                {/* Stop Markers */}
+                                {/* Stop Markers - tracksViewChanges=false for iOS performance */}
                                 {stops.map((stop, index) => (
                                     stop.latitude && stop.longitude && (
                                         <Marker
@@ -340,6 +321,7 @@ export default function BusTrackingScreen() {
                                             }}
                                             title={stop.name}
                                             pinColor={index === 0 ? 'green' : index === stops.length - 1 ? 'red' : 'blue'}
+                                            tracksViewChanges={false}
                                         />
                                     )
                                 ))}

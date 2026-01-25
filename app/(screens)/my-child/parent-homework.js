@@ -80,12 +80,11 @@ export default function ParentHomeworkScreen() {
                     // Save timestamp per child
                     const key = `${HOMEWORK_LAST_VIEWED_KEY}_${childId}`;
                     await SecureStore.setItemAsync(key, new Date().toISOString());
-                    // Invalidate badge query so home screen refreshes
-                    queryClient.invalidateQueries(['parent-homework-badge']);
+                    // No query invalidation needed - home uses useFocusEffect to refresh timestamps
                 }
             };
             markAsViewed();
-        }, [childId, queryClient])
+        }, [childId])
     );
 
     // Filter homework

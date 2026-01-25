@@ -1357,7 +1357,50 @@ export default function HomeScreen() {
     // / Complete ParentView Component
     const ParentView = ({ schoolId, parentId, refreshing, onRefresh, onScroll, paddingTop, refreshOffset, banner, navigateOnce }) => {
         const [showAddChildModal, setShowAddChildModal] = useState(false);
-        const [selectedChild, setSelectedChild] = useState(null);
+        // Use ref to track if we've restored from cache - prevents flash of null
+        const hasRestoredChild = useRef(false);
+        const [selectedChild, setSelectedChild] = useState(() => {
+            // Synchronously try to get cached child (will be null on first render, populated on subsequent)
+            return null;
+        });
+
+        // Local state for lastViewed timestamps - refreshed on focus to clear badges
+        const [lastViewedTimestamps, setLastViewedTimestamps] = useState({
+            homework: null,
+            exams: null,
+        });
+
+        // Helper function to refresh timestamps from SecureStore
+        const refreshBadgeTimestamps = useCallback(async (studentId) => {
+            if (!studentId) return;
+
+            const [homeworkLastViewed, examLastViewed] = await Promise.all([
+                SecureStore.getItemAsync(`homework_last_viewed_${studentId}`),
+                SecureStore.getItemAsync(`exam_last_viewed_${studentId}`),
+            ]);
+
+            setLastViewedTimestamps({
+                homework: homeworkLastViewed,
+                exams: examLastViewed,
+            });
+        }, []);
+
+        // Refresh timestamps when selectedChild changes (handles initial load)
+        useEffect(() => {
+            if (selectedChild?.studentId) {
+                refreshBadgeTimestamps(selectedChild.studentId);
+            }
+        }, [selectedChild?.studentId, refreshBadgeTimestamps]);
+
+        // Also refresh timestamps when screen gains focus (handles back navigation)
+        useFocusEffect(
+            useCallback(() => {
+                if (selectedChild?.studentId) {
+                    refreshBadgeTimestamps(selectedChild.studentId);
+                }
+            }, [selectedChild?.studentId, refreshBadgeTimestamps])
+        );
+
         const queryClient = useQueryClient();
         const {
             data: recentNotices,
@@ -1494,9 +1537,9 @@ export default function HomeScreen() {
             const isPending = !hw.mySubmission || hw.mySubmission.status === 'PENDING';
             if (!isPending) return false;
 
-            // If user has viewed homework before, only count new ones
-            if (homeworkData?.lastViewed) {
-                const lastViewedDate = new Date(homeworkData.lastViewed);
+            // Use focus-refreshed lastViewed timestamp for accurate badge count
+            if (lastViewedTimestamps.homework) {
+                const lastViewedDate = new Date(lastViewedTimestamps.homework);
                 const homeworkDate = new Date(hw.createdAt);
                 return homeworkDate > lastViewedDate;
             }
@@ -1506,22 +1549,22 @@ export default function HomeScreen() {
         // Combined loading state for stats cards
         const isStatsLoading = isChildStatsFetching;
 
-        // Count new exam results (created after last viewed)
+        // Count new exam results (CREATED after last viewed) - uses focus-refreshed timestamp
+        // Uses createdAt (when result was published), NOT examDate (which can be in the future)
         const newExamResults = (() => {
-            if (!examBadgeData?.lastViewed) {
-                // First time viewing - no badge, or show total results
-                return 0; // Don't show badge if never viewed
+            if (!lastViewedTimestamps.exams) {
+                // First time viewing - no badge
+                return 0;
             }
-            const lastViewedDate = new Date(examBadgeData.lastViewed);
-            const latestResultDate = examBadgeData.stats?.latestResultDate ? new Date(examBadgeData.stats.latestResultDate) : null;
-            if (latestResultDate && latestResultDate > lastViewedDate) {
-                // There are new results since last view
-                return (examBadgeData.results || []).filter(r => {
-                    const resultDate = new Date(r.examDate || r.createdAt);
-                    return resultDate > lastViewedDate;
-                }).length;
-            }
-            return 0;
+            const lastViewedDate = new Date(lastViewedTimestamps.exams);
+
+            // Count results that were CREATED after user last viewed
+            // (ignoring examDate which might be in the future for scheduled exams)
+            return (examBadgeData?.results || []).filter(r => {
+                // Use createdAt (when result was published to system)
+                const createdDate = r.createdAt ? new Date(r.createdAt) : null;
+                return createdDate && createdDate > lastViewedDate;
+            }).length;
         })();
 
         // Calculate performance using same formula as performance page (40% attendance + 60% exams)
@@ -1738,11 +1781,53 @@ export default function HomeScreen() {
             ]
         }), []);
 
+        // Restore selectedChild from cache on mount, then persist on change
         useEffect(() => {
-            if (uiChildren.length > 0 && !selectedChild) {
-                setSelectedChild(uiChildren[0]);
+            const restoreSelectedChild = async () => {
+                if (hasRestoredChild.current) return;
+                hasRestoredChild.current = true;
+
+                try {
+                    const cachedChild = await SecureStore.getItemAsync(`selectedChild_${parentId}`);
+                    if (cachedChild) {
+                        const parsed = JSON.parse(cachedChild);
+                        // Validate cached child exists in current children list
+                        if (uiChildren.some(c => c.studentId === parsed.studentId)) {
+                            setSelectedChild(parsed);
+                            return;
+                        }
+                    }
+                } catch (e) {
+                    console.log('Error restoring selected child:', e);
+                }
+
+                // Fallback to first child if no valid cache
+                if (uiChildren.length > 0 && !selectedChild) {
+                    setSelectedChild(uiChildren[0]);
+                }
+            };
+
+            if (uiChildren.length > 0) {
+                restoreSelectedChild();
             }
-        }, [uiChildren, selectedChild]);
+        }, [uiChildren, parentId]);
+
+        // Persist selectedChild when it changes
+        useEffect(() => {
+            const persistSelectedChild = async () => {
+                if (selectedChild && parentId) {
+                    try {
+                        await SecureStore.setItemAsync(
+                            `selectedChild_${parentId}`,
+                            JSON.stringify(selectedChild)
+                        );
+                    } catch (e) {
+                        console.log('Error persisting selected child:', e);
+                    }
+                }
+            };
+            persistSelectedChild();
+        }, [selectedChild, parentId]);
 
         const handleAddChildSuccess = useCallback(async () => {
             try {

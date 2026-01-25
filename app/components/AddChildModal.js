@@ -155,29 +155,29 @@ const AddChildModal = ({ visible = false, onClose, parentId, schoolId, onSuccess
             statusBarTranslucent
             onRequestClose={handleClose}
         >
-            <Animated.View entering={FadeIn.duration(200)} exiting={FadeOut.duration(200)} style={styles.overlay}>
-                <TouchableOpacity style={styles.overlayTouchable} activeOpacity={1} onPress={handleClose} />
+            <KeyboardAvoidingView
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                style={{ flex: 1 }}
+            >
+                <Animated.View entering={FadeIn.duration(200)} exiting={FadeOut.duration(200)} style={styles.overlay}>
+                    <TouchableOpacity style={styles.overlayTouchable} activeOpacity={1} onPress={handleClose} />
 
-                <Animated.View
-                    entering={SlideInDown.duration(400).easing(Easing.out(Easing.cubic))}
-                    exiting={SlideOutDown.duration(300).easing(Easing.in(Easing.cubic))}
-                    style={styles.modalContainer}
-                >
-                    {step !== 3 && (
-                        <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
-                            <X size={24} color="#666" />
-                        </TouchableOpacity>
-                    )}
-
-                    <KeyboardAvoidingView 
-                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-                        style={styles.keyboardView}
+                    <Animated.View
+                        entering={SlideInDown.duration(400).easing(Easing.out(Easing.cubic))}
+                        exiting={SlideOutDown.duration(300).easing(Easing.in(Easing.cubic))}
+                        style={styles.modalContainer}
                     >
-                        <ScrollView 
-                            showsVerticalScrollIndicator={false} 
+                        {step !== 3 && (
+                            <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
+                                <X size={24} color="#666" />
+                            </TouchableOpacity>
+                        )}
+
+                        <ScrollView
+                            showsVerticalScrollIndicator={false}
                             contentContainerStyle={styles.scrollContent}
                             bounces={false}
+                            keyboardShouldPersistTaps="handled"
                         >
                             {/* Step 1: Admission Number */}
                             {step === 1 && (
@@ -260,7 +260,8 @@ const AddChildModal = ({ visible = false, onClose, parentId, schoolId, onSuccess
                                                 setEmail(text);
                                                 setError('');
                                             }}
-                                            keyboardType="numeric"
+                                            keyboardType="email-address"
+                                            autoCapitalize="none"
                                         />
                                     </View>
 
@@ -304,8 +305,8 @@ const AddChildModal = ({ visible = false, onClose, parentId, schoolId, onSuccess
 
                             {/* Step 3: Success */}
                             {step === 3 && (
-                                <Animated.View 
-                                    entering={FadeIn.duration(400).easing(Easing.out(Easing.ease))} 
+                                <Animated.View
+                                    entering={FadeIn.duration(400).easing(Easing.out(Easing.ease))}
                                     style={styles.successContainer}
                                 >
                                     <Animated.View style={[styles.successCircle, checkAnimatedStyle]}>
@@ -319,9 +320,9 @@ const AddChildModal = ({ visible = false, onClose, parentId, schoolId, onSuccess
                                 </Animated.View>
                             )}
                         </ScrollView>
-                    </KeyboardAvoidingView>
+                    </Animated.View>
                 </Animated.View>
-            </Animated.View>
+            </KeyboardAvoidingView>
         </Modal>
     );
 };
@@ -457,7 +458,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     backButtonText: {
-        color: '#0469ff', 
+        color: '#0469ff',
         fontSize: 15,
         fontWeight: '600',
     },

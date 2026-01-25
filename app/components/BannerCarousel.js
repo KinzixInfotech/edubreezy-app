@@ -86,57 +86,33 @@ const BannerCarousel = ({ schoolId, role }) => {
     }, [isAutoPlay, images, activeIndex]);
 
     const fetchImages = async () => {
+        setIsLoading(true);
+
         // Map app role to API role format
         const apiRole = role === 'TEACHING_STAFF' ? 'TEACHERS' :
             role === 'NON_TEACHING_STAFF' ? 'STAFF' :
                 role; // STUDENTS, PARENTS, etc.
 
-        const cacheKey = `carousel_cache_${schoolId}_${apiRole}`;
+        console.log('🎠 Carousel: Fetching for', { schoolId, role, apiRole });
 
-        let cachedLoaded = false;
-
-        // 1. Try to load from cache first for immediate display
         try {
-            const cachedData = await SecureStore.getItemAsync(cacheKey);
-            if (cachedData) {
-                const parsedData = JSON.parse(cachedData);
-                if (Array.isArray(parsedData) && parsedData.length > 0) {
-                    console.log('📱 Carousel: Loaded from cache');
-                    setImages(parsedData);
-                    setHasData(true);
-                    // Don't duplicate loading state if we have cache, 
-                    // but we still want to fetch fresh data in background
-                    setIsLoading(false);
-                    cachedLoaded = true;
-                }
-            }
-        } catch (e) {
-            console.log('Error reading carousel cache:', e);
-        }
-
-        // 2. Fetch fresh data from API (Stale-while-revalidate)
-        try {
-            // Only set loading to true if we didn't have cached data
-            // Use local variable because state update 'images' won't be reflected immediately in this closure
-            if (!cachedLoaded && images.length === 0) setIsLoading(true);
-
+            // Always fetch fresh from API
             const response = await api.get(`/schools/carousel?schoolId=${schoolId}&role=${apiRole}`);
+            console.log('🎠 Carousel: API response', response.data);
 
             if (Array.isArray(response.data)) {
                 if (response.data.length > 0) {
                     setImages(response.data);
                     setHasData(true);
-                    // 3. Update cache with fresh data
-                    await SecureStore.setItemAsync(cacheKey, JSON.stringify(response.data));
+                    console.log('🎠 Carousel: Found', response.data.length, 'images');
                 } else {
-                    // Only set hasData false if we don't have cached images either
-                    if (!cachedLoaded && images.length === 0) setHasData(false);
+                    setHasData(false);
+                    console.log('🎠 Carousel: No images found');
                 }
             }
         } catch (error) {
-            console.error('Failed to fetch carousel images:', error);
-            // If we have cached images, suppress the error visually
-            if (!cachedLoaded && images.length === 0) setHasData(false);
+            console.error('🎠 Carousel: Failed to fetch', error);
+            setHasData(false);
         } finally {
             setIsLoading(false);
         }

@@ -28,6 +28,7 @@ import {
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
+import { StatusBar } from 'expo-status-bar';
 
 export default function TransportFeeScreen() {
     const params = useLocalSearchParams();
@@ -138,6 +139,7 @@ export default function TransportFeeScreen() {
 
     return (
         <View style={styles.container}>
+            <StatusBar style='dark' />
             {/* Header */}
             <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>

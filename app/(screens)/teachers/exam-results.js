@@ -10,24 +10,28 @@ import {
     ActivityIndicator,
     TextInput,
     TouchableOpacity,
+    Modal,
+    FlatList,
+    SafeAreaView,
 } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
 import {
-    ArrowLeft,
     Search,
     ChevronDown,
     Award,
     CheckCircle,
     XCircle,
     AlertCircle,
+    ArrowLeft,
+    Copy,
     TrendingUp,
     X as CloseIcon,
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
-import { Picker } from '@react-native-picker/picker';
 import api from '../../../lib/api';
 import HapticTouchable from '../../components/HapticTouch';
 
@@ -36,6 +40,7 @@ export default function TeacherExamResults() {
     const [refreshing, setRefreshing] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedExam, setSelectedExam] = useState(null);
+    const [showExamPicker, setShowExamPicker] = useState(false);
 
     const { data: userData } = useQuery({
         queryKey: ['user-data'],
@@ -186,6 +191,7 @@ export default function TeacherExamResults() {
 
     return (
         <View style={styles.container}>
+            <StatusBar style="dark" />
             {/* Header */}
             <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>
@@ -223,32 +229,69 @@ export default function TeacherExamResults() {
                         </View>
                     </Animated.View>
                 ) : (
-                    <Animated.View entering={FadeInDown.delay(200).duration(500)}>
+                    <Animated.View entering={FadeInDown.delay(200).duration(500)} style={{ zIndex: 10 }}>
                         <View style={styles.pickerContainer}>
                             <Text style={styles.pickerLabel}>Select Exam</Text>
-                            <View style={styles.pickerWrapper}>
-                                <Picker
-                                    selectedValue={selectedExam?.id}
-                                    onValueChange={(itemValue) => {
-                                        const exam = exams.find(e => e.id === itemValue);
-                                        setSelectedExam(exam);
-                                    }}
-                                    style={styles.picker}
-                                >
-                                    <Picker.Item label="-- Select an Exam --" value={null} />
-                                    {exams.map(exam => (
-                                        <Picker.Item
-                                            key={exam.id}
-                                            label={exam.title}
-                                            value={exam.id}
-                                        />
-                                    ))}
-                                </Picker>
-                                <ChevronDown size={20} color="#666" style={styles.pickerIcon} />
-                            </View>
+                            <HapticTouchable onPress={() => setShowExamPicker(true)}>
+                                <View style={styles.customPicker}>
+                                    <Text style={[styles.customPickerText, !selectedExam && { color: '#999' }]}>
+                                        {selectedExam ? selectedExam.title : '-- Select an Exam --'}
+                                    </Text>
+                                    <ChevronDown size={20} color="#666" />
+                                </View>
+                            </HapticTouchable>
                         </View>
                     </Animated.View>
                 )}
+
+                {/* Exam Picker Modal */}
+                <Modal
+                    visible={showExamPicker}
+                    transparent={true}
+                    animationType="fade"
+                    onRequestClose={() => setShowExamPicker(false)}
+                >
+                    <TouchableOpacity
+                        style={styles.modalOverlay}
+                        activeOpacity={1}
+                        onPress={() => setShowExamPicker(false)}
+                    >
+                        <View style={styles.modalContent}>
+                            <View style={styles.modalHeader}>
+                                <Text style={styles.modalTitle}>Select Exam</Text>
+                                <TouchableOpacity onPress={() => setShowExamPicker(false)}>
+                                    <CloseIcon size={24} color="#666" />
+                                </TouchableOpacity>
+                            </View>
+                            <FlatList
+                                data={exams}
+                                keyExtractor={item => item.id}
+                                renderItem={({ item }) => (
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.modalItem,
+                                            selectedExam?.id === item.id && styles.modalItemActive
+                                        ]}
+                                        onPress={() => {
+                                            setSelectedExam(item);
+                                            setShowExamPicker(false);
+                                        }}
+                                    >
+                                        <Text style={[
+                                            styles.modalItemText,
+                                            selectedExam?.id === item.id && styles.modalItemTextActive
+                                        ]}>
+                                            {item.title}
+                                        </Text>
+                                        {selectedExam?.id === item.id && (
+                                            <CheckCircle size={20} color="#0469ff" />
+                                        )}
+                                    </TouchableOpacity>
+                                )}
+                            />
+                        </View>
+                    </TouchableOpacity>
+                </Modal>
 
                 {selectedExam && (
                     <>
@@ -428,35 +471,80 @@ const styles = StyleSheet.create({
         padding: 16,
     },
     pickerContainer: {
-        marginBottom: 16,
+        marginBottom: 24,
+        paddingHorizontal: 4,
     },
     pickerLabel: {
         fontSize: 14,
         fontWeight: '600',
         color: '#111',
         marginBottom: 8,
+        marginLeft: 4,
     },
-    pickerWrapper: {
+    customPicker: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        backgroundColor: '#F9FAFB',
         borderWidth: 1,
         borderColor: '#E5E7EB',
         borderRadius: 12,
-        backgroundColor: '#F9FAFB',
-        position: 'relative',
     },
-    picker: {
-        height: 50,
-        color: 'grey',
+    customPickerText: {
+        fontSize: 16,
+        color: '#111',
     },
-    pickerIcon: {
-        position: 'absolute',
-        right: 12,
-        top: 15,
-        pointerEvents: 'none',
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'flex-end',
+    },
+    modalContent: {
+        backgroundColor: '#fff',
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        maxHeight: '70%',
+        paddingBottom: 40,
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: 20,
+        borderBottomWidth: 1,
+        borderBottomColor: '#f0f0f0',
+    },
+    modalTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#111',
+    },
+    modalItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: 16,
+        paddingVertical: 18,
+        borderBottomWidth: 1,
+        borderBottomColor: '#f0f0f0',
+    },
+    modalItemActive: {
+        backgroundColor: '#F0F9FF',
+    },
+    modalItemText: {
+        fontSize: 16,
+        color: '#333',
+    },
+    modalItemTextActive: {
+        color: '#0469ff',
+        fontWeight: '600',
     },
     summaryGrid: {
         flexDirection: 'row',
         gap: 12,
-        marginBottom: 16,
+        marginBottom: 24,
     },
     summaryCard: {
         flex: 1,

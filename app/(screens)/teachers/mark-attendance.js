@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
 import {
   Users,
@@ -61,6 +61,33 @@ export default function BulkAttendanceMarking() {
   const userId = userData?.id;
 
   // Fetch teacher data with proper caching
+  const params = useLocalSearchParams();
+  const parsedTeacherData = React.useMemo(() => {
+    if (params?.teacherData) {
+      try {
+        const data = JSON.parse(params.teacherData);
+        // Check if it has assignments/sections (from home.js profile)
+        if (data.sectionsAssigned && Array.isArray(data.sectionsAssigned) && data.sectionsAssigned.length > 0) {
+          const firstSection = data.sectionsAssigned[0];
+          return {
+            hasSection: true,
+            classId: firstSection.classId,
+            sectionId: firstSection.id,
+            class: firstSection.class,
+            section: { id: firstSection.id, name: firstSection.name },
+            teachingStaff: firstSection.teachingStaff,
+            allSections: data.sectionsAssigned
+          };
+        }
+        return null;
+      } catch (e) {
+        console.error('Error parsing teacherData in attendance:', e);
+        return null;
+      }
+    }
+    return null;
+  }, [params?.teacherData]);
+
   const {
     data: teacherData,
     isLoading: teacherLoading,
@@ -71,35 +98,40 @@ export default function BulkAttendanceMarking() {
   } = useQuery({
     queryKey: ['teacher-profile', schoolId, userId],
     queryFn: async () => {
-      // ✅ FIXED: Use actual userId
-      const res = await api.get(`/schools/${schoolId}/teachers/${userId}`);
+      try {
+        // ✅ FIXED: Use actual userId
+        const res = await api.get(`/schools/${schoolId}/teachers/${userId}`);
 
-      // API returns array of sections assigned to this teacher
-      // Structure: { teacher: [{ class: {...}, teachingStaff: {...} }, ...] }
-      const sections = res.data?.teacher;
+        // API returns array of sections assigned to this teacher
+        // Structure: { teacher: [{ class: {...}, teachingStaff: {...} }, ...] }
+        const sections = res.data?.teacher;
 
-      if (!sections || !Array.isArray(sections) || sections.length === 0) {
-        // No sections assigned
-        return { hasSection: false };
+        if (!sections || !Array.isArray(sections) || sections.length === 0) {
+          // No sections assigned
+          return { hasSection: false };
+        }
+
+        // Get first assigned section for attendance marking
+        const firstSection = sections[0];
+
+        return {
+          hasSection: true,
+          // Extract IDs from the section data
+          classId: firstSection.classId,
+          sectionId: firstSection.id, // section's own ID
+          // Include full data for display
+          class: firstSection.class,
+          section: { id: firstSection.id, name: firstSection.name },
+          teachingStaff: firstSection.teachingStaff,
+          // Keep all sections if needed
+          allSections: sections
+        };
+      } catch (err) {
+        throw err; // Let react-query handle error state
       }
-
-      // Get first assigned section for attendance marking
-      const firstSection = sections[0];
-
-      return {
-        hasSection: true,
-        // Extract IDs from the section data
-        classId: firstSection.classId,
-        sectionId: firstSection.id, // section's own ID
-        // Include full data for display
-        class: firstSection.class,
-        section: { id: firstSection.id, name: firstSection.name },
-        teachingStaff: firstSection.teachingStaff,
-        // Keep all sections if needed
-        allSections: sections
-      };
     },
     enabled: !!schoolId && !!userId,
+    initialData: parsedTeacherData,
     staleTime: 1000 * 60 * 5, // 5 minutes
     retry: 2,
     retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),

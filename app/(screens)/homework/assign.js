@@ -16,7 +16,7 @@ import {
     Linking,
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
 import {
     BookOpen,
@@ -44,6 +44,7 @@ import api from '../../../lib/api';
 import HapticTouchable from '../../components/HapticTouch';
 import { Image } from 'expo-image';
 import { pickAndUploadImage, pickAndUploadDocument } from '../../../lib/uploadthing';
+import { StatusBar } from 'expo-status-bar';
 
 
 const TABS = ['Assign', 'My Homework'];
@@ -80,16 +81,50 @@ export default function AssignHomeworkScreen() {
     const schoolId = userData?.schoolId;
     const userId = userData?.id;
 
+    const params = useLocalSearchParams();
+    const parsedTeacherData = useMemo(() => {
+        if (params?.teacherData) {
+            try {
+                const data = JSON.parse(params.teacherData);
+                // Check if it's the expected structure (has classId directly)
+                if (data.classId) return data;
+
+                // Check if it has assignments array (e.g. from profile)
+                if (data.sectionsAssigned && Array.isArray(data.sectionsAssigned) && data.sectionsAssigned.length > 0) {
+                    return data.sectionsAssigned[0];
+                }
+
+                // Check if it has teacher array (rare but possible wrapping)
+                if (data.teacher && Array.isArray(data.teacher) && data.teacher.length > 0) {
+                    return data.teacher[0];
+                }
+
+                return null; // Data exists but doesn't match expected structure, let query fetch
+            } catch (e) {
+                console.error('Error parsing teacherData:', e);
+                return null;
+            }
+        }
+        return null;
+    }, [params?.teacherData]);
+
     // Fetch teacher data
     const { data: teacherData, isLoading: teacherLoading } = useQuery({
         queryKey: ['teacher-data', schoolId, userId],
         queryFn: async () => {
-            if (!schoolId || !userId) return {};
-            const res = await api.get(`/schools/${schoolId}/teachers/${userId}`);
-            const teachers = res.data?.teacher || res.data;
-            return Array.isArray(teachers) ? teachers[0] : teachers;
+            if (!schoolId || !userId) return null;
+            try {
+                const res = await api.get(`/schools/${schoolId}/teachers/${userId}`);
+                const teachers = res.data?.teacher || res.data;
+                const result = Array.isArray(teachers) ? teachers[0] : teachers;
+                return result || null;
+            } catch (err) {
+                console.error("Error fetching teacher data:", err);
+                return null;
+            }
         },
         enabled: !!schoolId && !!userId,
+        initialData: parsedTeacherData,
         staleTime: 1000 * 60 * 5,
     });
 
@@ -389,6 +424,8 @@ export default function AssignHomeworkScreen() {
 
     return (
         <View style={styles.container}>
+            <StatusBar style="dark" />
+
             {/* Header */}
             <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>

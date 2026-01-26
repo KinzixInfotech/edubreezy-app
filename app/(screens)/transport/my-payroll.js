@@ -1,5 +1,5 @@
-// Transport Staff Payroll Screen (Driver/Conductor)
-// Matches teacher payroll UI design
+// app/(screens)/transport/my-payroll.js
+// Transport Staff view for payroll, payslips, loans, employment, bank, and tax details
 import React, { useState } from 'react';
 import {
     View,
@@ -10,6 +10,7 @@ import {
     ActivityIndicator,
     TouchableOpacity,
     Dimensions,
+    Image,
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
@@ -22,12 +23,18 @@ import {
     CreditCard,
     Calendar,
     ChevronRight,
+    Building2,
     FileText,
+    IndianRupee,
     Clock,
     CheckCircle,
     AlertCircle,
     Minus,
     Plus,
+    User,
+    Landmark,
+    FileBadge,
+    Briefcase
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import api from '../../../lib/api';
@@ -46,6 +53,15 @@ const formatCurrency = (amount) => {
 
 const getMonthName = (month) => {
     return new Date(2000, month - 1).toLocaleString('default', { month: 'short' });
+};
+
+const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    return new Date(dateString).toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric'
+    });
 };
 
 export default function MyPayrollScreen() {
@@ -132,7 +148,17 @@ export default function MyPayrollScreen() {
         );
     }
 
-    const { profile, latestPayslip, ytd, loansEnabled } = payrollData;
+    const { profile, salaryStructure, latestPayslip, ytd, loans, loansEnabled } = payrollData;
+
+    const tabs = [
+        { id: 'overview', label: 'Overview' },
+        { id: 'employment', label: 'Employment' },
+        { id: 'salary', label: 'Salary Structure' },
+        { id: 'bank', label: 'Bank Details' },
+        { id: 'tax', label: 'Tax & PF' },
+        ...(loansEnabled ? [{ id: 'loans', label: 'Loans' }] : []),
+        { id: 'payslips', label: 'Payslips' },
+    ];
 
     return (
         <View style={styles.container}>
@@ -147,25 +173,26 @@ export default function MyPayrollScreen() {
                 <View style={{ width: 40 }} />
             </Animated.View>
 
-            {/* Tabs */}
-            <Animated.View entering={FadeInDown.delay(100).duration(400)} style={styles.tabContainer}>
-                <TouchableOpacity
-                    style={[styles.tab, activeTab === 'overview' && styles.tabActive]}
-                    onPress={() => setActiveTab('overview')}
+            {/* Scrollable Tabs */}
+            <View style={styles.tabWrapper}>
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.tabContainer}
                 >
-                    <Text style={[styles.tabText, activeTab === 'overview' && styles.tabTextActive]}>
-                        Overview
-                    </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                    style={[styles.tab, activeTab === 'payslips' && styles.tabActive]}
-                    onPress={() => setActiveTab('payslips')}
-                >
-                    <Text style={[styles.tabText, activeTab === 'payslips' && styles.tabTextActive]}>
-                        Payslips
-                    </Text>
-                </TouchableOpacity>
-            </Animated.View>
+                    {tabs.map((tab) => (
+                        <TouchableOpacity
+                            key={tab.id}
+                            style={[styles.tab, activeTab === tab.id && styles.tabActive]}
+                            onPress={() => setActiveTab(tab.id)}
+                        >
+                            <Text style={[styles.tabText, activeTab === tab.id && styles.tabTextActive]}>
+                                {tab.label}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                </ScrollView>
+            </View>
 
             <ScrollView
                 style={styles.content}
@@ -176,6 +203,45 @@ export default function MyPayrollScreen() {
             >
                 {activeTab === 'overview' && (
                     <>
+                        {/* Profile Summary Card */}
+                        <Animated.View entering={FadeInDown.delay(100).duration(500)}>
+                            <View style={styles.profileCard}>
+                                <View style={styles.profileRow}>
+                                    <View style={['styles.avatarContainer', profile.profilePicture && { backgroundColor: 'transparent', overflow: 'hidden' }]}>
+                                        {profile.profilePicture ? (
+                                            <Image
+                                                source={{ uri: profile.profilePicture }}
+                                                style={{ width: 48, height: 48, borderRadius: 24 }}
+                                            />
+                                        ) : (
+                                            <View style={styles.avatarContainer}>
+                                                <User size={24} color="#059669" />
+                                            </View>
+                                        )}
+                                    </View>
+                                    <View style={styles.profileInfo}>
+                                        <Text style={styles.profileName}>{profile.name}</Text>
+                                        <Text style={styles.profileDesignation}>{profile.designation || 'Transport Staff'}</Text>
+                                        <Text style={styles.profileDepartment}>{profile.department || 'Transport'}</Text>
+                                    </View>
+                                </View>
+                                <View style={styles.profileDivider} />
+                                <View style={styles.profileStats}>
+                                    <View style={styles.profileStat}>
+                                        <Text style={styles.profileStatLabel}>Joined</Text>
+                                        <Text style={styles.profileStatValue}>{formatDate(profile.joiningDate)}</Text>
+                                    </View>
+                                    <View style={styles.profileStatDivider} />
+                                    <View style={styles.profileStat}>
+                                        <Text style={styles.profileStatLabel}>Type</Text>
+                                        <Text style={styles.profileStatValue}>
+                                            {profile.employmentType?.replace('_', ' ').toLowerCase().replace(/\b\w/g, l => l.toUpperCase()) || 'Permanent'}
+                                        </Text>
+                                    </View>
+                                </View>
+                            </View>
+                        </Animated.View>
+
                         {/* Salary Summary Card */}
                         {latestPayslip ? (
                             <Animated.View entering={FadeInDown.delay(200).duration(500)}>
@@ -217,7 +283,7 @@ export default function MyPayrollScreen() {
                                             <Calendar size={16} color="#fff" />
                                             <Text style={styles.statLabel}>Days</Text>
                                             <Text style={styles.statValue}>
-                                                {latestPayslip.attendanceSummary?.daysWorked || '-'}
+                                                {latestPayslip.attendanceSummary?.daysWorked || latestPayslip.daysWorked || '-'}
                                             </Text>
                                         </View>
                                     </View>
@@ -260,23 +326,181 @@ export default function MyPayrollScreen() {
                             </Animated.View>
                         )}
 
-                        {/* Staff Profile Info */}
+                        {/* Link to Employment if Profile loaded */}
                         {profile && (
                             <Animated.View entering={FadeInDown.delay(400).duration(500)}>
-                                <Text style={styles.sectionTitle}>Profile Info</Text>
-                                <View style={styles.profileCard}>
-                                    <View style={styles.profileRow}>
-                                        <Text style={styles.profileLabel}>Name</Text>
-                                        <Text style={styles.profileValue}>{profile.name}</Text>
+                                <TouchableOpacity
+                                    style={styles.profileSummaryRow}
+                                    onPress={() => setActiveTab('employment')}
+                                >
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                                        <View style={styles.profileIconBg}>
+                                            <User size={20} color="#059669" />
+                                        </View>
+                                        <View>
+                                            <Text style={styles.profileRowTitle}>{profile.name}</Text>
+                                            <Text style={styles.profileRowSubtitle}>{profile.designation}</Text>
+                                        </View>
                                     </View>
-                                    <View style={styles.profileRow}>
-                                        <Text style={styles.profileLabel}>Employee ID</Text>
-                                        <Text style={styles.profileValue}>{profile.employeeId}</Text>
-                                    </View>
-                                </View>
+                                    <ChevronRight size={20} color="#999" />
+                                </TouchableOpacity>
                             </Animated.View>
                         )}
                     </>
+                )}
+
+                {activeTab === 'employment' && (
+                    <Animated.View entering={FadeInDown.delay(200).duration(500)}>
+                        <View style={styles.card}>
+                            <View style={styles.cardHeader}>
+                                <Briefcase size={20} color="#059669" />
+                                <Text style={styles.cardTitle}>Employment Details</Text>
+                            </View>
+                            <View style={styles.detailRow}>
+                                <Text style={styles.detailLabel}>Designation</Text>
+                                <Text style={styles.detailValue}>{profile.designation || 'N/A'}</Text>
+                            </View>
+                            <View style={styles.divider} />
+                            <View style={styles.detailRow}>
+                                <Text style={styles.detailLabel}>Department</Text>
+                                <Text style={styles.detailValue}>{profile.department || 'N/A'}</Text>
+                            </View>
+                            <View style={styles.divider} />
+                            <View style={styles.detailRow}>
+                                <Text style={styles.detailLabel}>Employment Type</Text>
+                                <Text style={styles.detailValue}>{profile.employmentType?.replace('_', ' ') || 'N/A'}</Text>
+                            </View>
+                            <View style={styles.divider} />
+                            <View style={styles.detailRow}>
+                                <Text style={styles.detailLabel}>Date of Joining</Text>
+                                <Text style={styles.detailValue}>{formatDate(profile.joiningDate)}</Text>
+                            </View>
+                            {profile.confirmationDate && (
+                                <>
+                                    <View style={styles.divider} />
+                                    <View style={styles.detailRow}>
+                                        <Text style={styles.detailLabel}>Date of Confirmation</Text>
+                                        <Text style={styles.detailValue}>{formatDate(profile.confirmationDate)}</Text>
+                                    </View>
+                                </>
+                            )}
+                        </View>
+                    </Animated.View>
+                )}
+
+                {activeTab === 'salary' && salaryStructure && (
+                    <Animated.View entering={FadeInDown.delay(200).duration(500)}>
+                        <View style={styles.structureCard}>
+                            <View style={styles.structureHeader}>
+                                <Text style={styles.structureName}>{salaryStructure.name}</Text>
+                                <Text style={styles.structureCTC}>
+                                    CTC: {formatCurrency(salaryStructure.ctc)}
+                                </Text>
+                            </View>
+                            <View style={styles.structureItems}>
+                                <View style={styles.structureRow}>
+                                    <Text style={styles.structureLabel}>Basic</Text>
+                                    <Text style={styles.structureValue}>
+                                        {formatCurrency(salaryStructure.basicSalary)}
+                                    </Text>
+                                </View>
+                                {salaryStructure.hraPercent > 0 && (
+                                    <View style={styles.structureRow}>
+                                        <Text style={styles.structureLabel}>HRA ({salaryStructure.hraPercent}%)</Text>
+                                        <Text style={styles.structureValue}>
+                                            {formatCurrency(salaryStructure.basicSalary * salaryStructure.hraPercent / 100)}
+                                        </Text>
+                                    </View>
+                                )}
+                                {salaryStructure.daPercent > 0 && (
+                                    <View style={styles.structureRow}>
+                                        <Text style={styles.structureLabel}>DA ({salaryStructure.daPercent}%)</Text>
+                                        <Text style={styles.structureValue}>
+                                            {formatCurrency(salaryStructure.basicSalary * salaryStructure.daPercent / 100)}
+                                        </Text>
+                                    </View>
+                                )}
+                                {/* Transport specific checks if structure exists */}
+                                <View style={[styles.structureRow, styles.structureTotal]}>
+                                    <Text style={styles.structureTotalLabel}>Gross Salary</Text>
+                                    <Text style={styles.structureTotalValue}>
+                                        {formatCurrency(salaryStructure.grossSalary)}
+                                    </Text>
+                                </View>
+                            </View>
+                        </View>
+                    </Animated.View>
+                )}
+
+                {activeTab === 'bank' && (
+                    <Animated.View entering={FadeInDown.delay(200).duration(500)}>
+                        <View style={styles.card}>
+                            <View style={styles.cardHeader}>
+                                <Landmark size={20} color="#059669" />
+                                <Text style={styles.cardTitle}>Bank Account</Text>
+                            </View>
+                            <View style={styles.detailRow}>
+                                <Text style={styles.detailLabel}>Bank Name</Text>
+                                <Text style={styles.detailValue}>{profile.bankName || 'Not updated'}</Text>
+                            </View>
+                            <View style={styles.divider} />
+                            <View style={styles.detailRow}>
+                                <Text style={styles.detailLabel}>Account Number</Text>
+                                <Text style={styles.detailValue}>{profile.accountNumber || 'Not updated'}</Text>
+                            </View>
+                            <View style={styles.divider} />
+                            <View style={styles.detailRow}>
+                                <Text style={styles.detailLabel}>IFSC Code</Text>
+                                <Text style={styles.detailValue}>{profile.ifscCode || 'Not updated'}</Text>
+                            </View>
+                            <View style={styles.divider} />
+                            <View style={styles.detailRow}>
+                                <Text style={styles.detailLabel}>Account Holder</Text>
+                                <Text style={styles.detailValue}>{profile.accountHolder || profile.name}</Text>
+                            </View>
+                            {profile.upiId && (
+                                <>
+                                    <View style={styles.divider} />
+                                    <View style={styles.detailRow}>
+                                        <Text style={styles.detailLabel}>UPI ID</Text>
+                                        <Text style={styles.detailValue}>{profile.upiId}</Text>
+                                    </View>
+                                </>
+                            )}
+                        </View>
+                    </Animated.View>
+                )}
+
+                {activeTab === 'tax' && (
+                    <Animated.View entering={FadeInDown.delay(200).duration(500)}>
+                        <View style={styles.card}>
+                            <View style={styles.cardHeader}>
+                                <FileBadge size={20} color="#059669" />
+                                <Text style={styles.cardTitle}>Tax & Statutory</Text>
+                            </View>
+                            <View style={styles.detailRow}>
+                                <Text style={styles.detailLabel}>PAN Number</Text>
+                                <Text style={styles.detailValue}>{profile.panNumber || 'N/A'}</Text>
+                            </View>
+                            <View style={styles.divider} />
+                            <View style={styles.detailRow}>
+                                <Text style={styles.detailLabel}>UAN (PF)</Text>
+                                <Text style={styles.detailValue}>{profile.uanNumber || 'N/A'}</Text>
+                            </View>
+                            <View style={styles.divider} />
+                            <View style={styles.detailRow}>
+                                <Text style={styles.detailLabel}>ESI Number</Text>
+                                <Text style={styles.detailValue}>{profile.esiNumber || 'N/A'}</Text>
+                            </View>
+                            <View style={styles.divider} />
+                            <View style={styles.detailRow}>
+                                <Text style={styles.detailLabel}>Tax Regime</Text>
+                                <View style={styles.badge}>
+                                    <Text style={styles.badgeText}>{profile.taxRegime || 'NEW'}</Text>
+                                </View>
+                            </View>
+                        </View>
+                    </Animated.View>
                 )}
 
                 {activeTab === 'payslips' && (
@@ -338,6 +562,96 @@ export default function MyPayrollScreen() {
                     </Animated.View>
                 )}
 
+                {activeTab === 'loans' && loansEnabled && (
+                    <Animated.View entering={FadeInDown.delay(200).duration(500)}>
+                        {loansData?.loans?.length > 0 ? (
+                            <>
+                                {/* Loan Summary */}
+                                <View style={styles.loanSummaryGrid}>
+                                    <View style={styles.loanSummaryCard}>
+                                        <Text style={styles.loanSummaryValue}>
+                                            {formatCurrency(loansData.summary.totalPending)}
+                                        </Text>
+                                        <Text style={styles.loanSummaryLabel}>Total Pending</Text>
+                                    </View>
+                                    <View style={styles.loanSummaryCard}>
+                                        <Text style={styles.loanSummaryValue}>
+                                            {formatCurrency(loansData.summary.monthlyEmi)}
+                                        </Text>
+                                        <Text style={styles.loanSummaryLabel}>Monthly EMI</Text>
+                                    </View>
+                                </View>
+
+                                {/* Loan Cards */}
+                                {loansData.loans.map((loan, idx) => (
+                                    <Animated.View key={loan.id} entering={FadeInRight.delay(idx * 50)}>
+                                        <View style={styles.loanCard}>
+                                            <View style={styles.loanHeader}>
+                                                <View>
+                                                    <Text style={styles.loanType}>{loan.typeName}</Text>
+                                                    <Text style={styles.loanAmount}>
+                                                        {formatCurrency(loan.principalAmount)}
+                                                    </Text>
+                                                </View>
+                                                <View style={[
+                                                    styles.loanStatusBadge,
+                                                    { backgroundColor: loan.status === 'ACTIVE' ? '#D1FAE5' : '#E5E7EB' }
+                                                ]}>
+                                                    <Text style={[
+                                                        styles.loanStatusText,
+                                                        { color: loan.status === 'ACTIVE' ? '#059669' : '#6B7280' }
+                                                    ]}>
+                                                        {loan.status}
+                                                    </Text>
+                                                </View>
+                                            </View>
+
+                                            {/* Progress Bar */}
+                                            <View style={styles.loanProgress}>
+                                                <View style={styles.progressBar}>
+                                                    <View style={[
+                                                        styles.progressFill,
+                                                        { width: `${loan.progress}%` }
+                                                    ]} />
+                                                </View>
+                                                <Text style={styles.progressText}>
+                                                    {loan.progress}% paid
+                                                </Text>
+                                            </View>
+
+                                            <View style={styles.loanDetails}>
+                                                <View style={styles.loanDetailItem}>
+                                                    <Text style={styles.loanDetailLabel}>EMI</Text>
+                                                    <Text style={styles.loanDetailValue}>
+                                                        {formatCurrency(loan.emiAmount)}/month
+                                                    </Text>
+                                                </View>
+                                                <View style={styles.loanDetailItem}>
+                                                    <Text style={styles.loanDetailLabel}>Paid</Text>
+                                                    <Text style={[styles.loanDetailValue, { color: '#51CF66' }]}>
+                                                        {formatCurrency(loan.amountPaid)}
+                                                    </Text>
+                                                </View>
+                                                <View style={styles.loanDetailItem}>
+                                                    <Text style={styles.loanDetailLabel}>Pending</Text>
+                                                    <Text style={[styles.loanDetailValue, { color: '#FF6B6B' }]}>
+                                                        {formatCurrency(loan.amountPending)}
+                                                    </Text>
+                                                </View>
+                                            </View>
+                                        </View>
+                                    </Animated.View>
+                                ))}
+                            </>
+                        ) : (
+                            <View style={styles.emptyState}>
+                                <CreditCard size={48} color="#ccc" />
+                                <Text style={styles.emptyText}>No active loans</Text>
+                            </View>
+                        )}
+                    </Animated.View>
+                )}
+
                 <View style={{ height: 40 }} />
             </ScrollView>
         </View>
@@ -383,20 +697,23 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         color: '#111',
     },
-    tabContainer: {
-        flexDirection: 'row',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        gap: 8,
+    tabWrapper: {
         backgroundColor: '#fff',
         borderBottomWidth: 1,
         borderBottomColor: '#f0f0f0',
+    },
+    tabContainer: {
+        flexGrow: 1,
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        gap: 8,
     },
     tab: {
         paddingHorizontal: 16,
         paddingVertical: 8,
         borderRadius: 20,
         backgroundColor: '#f5f5f5',
+        marginRight: 4,
     },
     tabActive: {
         backgroundColor: '#059669',
@@ -430,6 +747,80 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: '#666',
         textAlign: 'center',
+    },
+    profileCard: {
+        backgroundColor: '#fff',
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 20,
+        borderWidth: 1,
+        borderColor: '#f0f0f0',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        elevation: 2,
+    },
+    profileRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 16,
+        marginBottom: 16,
+    },
+    avatarContainer: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: '#d1fae5',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    profileInfo: {
+        flex: 1,
+    },
+    profileName: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#111',
+    },
+    profileDesignation: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#059669',
+        marginTop: 2,
+    },
+    profileDepartment: {
+        fontSize: 13,
+        color: '#666',
+        marginTop: 2,
+    },
+    profileDivider: {
+        height: 1,
+        backgroundColor: '#f0f0f0',
+        marginBottom: 16,
+    },
+    profileStats: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    profileStat: {
+        flex: 1,
+    },
+    profileStatLabel: {
+        fontSize: 12,
+        color: '#666',
+        marginBottom: 4,
+    },
+    profileStatValue: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#111',
+    },
+    profileStatDivider: {
+        width: 1,
+        height: 30,
+        backgroundColor: '#f0f0f0',
+        marginHorizontal: 16,
     },
     mainCard: {
         borderRadius: 20,
@@ -518,51 +909,90 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#666',
     },
-    profileCard: {
+    structureCard: {
         backgroundColor: '#f8f9fa',
         borderRadius: 16,
         padding: 16,
         marginBottom: 20,
     },
-    profileRow: {
+    structureHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingVertical: 8,
+        marginBottom: 16,
+        paddingBottom: 12,
         borderBottomWidth: 1,
         borderBottomColor: '#e0e0e0',
     },
-    profileLabel: {
+    structureName: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#111',
+    },
+    structureCTC: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#059669',
+    },
+    structureItems: {
+        gap: 8,
+    },
+    structureRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingVertical: 4,
+    },
+    structureLabel: {
         fontSize: 14,
         color: '#666',
     },
-    profileValue: {
+    structureValue: {
         fontSize: 14,
         fontWeight: '600',
         color: '#111',
     },
-    emptyCard: {
-        backgroundColor: '#f8f9fa',
-        borderRadius: 20,
-        padding: 40,
+    structureTotal: {
+        marginTop: 8,
+        paddingTop: 12,
+        borderTopWidth: 1,
+        borderTopColor: '#e0e0e0',
+    },
+    structureTotalLabel: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#111',
+    },
+    structureTotalValue: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#059669',
+    },
+    loansSummaryCard: {
+        flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: '#FFF5F5',
+        borderRadius: 16,
+        padding: 16,
         marginBottom: 20,
     },
-    emptyState: {
+    loansSummaryLeft: {
+        flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 60,
+        gap: 12,
     },
-    emptyText: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: '#64748B',
-        marginTop: 16,
+    loansSummaryText: {
+        gap: 4,
     },
-    emptySubtext: {
+    loansSummaryTitle: {
         fontSize: 14,
-        color: '#94A3B8',
-        marginTop: 8,
-        textAlign: 'center',
+        fontWeight: '600',
+        color: '#111',
+    },
+    loansSummaryAmount: {
+        fontSize: 13,
+        color: '#666',
     },
     payslipCard: {
         backgroundColor: '#f8f9fa',
@@ -626,5 +1056,181 @@ const styles = StyleSheet.create({
     breakdownValue: {
         fontSize: 14,
         fontWeight: '600',
+    },
+    emptyState: {
+        alignItems: 'center',
+        paddingVertical: 60,
+    },
+    emptyText: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#64748B',
+        marginTop: 16,
+    },
+    emptySubtext: {
+        fontSize: 14,
+        color: '#94A3B8',
+        marginTop: 8,
+        textAlign: 'center',
+    },
+    emptyCard: {
+        backgroundColor: '#f8f9fa',
+        borderRadius: 20,
+        padding: 40,
+        alignItems: 'center',
+        marginBottom: 20,
+    },
+    card: {
+        backgroundColor: '#f8f9fa',
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 20,
+    },
+    cardHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 16,
+        paddingBottom: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: '#e0e0e0',
+    },
+    cardTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#111',
+    },
+    detailRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingVertical: 8,
+    },
+    detailLabel: {
+        fontSize: 14,
+        color: '#666',
+    },
+    detailValue: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#111',
+        maxWidth: '60%',
+        textAlign: 'right',
+    },
+    divider: {
+        height: 1,
+        backgroundColor: '#e0e0e0',
+    },
+    badge: {
+        backgroundColor: '#d1fae5',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 8,
+    },
+    badgeText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#059669',
+    },
+    profileSummaryRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: '#f8f9fa',
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 16,
+    },
+    profileIconBg: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: '#d1fae5',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    profileRowTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#111',
+    },
+    profileRowSubtitle: {
+        fontSize: 13,
+        color: '#666',
+    },
+    loanSummaryGrid: {
+        flexDirection: 'row',
+        gap: 12,
+        marginBottom: 16,
+    },
+    loanCard: {
+        backgroundColor: '#f8f9fa',
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 12,
+    },
+    loanHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        marginBottom: 12,
+    },
+    loanType: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#111',
+    },
+    loanAmount: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#059669',
+        marginTop: 4,
+    },
+    loanStatusBadge: {
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 6,
+    },
+    loanStatusText: {
+        fontSize: 11,
+        fontWeight: '700',
+    },
+    loanProgress: {
+        marginBottom: 16,
+    },
+    progressBar: {
+        height: 6,
+        backgroundColor: '#e0e0e0',
+        borderRadius: 3,
+        marginBottom: 6,
+    },
+    progressFill: {
+        height: '100%',
+        backgroundColor: '#059669',
+        borderRadius: 3,
+    },
+    progressText: {
+        fontSize: 11,
+        color: '#666',
+        textAlign: 'right',
+    },
+    loanDetails: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        paddingTop: 12,
+        borderTopWidth: 1,
+        borderTopColor: '#e0e0e0',
+    },
+    loanDetailItem: {
+        gap: 4,
+    },
+    loanDetailLabel: {
+        fontSize: 11,
+        color: '#666',
+    },
+    loanDetailValue: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#111',
     },
 });

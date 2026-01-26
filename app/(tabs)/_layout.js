@@ -144,13 +144,16 @@ function TabsLayout() {
           href: tabConfig.showProfile ? undefined : null,
           tabBarItemStyle: tabConfig.showProfile ? undefined : { display: 'none' },
           unmountOnBlur: false,
+          tabBarLabel: user?.profilePicture ? '' : 'Profile',
           tabBarIcon: ({ focused, color, size }) => {
             if (user?.profilePicture && user.profilePicture !== 'default.png' && user.profilePicture !== 'N/A') {
+              const sizecs = size + 20;
               return (
                 <View style={{
-                  width: size,
-                  height: size,
-                  borderRadius: size / 2,
+                  width: sizecs,
+                  marginTop: 15,
+                  height: sizecs,
+                  borderRadius: 50,
                   borderWidth: focused ? 2 : 1.5,
                   borderColor: focused ? color : 'rgba(255,255,255,0.6)',
                   overflow: 'hidden',

@@ -748,7 +748,7 @@ export default function HomeScreen() {
             case 'student':
                 return <StudentView refreshing={refreshing} onRefresh={onRefresh} banner={permissionBanner} paddingTop={paddingTop} refreshOffset={refreshOffset} navigateOnce={navigateOnce} />;
             case 'teaching_staff':
-                return <TeacherView refreshing={refreshing} schoolId={schoolId} userId={userId} onRefresh={onRefresh} upcomingEvents={upcomingEvents} todaysEvents={todaysEvents} banner={permissionBanner} paddingTop={paddingTop} refreshOffset={refreshOffset} onScroll={scrollHandler} navigateOnce={navigateOnce} />;
+                return <TeacherView refreshing={refreshing} schoolId={schoolId} userId={userId} teacher={teacher} onRefresh={onRefresh} upcomingEvents={upcomingEvents} todaysEvents={todaysEvents} banner={permissionBanner} paddingTop={paddingTop} refreshOffset={refreshOffset} onScroll={scrollHandler} navigateOnce={navigateOnce} />;
             case 'admin':
                 return <AdminView refreshing={refreshing} onRefresh={onRefresh} banner={permissionBanner} paddingTop={paddingTop} refreshOffset={refreshOffset} navigateOnce={navigateOnce} />;
             case 'parent':
@@ -1614,7 +1614,7 @@ export default function HomeScreen() {
                         label: 'School Calendar',
                         color: '#4CAF50',     // green icon
                         bgColor: '#E8F5E9',   // light green background
-                        href: "/calendarscreen"
+                        href: "/(screens)/calendarscreen"
                     },
                     {
                         icon: ScrollText,
@@ -2226,7 +2226,7 @@ export default function HomeScreen() {
                         {nextEvent && (
                             <HapticTouchable
                                 style={styles.updateItem}
-                                onPress={() => navigateOnce('/(screens)/SchoolCalendar')}
+                                onPress={() => navigateOnce('/(screens)/calendarscreen')}
                             >
                                 <View style={[styles.updateIconBg, { backgroundColor: '#E8F5E9' }]}>
                                     <Calendar size={14} color="#4CAF50" />
@@ -2736,7 +2736,7 @@ export default function HomeScreen() {
                                 label: 'School Calendar',
                                 color: '#4CAF50',     // green icon
                                 bgColor: '#E8F5E9',   // light green background
-                                href: "/calendarscreen"
+                                href: "/(screens)/calendarscreen"
                             },
                         ].map((action, index) => (
                             <HapticTouchable key={action.label} onPress={() => action.href && navigateOnce(action.href)} disabled={!action.href}>
@@ -4359,7 +4359,7 @@ const styles = StyleSheet.create({
 
 // === TEACHER VIEW (MOVED) ===
 // === TEACHING STAFF VIEW ===
-const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEvents, todaysEvents, banner, onScroll, paddingTop, refreshOffset, navigateOnce }) => {
+const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, upcomingEvents, todaysEvents, banner, onScroll, paddingTop, refreshOffset, navigateOnce }) => {
     const [showDelegationModal, setShowDelegationModal] = useState(false);
     const [activeDelegations, setActiveDelegations] = useState([]);
     const [shownDelegations, setShownDelegations] = useState({});
@@ -4489,24 +4489,129 @@ const TeacherView = memo(({ schoolId, userId, refreshing, onRefresh, upcomingEve
     };
 
     // Quick Actions
+    // Quick Actions (Teacher Dashboard)
+
     const actionGroups = [
+        // =========================
+        // Attendance (Top Priority)
+        // =========================
         {
-            title: 'Quick Actions',
+            title: 'Attendance',
             actions: [
-                { icon: Book, label: 'Add Homework', color: '#0469ff', bgColor: '#E3F2FD', href: "/homework/assign" },
-                { icon: Calendar, label: 'Self Attendance', color: '#F9A825', bgColor: '#FFF8E1', href: "teachers/attendance" },
-                { icon: Calendar, label: 'Mark Attendance', color: '#F9A825', bgColor: '#FFF8E1', href: "teachers/mark-attendance" },
-                { icon: ChartPie, label: 'Attendance Stats', color: '#F9A825', params: { teacherData: JSON.stringify({ schoolId, userId }) }, bgColor: '#FFF8E1', href: "/teachers/stats-calendar" },
-                { icon: Calendar, label: 'School Calendar', color: '#4CAF50', bgColor: '#E8F5E9', href: "/calendarscreen" },
-                { icon: ClipboardList, label: 'Class Attendance', color: '#3B82F6', bgColor: '#DBEAFE', href: "/teachers/class-attendance" },
-                { icon: ScrollText, label: 'Syllabus', color: '#9C27B0', bgColor: '#F3E5F5', href: "/syllabusview" },
-                { icon: BookOpen, label: 'Library', color: '#10b981', bgColor: '#dcfce7', href: "/teachers/teacher-library" },
-                { icon: Award, label: 'Examination', color: '#F59E0B', bgColor: '#FEF3C7', href: "/teachers/exam-results" },
-                { icon: Wallet, label: 'My Payroll', color: '#059669', bgColor: '#D1FAE5', href: "/teachers/my-payroll" },
-                { icon: Clock, label: 'My Timetable', color: '#8B5CF6', bgColor: '#EDE9FE', href: "/teachers/timetable" },
+                {
+                    icon: Calendar,
+                    label: 'Check In / Out',
+                    color: '#F9A825',
+                    bgColor: '#FFF8E1',
+                    href: '/teachers/attendance',
+                    params: { teacherData: JSON.stringify(teacher) },
+                },
+                {
+                    icon: ClipboardList,
+                    label: 'Take Class Attendance',
+                    color: '#3B82F6',
+                    bgColor: '#DBEAFE',
+                    href: '/teachers/mark-attendance',
+                    params: { teacherData: JSON.stringify(teacher) },
+                },
+                {
+                    icon: ChartPie,
+                    label: 'My Attendance Summary',
+                    color: '#F59E0B',
+                    bgColor: '#FEF3C7',
+                    href: '/teachers/stats-calendar',
+                    params: {
+                        teacherData: JSON.stringify({ schoolId, userId, ...teacher }),
+                    },
+                },
             ],
         },
 
+        // =========================
+        // Teaching
+        // =========================
+        {
+            title: 'Teaching',
+            actions: [
+                {
+                    icon: Book,
+                    label: 'Add Homework',
+                    color: '#0469ff',
+                    bgColor: '#E3F2FD',
+                    href: '/homework/assign',
+                    params: { teacherData: JSON.stringify(teacher) },
+                },
+                {
+                    icon: ScrollText,
+                    label: 'Syllabus',
+                    color: '#9C27B0',
+                    bgColor: '#F3E5F5',
+                    href: '/syllabusview',
+                },
+                {
+                    icon: Award,
+                    label: 'Examinations',
+                    color: '#F59E0B',
+                    bgColor: '#FEF3C7',
+                    href: '/teachers/exam-results',
+                },
+            ],
+        },
+
+        // =========================
+        // Schedule & Planning
+        // =========================
+        {
+            title: 'Schedule & Planning',
+            actions: [
+                {
+                    icon: Clock,
+                    label: 'My Timetable',
+                    color: '#8B5CF6',
+                    bgColor: '#EDE9FE',
+                    href: '/teachers/timetable',
+                },
+                {
+                    icon: Calendar,
+                    label: 'School Calendar',
+                    color: '#4CAF50',
+                    bgColor: '#E8F5E9',
+                    href: '/(screens)/calendarscreen',
+                },
+            ],
+        },
+
+        // =========================
+        // Resources
+        // =========================
+        {
+            title: 'Resources',
+            actions: [
+                {
+                    icon: BookOpen,
+                    label: 'Library',
+                    color: '#10b981',
+                    bgColor: '#dcfce7',
+                    href: '/teachers/teacher-library',
+                },
+            ],
+        },
+
+        // =========================
+        // My Account
+        // =========================
+        {
+            title: 'My Account',
+            actions: [
+                {
+                    icon: Wallet,
+                    label: 'My Payroll',
+                    color: '#059669',
+                    bgColor: '#D1FAE5',
+                    href: '/teachers/my-payroll',
+                },
+            ],
+        },
     ];
 
     // MAIN LOADER - Shows until EVERYTHING is ready

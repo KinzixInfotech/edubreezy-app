@@ -2674,7 +2674,7 @@ export default function HomeScreen() {
                     />
                 }
             >
-                {header}
+
                 {/* School Banner Carousel */}
                 <BannerCarousel schoolId={schoolId} role={user_acc?.role?.name} />
 
@@ -3013,7 +3013,6 @@ export default function HomeScreen() {
                     />
                 }
             >
-                {header}
                 <BannerCarousel schoolId={schoolId} role={user_acc?.role?.name} />
                 {/* Dashboard Stats */}
                 <View style={styles.dashboardSection}>
@@ -3191,7 +3190,6 @@ export default function HomeScreen() {
 
     // Collapsible Header Logic
 
-
     return (
         <View style={styles.container} edges={['top']}>
             <StatusBar style="light" />
@@ -3336,7 +3334,7 @@ const styles = StyleSheet.create({
     activeTripArrow: {
         marginLeft: 8,
     },
-    container: { flex: 1, backgroundColor: '#fff' },
+    container: { flex: 1, backgroundColor: '#fff', paddingTop: 80, },
     schoolBadge: {
         marginHorizontal: 16,
         marginTop: 12,

@@ -144,7 +144,7 @@ function TabsLayout() {
           href: tabConfig.showProfile ? undefined : null,
           tabBarItemStyle: tabConfig.showProfile ? undefined : { display: 'none' },
           unmountOnBlur: false,
-          tabBarLabel: user?.profilePicture ? '' : 'Profile',
+          tabBarLabel: user?.profilePicture && user.profilePicture !== 'default.png' && user.profilePicture !== 'N/A' ? '' : 'Profile',
           tabBarIcon: ({ focused, color, size }) => {
             if (user?.profilePicture && user.profilePicture !== 'default.png' && user.profilePicture !== 'N/A') {
               const sizecs = size + 20;

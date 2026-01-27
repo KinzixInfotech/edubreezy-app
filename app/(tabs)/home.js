@@ -4487,13 +4487,11 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
         }
         setShowDelegationModal(false);
     };
-
-    // Quick Actions
     // Quick Actions (Teacher Dashboard)
 
     const actionGroups = [
         // =========================
-        // Attendance (Top Priority)
+        // Attendance
         // =========================
         {
             title: 'Attendance',
@@ -4513,6 +4511,13 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                     bgColor: '#DBEAFE',
                     href: '/teachers/mark-attendance',
                     params: { teacherData: JSON.stringify(teacher) },
+                },
+                {
+                    icon: ClipboardList,
+                    label: 'Class Attendance Records',
+                    color: '#2563EB',
+                    bgColor: '#E0EAFF',
+                    href: '/teachers/class-attendance',
                 },
                 {
                     icon: ChartPie,

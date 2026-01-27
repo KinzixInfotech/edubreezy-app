@@ -12,6 +12,7 @@ import Animated, {
 import Svg, { Circle, Rect, Path } from 'react-native-svg';
 import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
+import { responsiveFontSize, responsiveHeight, responsiveWidth } from '../utils/responsive';
 const { height, width } = Dimensions.get('window');
 
 export default function GreetingScreen() {
@@ -206,22 +207,22 @@ export default function GreetingScreen() {
                 {/* Decorative Shapes */}
                 <Svg style={styles.svgPattern} height="100%" width="100%">
                     {/* Circle decorations */}
-                    <Circle cx="80%" cy="15%" r="80" fill={greeting.patternColor} opacity="0.4" />
-                    <Circle cx="15%" cy="85%" r="100" fill={greeting.patternColor} opacity="0.3" />
-                    <Circle cx="90%" cy="75%" r="60" fill={greeting.patternColor} opacity="0.5" />
+                    <Circle cx="80%" cy="15%" r={responsiveWidth(80)} fill={greeting.patternColor} opacity="0.4" />
+                    <Circle cx="15%" cy="85%" r={responsiveWidth(100)} fill={greeting.patternColor} opacity="0.3" />
+                    <Circle cx="90%" cy="75%" r={responsiveWidth(60)} fill={greeting.patternColor} opacity="0.5" />
 
                     {/* Wave pattern */}
                     <Path
                         d={`M 0 ${height * 0.3} Q ${width * 0.25} ${height * 0.25}, ${width * 0.5} ${height * 0.3} T ${width} ${height * 0.3}`}
                         stroke={greeting.patternColor}
-                        strokeWidth="40"
+                        strokeWidth={responsiveWidth(40)}
                         fill="none"
                         opacity="0.3"
                     />
 
                     {/* Abstract lines */}
-                    <Rect x="70%" y="30%" width="200" height="4" fill={greeting.patternColor} opacity="0.4" transform="rotate(45)" />
-                    <Rect x="10%" y="20%" width="150" height="4" fill={greeting.patternColor} opacity="0.4" transform="rotate(-30)" />
+                    <Rect x="70%" y="30%" width={responsiveWidth(200)} height={responsiveHeight(4)} fill={greeting.patternColor} opacity="0.4" transform="rotate(45)" />
+                    <Rect x="10%" y="20%" width={responsiveWidth(150)} height={responsiveHeight(4)} fill={greeting.patternColor} opacity="0.4" transform="rotate(-30)" />
                 </Svg>
             </View>
 
@@ -252,7 +253,7 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#ffffff',
         justifyContent: 'center',
-        paddingHorizontal: 30,
+        paddingHorizontal: responsiveWidth(30),
     },
     patternContainer: {
         position: 'absolute',
@@ -269,9 +270,9 @@ const styles = StyleSheet.create({
     },
     dot: {
         position: 'absolute',
-        width: 6,
-        height: 6,
-        borderRadius: 3,
+        width: responsiveWidth(6),
+        height: responsiveWidth(6),
+        borderRadius: responsiveWidth(3),
     },
     textContainer: {
         height: height * 0.5,
@@ -280,12 +281,12 @@ const styles = StyleSheet.create({
         zIndex: 10,
     },
     greetingText: {
-        fontSize: width * 0.18,
+        fontSize: responsiveFontSize(70), // Approx 0.18 * 375 = 67.5 -> 70
         fontWeight: '900',
         color: '#000000',
         textAlign: 'left',
         letterSpacing: -2,
-        lineHeight: width * 0.19,
+        lineHeight: responsiveFontSize(75), // Approx 0.19 * 375 = 71.25 -> 75
     },
     timeText: {
         fontStyle: 'italic',
@@ -298,18 +299,18 @@ const styles = StyleSheet.create({
         position: 'absolute',
         height: '70%',
         width: '105%',
-        bottom: 6,
+        bottom: responsiveHeight(6),
         left: -5,
         opacity: 0.5,
         borderRadius: 8,
         transform: [{ skewY: '-2deg' }],
     },
     nameText: {
-        fontSize: width * 0.16,
+        fontSize: responsiveFontSize(60), // Approx 0.16 * 375 = 60
         fontWeight: '800',
         color: '#000000',
         textAlign: 'left',
-        marginTop: 5,
+        marginTop: responsiveHeight(5),
         letterSpacing: -1,
     },
 });

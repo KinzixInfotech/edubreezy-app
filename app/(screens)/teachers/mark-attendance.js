@@ -188,10 +188,54 @@ export default function BulkAttendanceMarking() {
       const res = await api.post(`/schools/${schoolId}/attendance/bulk`, data);
       return res.data;
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries(['bulk-attendance-students']);
-      setHasChanges(false);
-      Alert.alert('Success! 🎉', 'Attendance marked successfully!');
+    onSuccess: (data, variables) => {
+      // Check if any records were skipped because they already exist
+      const skippedRecords = data.results?.skipped || [];
+      const alreadyMarked = skippedRecords.filter(r => r.reason === 'Already marked');
+
+      if (alreadyMarked.length > 0 && !variables.attendance[0]?.forceUpdate) {
+        // We have skipped records and this wasn't a forced update
+        Alert.alert(
+          'Existing Attendance Found',
+          `${alreadyMarked.length} student(s) already have marked attendance. Do you want to overwrite their status?`,
+          [
+            {
+              text: 'No, Keep Existing',
+              style: 'cancel',
+              onPress: () => {
+                // Just clear incomplete state and show success for the ones that worked
+                queryClient.invalidateQueries(['bulk-attendance-students']);
+                setHasChanges(false);
+                Alert.alert('Done', `Marked attendance for ${data.results.success.length} new student(s). Skipped ${alreadyMarked.length} existing records.`);
+              }
+            },
+            {
+              text: 'Yes, Overwrite',
+              onPress: () => {
+                // Re-submit with forceUpdate: true
+                const forcedAttendance = variables.attendance.map(record => ({
+                  ...record,
+                  forceUpdate: true
+                }));
+
+                submitMutation.mutate({
+                  ...variables,
+                  attendance: forcedAttendance
+                });
+              }
+            }
+          ]
+        );
+      } else {
+        // Standard success path
+        queryClient.invalidateQueries(['bulk-attendance-students']);
+        setHasChanges(false);
+        const successCount = data.results?.success?.length || 0;
+        const msg = successCount > 0
+          ? `Successfully marked attendance for ${successCount} student(s)!`
+          : 'Attendance updated successfully!';
+        Alert.alert('Success! 🎉', msg);
+      }
     },
     onError: (error) => {
       // ✅ ENHANCED ERROR HANDLING

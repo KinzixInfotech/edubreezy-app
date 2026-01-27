@@ -226,6 +226,32 @@ export default function TeacherClassAttendance() {
         });
     }, [students, searchQuery]);
 
+    const todayStats = useMemo(() => {
+        if (!students || students.length === 0) return { present: 0, absent: 0, percentage: 0 };
+
+        let presentCount = 0;
+        let absentCount = 0;
+
+        students.forEach(s => {
+            const status = s.attendance?.status;
+            if (status) {
+                if (status === 'PRESENT' || status === 'LATE' || status === 'HALF_DAY') {
+                    presentCount++;
+                } else if (status === 'ABSENT') {
+                    absentCount++;
+                }
+            }
+        });
+
+        const percentage = students.length > 0 ? Math.round((presentCount / students.length) * 100) : 0;
+
+        return {
+            present: presentCount,
+            absent: absentCount,
+            percentage
+        };
+    }, [students]);
+
     // Calendar days generation for selected student
     const calendarDays = useMemo(() => {
         if (!selectedStudent) return [];
@@ -273,9 +299,9 @@ export default function TeacherClassAttendance() {
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
         await Promise.all([
-            queryClient.invalidateQueries(['teacher-students']),
-            queryClient.invalidateQueries(['class-attendance-stats']),
-            queryClient.invalidateQueries(['student-attendance-detail']),
+            queryClient.invalidateQueries({ queryKey: ['class-students-list'] }),
+            queryClient.invalidateQueries({ queryKey: ['class-attendance-stats'] }),
+            queryClient.invalidateQueries({ queryKey: ['student-attendance-detail-6months'] }),
         ]);
         setRefreshing(false);
     }, [queryClient]);
@@ -348,24 +374,24 @@ export default function TeacherClassAttendance() {
                 }
             >
                 {/* Class Stats */}
-                {classStats && (
+                {!studentsLoading && (
                     <Animated.View entering={FadeInDown.delay(200).duration(500)}>
                         <View style={styles.summaryGrid}>
                             <LinearGradient colors={['#3B82F6', '#2563EB']} style={styles.summaryCard}>
                                 <TrendingUp size={24} color="#fff" />
-                                <Text style={styles.summaryValue}>{Math.round(classStats.averageAttendance || 0)}%</Text>
-                                <Text style={styles.summaryLabel}>Class Avg</Text>
+                                <Text style={styles.summaryValue}>{todayStats.percentage}%</Text>
+                                <Text style={styles.summaryLabel}>Today's %</Text>
                             </LinearGradient>
 
                             <LinearGradient colors={['#51CF66', '#37B24D']} style={styles.summaryCard}>
                                 <CheckCircle size={24} color="#fff" />
-                                <Text style={styles.summaryValue}>{classStats.totalPresent || 0}</Text>
+                                <Text style={styles.summaryValue}>{todayStats.present}</Text>
                                 <Text style={styles.summaryLabel}>Present</Text>
                             </LinearGradient>
 
                             <LinearGradient colors={['#FF6B6B', '#EE5A6F']} style={styles.summaryCard}>
                                 <XCircle size={24} color="#fff" />
-                                <Text style={styles.summaryValue}>{classStats.totalAbsent || 0}</Text>
+                                <Text style={styles.summaryValue}>{todayStats.absent}</Text>
                                 <Text style={styles.summaryLabel}>Absent</Text>
                             </LinearGradient>
                         </View>

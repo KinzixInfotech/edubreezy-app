@@ -109,8 +109,8 @@ export default function ParentAttendanceView() {
             return res.data;
         },
         enabled: !!studentId && !!schoolId,
-        staleTime: 1000 * 60 * 10, // 10 minutes - data stays fresh
-        cacheTime: 1000 * 60 * 30, // 30 minutes in cache
+        staleTime: 0, // Always fetch fresh data on mount/refocus
+        cacheTime: 1000 * 60 * 5, // Keep in cache for 5 minutes
     });
 
     // Use overall stats from API (full academic year)
@@ -142,15 +142,7 @@ export default function ParentAttendanceView() {
 
         return fullYearData.monthlyStats.find(
             stat => stat.month === month && stat.year === year
-        ) || {
-            totalPresent: 0,
-            totalAbsent: 0,
-            totalHalfDay: 0,
-            totalLate: 0,
-            totalLeaves: 0,
-            attendancePercentage: 0,
-            totalWorkingDays: 0
-        };
+        ) || null;
     }, [fullYearData?.monthlyStats, currentMonth]);
 
     // Weekly attendance data for simple bar visualization
@@ -271,7 +263,7 @@ export default function ParentAttendanceView() {
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
-        await queryClient.invalidateQueries(['child-attendance-full']);
+        await queryClient.invalidateQueries({ queryKey: ['child-attendance-full'] });
         setRefreshing(false);
     }, [queryClient]);
 
@@ -286,6 +278,7 @@ export default function ParentAttendanceView() {
         }
     };
 
+    // Get specific status configuration
     const getStatusConfig = (status) => {
         const configs = {
             PRESENT: { color: '#51CF66', icon: CheckCircle, bg: '#E7F5E9' },
@@ -293,6 +286,7 @@ export default function ParentAttendanceView() {
             LATE: { color: '#FFB020', icon: Clock, bg: '#FFF9E0' },
             HALF_DAY: { color: '#FF8C42', icon: Clock, bg: '#FFE9D6' },
             ON_LEAVE: { color: '#8B5CF6', icon: AlertCircle, bg: '#F3E8FF' },
+            HOLIDAY: { color: '#9CA3AF', icon: Sparkles, bg: '#F3F4F6' }, // Grey/Purple for Holiday
         };
         return configs[status] || { color: '#94A3B8', icon: AlertCircle, bg: '#F1F5F9' };
     };
@@ -305,7 +299,32 @@ export default function ParentAttendanceView() {
         if (status === 'LATE') return '#FFB020';
         if (status === 'HALF_DAY') return '#FF8C42';
         if (status === 'ON_LEAVE') return '#8B5CF6';
+        if (status === 'HOLIDAY') return '#E5E7EB';
         return 'transparent';
+    };
+
+    // Check if we can go back
+    const canGoBack = useMemo(() => {
+        if (!fullYearData?.academicYear?.startDate) return true;
+
+        const minDate = new Date(fullYearData.academicYear.startDate);
+        // Normalize to start of month for comparison
+        const minMonthStart = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+
+        return currentMonth > minMonthStart;
+    }, [currentMonth, fullYearData]);
+
+    const handlePrevMonth = () => {
+        if (!canGoBack) return;
+        const newDate = new Date(currentMonth);
+        newDate.setMonth(newDate.getMonth() - 1);
+        setCurrentMonth(newDate);
+    };
+
+    const handleNextMonth = () => {
+        const newDate = new Date(currentMonth);
+        newDate.setMonth(newDate.getMonth() + 1);
+        setCurrentMonth(newDate);
     };
 
     if (!childData) {
@@ -348,63 +367,63 @@ export default function ParentAttendanceView() {
                     <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" />
                 }
             >
-                {isLoading ? (
+                {isLoading && !refreshing ? (
                     <View style={styles.loadingContainer}>
                         <ActivityIndicator size="large" color="#0469ff" />
                         <Text style={styles.loadingText}>Loading attendance data...</Text>
                     </View>
-                ) : !overallStats ? (
+                ) : !fullYearData?.overallStats ? (
                     <Animated.View entering={FadeInDown.delay(300)} style={styles.noDataCard}>
                         <AlertCircle size={48} color="#999" />
                         <Text style={styles.noDataText}>No attendance data available</Text>
                     </Animated.View>
                 ) : (
                     <>
-                        {/* Overall Stats Cards - Academic Year Total */}
+                        {/* Overall Stats Cards */}
                         <Animated.View entering={FadeInDown.delay(100).duration(500)}>
                             <Text style={styles.statsLabel}>Overall (Academic Year)</Text>
                             <View style={styles.summaryGrid}>
                                 <LinearGradient colors={['#3B82F6', '#2563EB']} style={styles.summaryCard}>
                                     <TrendingUp size={24} color="#fff" />
                                     <Text style={styles.summaryValue}>
-                                        {Math.round(overallStats.attendancePercentage)}%
+                                        {Math.round(fullYearData.overallStats.attendancePercentage)}%
                                     </Text>
                                     <Text style={styles.summaryLabel}>Attendance</Text>
                                 </LinearGradient>
 
                                 <LinearGradient colors={['#51CF66', '#37B24D']} style={styles.summaryCard}>
                                     <CheckCircle size={24} color="#fff" />
-                                    <Text style={styles.summaryValue}>{overallStats.totalPresent}</Text>
+                                    <Text style={styles.summaryValue}>{fullYearData.overallStats.totalPresent}</Text>
                                     <Text style={styles.summaryLabel}>Present</Text>
                                 </LinearGradient>
 
                                 <LinearGradient colors={['#FF6B6B', '#EE5A6F']} style={styles.summaryCard}>
                                     <XCircle size={24} color="#fff" />
-                                    <Text style={styles.summaryValue}>{overallStats.totalAbsent}</Text>
+                                    <Text style={styles.summaryValue}>{fullYearData.overallStats.totalAbsent}</Text>
                                     <Text style={styles.summaryLabel}>Absent</Text>
                                 </LinearGradient>
                             </View>
                         </Animated.View>
 
                         {/* Streak Card */}
-                        {streak && streak.current > 0 && (
+                        {fullYearData.streak && fullYearData.streak.current > 0 && (
                             <Animated.View entering={FadeInDown.delay(200).duration(500)} style={styles.streakCard}>
                                 <LinearGradient colors={['#FFB020', '#FF8C42']} style={styles.streakGradient}>
                                     <Award size={32} color="#fff" />
                                     <View style={styles.streakInfo}>
-                                        <Text style={styles.streakValue}>{streak.current} Days</Text>
+                                        <Text style={styles.streakValue}>{fullYearData.streak.current} Days</Text>
                                         <Text style={styles.streakLabel}>Current Streak 🔥</Text>
                                     </View>
                                     <View style={styles.streakBadge}>
                                         <Sparkles size={14} color="#92400E" />
-                                        <Text style={styles.streakBadgeText}>Best: {streak.longest}</Text>
+                                        <Text style={styles.streakBadgeText}>Best: {fullYearData.streak.longest}</Text>
                                     </View>
                                 </LinearGradient>
                             </Animated.View>
                         )}
 
                         {/* Low Attendance Warning */}
-                        {overallStats.attendancePercentage < 75 && (
+                        {fullYearData.overallStats.attendancePercentage < 75 && (
                             <Animated.View entering={FadeInDown.delay(300).duration(500)} style={styles.warningCard}>
                                 <View style={styles.warningIconContainer}>
                                     <AlertCircle size={24} color="#FF6B6B" />
@@ -412,7 +431,7 @@ export default function ParentAttendanceView() {
                                 <View style={styles.warningContent}>
                                     <Text style={styles.warningTitle}>Low Attendance Alert</Text>
                                     <Text style={styles.warningMessage}>
-                                        Overall attendance is {Math.round(overallStats.attendancePercentage)}%, below the required 75%
+                                        Overall attendance is {Math.round(fullYearData.overallStats.attendancePercentage)}%, below the required 75%
                                     </Text>
                                 </View>
                             </Animated.View>
@@ -444,21 +463,13 @@ export default function ParentAttendanceView() {
                                         </View>
                                     </HapticTouchable>
 
-                                    <HapticTouchable onPress={() => {
-                                        const newDate = new Date(currentMonth);
-                                        newDate.setMonth(newDate.getMonth() - 1);
-                                        setCurrentMonth(newDate);
-                                    }}>
+                                    <HapticTouchable style={{ opacity: canGoBack ? 1 : 0.3 }} onPress={handlePrevMonth}>
                                         <View style={styles.navButton}>
                                             <ChevronLeft size={20} color="#666" />
                                         </View>
                                     </HapticTouchable>
 
-                                    <HapticTouchable onPress={() => {
-                                        const newDate = new Date(currentMonth);
-                                        newDate.setMonth(newDate.getMonth() + 1);
-                                        setCurrentMonth(newDate);
-                                    }}>
+                                    <HapticTouchable onPress={handleNextMonth}>
                                         <View style={styles.navButton}>
                                             <ChevronRight size={20} color="#666" />
                                         </View>
@@ -487,6 +498,7 @@ export default function ParentAttendanceView() {
                                     const isWeekend = day.fullDate && (new Date(day.fullDate).getDay() === 0 || new Date(day.fullDate).getDay() === 6);
                                     const borderColor = day.isToday ? '#0469ff' : getDayBorderColor(day);
                                     const bgColor = day.isToday ? '#E3F2FD' : (isWeekend && !day.isOtherMonth ? '#f8f9fa' : '#fff');
+                                    const isFuture = day.fullDate && day.fullDate > getISTDateString();
 
                                     return (
                                         <View
@@ -496,7 +508,8 @@ export default function ParentAttendanceView() {
                                                 day.isOtherMonth && styles.otherMonthDay,
                                                 {
                                                     borderColor: borderColor,
-                                                    backgroundColor: bgColor
+                                                    backgroundColor: bgColor,
+                                                    opacity: isFuture ? 0.6 : 1
                                                 }
                                             ]}
                                         >
@@ -504,7 +517,11 @@ export default function ParentAttendanceView() {
                                                 <>
                                                     <Text style={[
                                                         styles.dayText,
-                                                        day.isToday && styles.todayText
+                                                        day.isToday && styles.todayText,
+                                                        isFuture && {
+                                                            textDecorationLine: 'line-through',
+                                                            color: '#cbd5e1'
+                                                        }
                                                     ]}>
                                                         {day.date}
                                                     </Text>
@@ -540,6 +557,10 @@ export default function ParentAttendanceView() {
                                 <View style={styles.legendItem}>
                                     <View style={[styles.legendDot, { backgroundColor: '#8B5CF6' }]} />
                                     <Text style={styles.legendText}>Leave</Text>
+                                </View>
+                                <View style={styles.legendItem}>
+                                    <View style={[styles.legendDot, { backgroundColor: '#9CA3AF' }]} />
+                                    <Text style={styles.legendText}>Holiday</Text>
                                 </View>
                             </View>
                         </Animated.View>
@@ -618,7 +639,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 16,
-        paddingTop: 50,
+        paddingTop: 60,
         paddingBottom: 16,
         borderBottomWidth: 1,
         borderBottomColor: '#f0f0f0',

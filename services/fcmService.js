@@ -295,6 +295,100 @@ class FCMService {
         };
     }
 
+    /**
+     * Setup token refresh listener
+     * Firebase can refresh tokens at any time - we need to catch this and update backend
+     * @param {string} userId - Current user ID to update token for
+     * @returns {function} Cleanup function to unsubscribe
+     */
+    setupTokenRefreshListener(userId) {
+        if (!userId) {
+            console.warn('[FCM Token Refresh] No userId provided, skipping setup');
+            return () => { };
+        }
+
+        console.log('[FCM Token Refresh] Setting up listener for user:', userId);
+
+        const unsubscribe = messaging().onTokenRefresh(async newToken => {
+            console.log('[FCM Token Refresh] 🔄 Token refreshed, updating backend...');
+
+            try {
+                // Get previously stored token
+                const oldToken = await SecureStore.getItemAsync('fcmToken');
+
+                // Only update if token actually changed
+                if (oldToken !== newToken) {
+                    await api.post(`/users/${userId}/fcm-token`, { fcmToken: newToken });
+                    await SecureStore.setItemAsync('fcmToken', newToken);
+                    console.log('[FCM Token Refresh] ✅ New token registered successfully');
+                } else {
+                    console.log('[FCM Token Refresh] Token unchanged, skipping update');
+                }
+            } catch (error) {
+                console.error('[FCM Token Refresh] ❌ Failed to update token:', error);
+
+                // Store failed token for retry on next app launch
+                try {
+                    await SecureStore.setItemAsync('pendingFcmToken', newToken);
+                    console.log('[FCM Token Refresh] Stored pending token for retry');
+                } catch (storeError) {
+                    console.error('[FCM Token Refresh] Failed to store pending token:', storeError);
+                }
+            }
+        });
+
+        return unsubscribe;
+    }
+
+    /**
+     * Check and sync any pending token refresh that failed earlier
+     * Call this on app startup after user is authenticated
+     * @param {string} userId - Current user ID
+     */
+    async syncPendingToken(userId) {
+        if (!userId) return;
+
+        try {
+            const pendingToken = await SecureStore.getItemAsync('pendingFcmToken');
+
+            if (pendingToken) {
+                console.log('[FCM Token Sync] Found pending token, syncing to backend...');
+
+                await api.post(`/users/${userId}/fcm-token`, { fcmToken: pendingToken });
+                await SecureStore.setItemAsync('fcmToken', pendingToken);
+                await SecureStore.deleteItemAsync('pendingFcmToken');
+
+                console.log('[FCM Token Sync] ✅ Pending token synced successfully');
+            }
+        } catch (error) {
+            console.error('[FCM Token Sync] Failed to sync pending token:', error);
+            // Keep the pending token for next retry
+        }
+    }
+
+    /**
+     * Verify current token is still valid and matches backend
+     * Call periodically or on app foreground
+     * @param {string} userId - Current user ID
+     */
+    async verifyToken(userId) {
+        if (!userId) return;
+
+        try {
+            const currentToken = await this.getToken();
+            const storedToken = await SecureStore.getItemAsync('fcmToken');
+
+            if (currentToken && currentToken !== storedToken) {
+                console.log('[FCM Token Verify] Token mismatch detected, updating...');
+                await api.post(`/users/${userId}/fcm-token`, { fcmToken: currentToken });
+                await SecureStore.setItemAsync('fcmToken', currentToken);
+                console.log('[FCM Token Verify] ✅ Token updated');
+            }
+        } catch (error) {
+            console.error('[FCM Token Verify] Error:', error);
+        }
+    }
+
     // Helper to reset badge count
     async resetBadgeCount() {
         try {

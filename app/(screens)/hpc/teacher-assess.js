@@ -94,6 +94,8 @@ const GradeSelector = ({ value, onChange, paramName }) => {
 export default function TeacherSELAssessScreen() {
     const params = useLocalSearchParams();
     const childData = params.childData ? JSON.parse(params.childData) : null;
+    console.log(childData);
+
     // const termNumber = params.termNumber ? Number(params.termNumber) : 1;
     const [termNumber, setTermNumber] = useState(params.termNumber ? Number(params.termNumber) : 1);
 
@@ -113,7 +115,8 @@ export default function TeacherSELAssessScreen() {
 
     const schoolId = userData?.schoolId;
     const teacherId = userData?.id;
-    const studentId = childData?.studentId;
+    // Try multiple fields for studentId (handles different data structures)
+    const studentId = childData?.userId;
 
     // Fetch active academic year
     const { data: academicYear } = useQuery({
@@ -213,6 +216,16 @@ export default function TeacherSELAssessScreen() {
     };
 
     const handleSubmit = () => {
+        // Validate studentId exists
+        if (!studentId) {
+            Alert.alert(
+                'Error',
+                'Student ID is missing. Please go back and select the student again.',
+                [{ text: 'OK', onPress: () => router.back() }]
+            );
+            return;
+        }
+
         const filledCount = Object.keys(assessments).length;
         const totalParams = selParams?.length || 0;
 
@@ -339,7 +352,7 @@ export default function TeacherSELAssessScreen() {
             >
                 {Object.entries(groupedParams).map(([category, params], catIdx) => (
                     <Animated.View
-                        key={category}
+                        key={category || `cat-${catIdx}`}
                         entering={FadeInDown.delay(catIdx * 100)}
                         style={styles.categoryCard}
                     >
@@ -350,7 +363,7 @@ export default function TeacherSELAssessScreen() {
 
                         {params.map((param, idx) => (
                             <Animated.View
-                                key={param.id}
+                                key={param?.id || `param-${catIdx}-${idx}`}
                                 entering={FadeInRight.delay(catIdx * 100 + idx * 50)}
                             >
                                 <GradeSelector

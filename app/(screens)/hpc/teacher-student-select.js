@@ -60,34 +60,32 @@ export default function TeacherStudentSelectScreen() {
 
         const tabs = [];
 
-        // Add assigned sections
+        // Add assigned sections (with defensive check for id)
         if (activeTeacherData.sectionsAssigned?.length > 0) {
-            tabs.push(...activeTeacherData.sectionsAssigned);
+            activeTeacherData.sectionsAssigned.forEach(s => {
+                if (s?.id) {
+                    tabs.push({
+                        id: s.id,
+                        name: s.name || `Section ${s.id}`,
+                        type: 'section',
+                        class: s.class
+                    });
+                }
+            });
         }
 
-        // Add class teacher classes (treated as sections for filtering)
+        // Add class teacher classes (with unique prefix to avoid ID collision)
         if (activeTeacherData.Class?.length > 0) {
             activeTeacherData.Class.forEach(c => {
-                // Avoid duplicates if class is already covered by section assignment (simplistic check)
-                // For now, just add them. Filter logic will handle it.
-                // We need a unique ID. Using classId might conflict with sectionId if they share number space?
-                // Usually IDs are unique UUIDs or high numbers. 
-                // Wait, Class ID and Section ID are ints.
-                // Let's assume they are distinct enough or we handle them.
-                // Actually, my filtering logic uses `s.sectionId`.
-                // If I select a Class Tab, I want students with `s.classId === classId`.
-
-                // We need a way to distinguish Class Tab vs Section Tab in filteredStudents.
-                // Let's stick to sections for now as per user request to "remove All Classes".
-                // But if teacher is Class Teacher, they need to see their class.
-                // Add a field `type: 'class'` to the tab item.
-
-                tabs.push({
-                    id: c.id,
-                    name: `${c.className} (Class Teacher)`,
-                    type: 'class',
-                    class: c // redundant structure matching
-                });
+                if (c?.id) {
+                    tabs.push({
+                        id: `class-${c.id}`, // Prefix to ensure uniqueness
+                        classId: c.id, // Store actual classId for filtering
+                        name: `${c.className || 'Class'} (Class Teacher)`,
+                        type: 'class',
+                        class: c
+                    });
+                }
             });
         }
 
@@ -110,18 +108,20 @@ export default function TeacherStudentSelectScreen() {
             const res = await api.get(`/schools/${schoolId}/teachers/${teacherId}/students`);
 
             return (res.data?.students || []).map(s => ({
-                id: s.studentId,
-                studentId: s.studentId,
-                userId: s.id,
+                // API returns: id = user.id, studentId = student.id (actual Student record ID)
+                id: s.studentId, // Use studentId for unique identification
+                studentId: s.studentId, // This is what the assessment API needs
+                userId: s.id, // User ID (for profile pictures, etc.)
                 name: s.name,
                 email: s.email,
                 profilePicture: s.profilePicture,
                 rollNumber: s.rollNumber,
                 admissionNo: s.admissionNo,
-                className: s.class?.className || s.section?.class?.className || '',
-                classId: s.class?.id, // Added classId for filtering
-                sectionName: s.section?.name || '',
-                sectionId: s.section?.id
+                // Use flat fields from API response
+                className: s.className || '',
+                classId: s.classId,
+                sectionName: s.sectionName || '',
+                sectionId: s.sectionId
             }));
         },
         enabled: !!schoolId && !!teacherId,
@@ -151,11 +151,11 @@ export default function TeacherStudentSelectScreen() {
             const selectedTab = assignedSections.find(s => s.id == selectedSectionId);
 
             if (selectedTab?.type === 'class') {
-                // Filter by Class ID
-                result = result.filter(s => s.classId == selectedSectionId); // Loose equality
+                // Filter by Class ID (use the stored classId, not the prefixed id)
+                result = result.filter(s => s.classId == selectedTab.classId);
             } else {
                 // Filter by Section ID
-                result = result.filter(s => s.sectionId == selectedSectionId); // Loose equality
+                result = result.filter(s => s.sectionId == selectedSectionId);
             }
         }
 
@@ -289,12 +289,8 @@ export default function TeacherStudentSelectScreen() {
                 <FlatList
                     horizontal
                     showsHorizontalScrollIndicator={false}
-                    // Removed "All Classes" as requested
-                    data={assignedSections.map(s => ({
-                        id: s.id,
-                        name: `${s.class?.className}-${s.name}`
-                    }))}
-                    keyExtractor={item => item.id}
+                    data={assignedSections}
+                    keyExtractor={(item, index) => item?.id ? String(item.id) : `tab-${index}`}
                     contentContainerStyle={{ paddingHorizontal: 16, paddingVertical: 12, gap: 8 }}
                     renderItem={({ item }) => {
                         const isSelected = selectedSectionId === item.id;
@@ -311,7 +307,7 @@ export default function TeacherStudentSelectScreen() {
                                         styles.filterText,
                                         isSelected && styles.filterTextSelected
                                     ]}>
-                                        {item.name}
+                                        {item.name || `${item.class?.className}-${item.sectionName || ''}`}
                                     </Text>
                                 </View>
                             </TouchableOpacity>
@@ -329,7 +325,7 @@ export default function TeacherStudentSelectScreen() {
             ) : (
                 <FlatList
                     data={filteredStudents}
-                    keyExtractor={item => item.id}
+                    keyExtractor={(item, index) => item?.id ? String(item.id) : `student-${index}`}
                     renderItem={renderStudentItem}
                     contentContainerStyle={styles.listContent}
                     refreshControl={

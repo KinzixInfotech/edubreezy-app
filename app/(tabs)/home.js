@@ -799,6 +799,8 @@ export default function HomeScreen() {
                 return <DirectorView
                     refreshing={refreshing}
                     onRefresh={onRefresh}
+                    paddingTop={paddingTop}
+
                     schoolId={schoolId}
                     userId={userId}
                     header={headerComponent}
@@ -811,6 +813,7 @@ export default function HomeScreen() {
                     onRefresh={onRefresh}
                     schoolId={schoolId}
                     userId={userId}
+                    paddingTop={paddingTop}
                     header={headerComponent}
                     refreshOffset={refreshOffset}
                     navigateOnce={navigateOnce}
@@ -980,6 +983,7 @@ export default function HomeScreen() {
                     { icon: BookOpen, label: 'Homework', color: '#0469ff', bgColor: '#DBEAFE', href: '/homework/view' },
                     { icon: Book, label: 'Library', color: '#F59E0B', bgColor: '#FEF3C7', href: '/student/library' },
                     { icon: Award, label: 'Exam Results', color: '#EF4444', bgColor: '#FEE2E2', href: '/student/exam-results' },
+                    { icon: GraduationCap, label: 'Progress Card', color: '#8B5CF6', bgColor: '#F3E8FF', href: '/hpc/view' },
                     { icon: FileText, label: 'Certificates', color: '#06B6D4', bgColor: '#CFFAFE', href: '/student/certificates' },
                     { icon: ScrollText, label: 'Syllabus', color: '#9C27B0', bgColor: '#F3E5F5', href: '/syllabusview' },
                 ],
@@ -1655,6 +1659,14 @@ export default function HomeScreen() {
                         bgColor: '#EEF2FF',
                         href: '/my-child/parent-library',
                         params: { childData: JSON.stringify(selectedChild) },
+                    },
+                    {
+                        icon: GraduationCap,
+                        label: 'Progress Card',
+                        color: '#8B5CF6',
+                        bgColor: '#F3E8FF',
+                        href: '/hpc/parent-view',
+                        params: { studentId: selectedChild?.studentId, studentName: selectedChild?.name },
                     },
                 ],
             },
@@ -2481,7 +2493,7 @@ export default function HomeScreen() {
     // === DRIVER VIEW ===
 
     // === DIRECTOR VIEW ===
-    const DirectorView = ({ refreshing, onRefresh, schoolId, userId, header, refreshOffset, navigateOnce }) => {
+    const DirectorView = ({ refreshing, onRefresh, schoolId, userId, paddingTop, header, refreshOffset, navigateOnce }) => {
         // Fetch academic years first (like admin web dashboard)
         const { data: academicYears, isLoading: isLoadingYears } = useQuery({
             queryKey: ['academic-years', schoolId],
@@ -2664,6 +2676,7 @@ export default function HomeScreen() {
             <ScrollView
                 style={styles.container}
                 showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingTop: paddingTop }}
                 refreshControl={
                     <RefreshControl
                         refreshing={refreshing}
@@ -2860,7 +2873,7 @@ export default function HomeScreen() {
 
 
     // === PRINCIPAL VIEW ===
-    const PrincipalView = ({ refreshing, onRefresh, schoolId, userId, header, refreshOffset, navigateOnce }) => {
+    const PrincipalView = ({ refreshing, onRefresh, paddingTop, schoolId, userId, header, refreshOffset, navigateOnce }) => {
         // Fetch academic years first (like admin web dashboard)
         const { data: academicYears, isLoading: isLoadingYears } = useQuery({
             queryKey: ['academic-years', schoolId],
@@ -2971,15 +2984,6 @@ export default function HomeScreen() {
                 href: '/director/library'
             },
             {
-                label: 'Active Classes',
-                value: apiStats.academics.totalClasses.toString(),
-                subtext: `${apiStats.academics.activeNow} in session`,
-                icon: Book,
-                color: '#8B5CF6',
-                bgColor: '#F5F3FF',
-                href: '/classes'
-            },
-            {
                 label: 'Exam Schedule',
                 value: apiStats.academics.examsThisWeek.toString(),
                 subtext: 'This week',
@@ -3002,6 +3006,7 @@ export default function HomeScreen() {
         return (
             <ScrollView
                 style={styles.container}
+                contentContainerStyle={{ paddingTop: paddingTop }}
                 showsVerticalScrollIndicator={false}
                 refreshControl={
                     <RefreshControl
@@ -3067,7 +3072,6 @@ export default function HomeScreen() {
                             { icon: Users, label: 'Staff', color: '#0EA5E9', bgColor: '#F0F9FF', href: '/(screens)/director/teachers' },
                             { icon: GraduationCap, label: 'Students', color: '#F59E0B', bgColor: '#FFFBEB', href: '/(screens)/director/students' },
                             { icon: Bell, label: 'Broadcast', color: '#EC4899', bgColor: '#FDF2F8', href: '/(screens)/director/broadcast' },
-                            { icon: Settings, label: 'Settings', color: '#64748B', bgColor: '#F1F5F9', href: '/profile' },
                         ].map((action, index) => (
                             <HapticTouchable key={action.label} onPress={() => action.href && navigateOnce(action.href)} disabled={!action.href}>
                                 <View style={[styles.actionButton3x3, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5 }]}>
@@ -3334,7 +3338,7 @@ const styles = StyleSheet.create({
     activeTripArrow: {
         marginLeft: 8,
     },
-    container: { flex: 1, backgroundColor: '#fff', paddingTop: 80, },
+    container: { flex: 1, backgroundColor: '#fff', },
     schoolBadge: {
         marginHorizontal: 16,
         marginTop: 12,
@@ -4557,6 +4561,18 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                     color: '#F59E0B',
                     bgColor: '#FEF3C7',
                     href: '/teachers/exam-results',
+                },
+                {
+                    icon: GraduationCap,
+                    label: 'Holistic Progress',
+                    color: '#8B5CF6',
+                    bgColor: '#F3E8FF',
+                    href: '/hpc/teacher-student-select',
+                    params: {
+                        teacherData: JSON.stringify(teacher),
+                        schoolId: schoolId,
+                        teacherId: teacher?.id || userId // Fallback to userId if teacher.id missing (though teacher.id is preferred for teacher table)
+                    },
                 },
             ],
         },

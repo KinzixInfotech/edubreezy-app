@@ -72,7 +72,11 @@ export default function PrincipalLeaveManagement() {
         queryKey: ['leave-requests', schoolId, activeStatus],
         queryFn: async () => {
             const res = await api.get(`/schools/${schoolId}/attendance/admin/leave-management?status=${activeStatus}`);
-            return res.data;
+            const data = res.data;
+            if (Array.isArray(data)) return data;
+            if (data?.leaves && Array.isArray(data.leaves)) return data.leaves;
+            if (data?.data && Array.isArray(data.data)) return data.data;
+            return [];
         },
         enabled: !!schoolId,
         staleTime: 60 * 1000,
@@ -354,7 +358,7 @@ export default function PrincipalLeaveManagement() {
                 }
                 showsVerticalScrollIndicator={false}
             >
-                {!leaves || leaves.length === 0 ? (
+                {!Array.isArray(leaves) || leaves.length === 0 ? (
                     <View style={styles.emptyState}>
                         <View style={styles.emptyIcon}>
                             <FileText size={48} color="#9CA3AF" />

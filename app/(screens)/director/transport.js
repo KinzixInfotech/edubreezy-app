@@ -1,8 +1,8 @@
 import { View, Text, StyleSheet, ScrollView, RefreshControl, ActivityIndicator, FlatList, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Stack, router, useLocalSearchParams } from 'expo-router';
+import { Stack, router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Bus, ChevronLeft, MapPin, Users, Wrench, CheckCircle, Navigation, Clock, Phone, AlertCircle, Map } from 'lucide-react-native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import HapticTouchable from '../../components/HapticTouch';
@@ -39,6 +39,13 @@ export default function TransportScreen() {
         staleTime: 10 * 1000, // 10 seconds
         refetchInterval: 15000, // Poll every 15 seconds for live updates
     });
+
+    // Refetch when screen comes into focus
+    useFocusEffect(
+        useCallback(() => {
+            refetch();
+        }, [refetch])
+    );
 
     const onRefresh = async () => {
         setRefreshing(true);

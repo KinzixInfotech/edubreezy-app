@@ -97,9 +97,11 @@ export default function DirectorBusTrackingScreen() {
 
     const statusColor = getStatusColor(status);
 
-    // Format speed (m/s to km/h)
-    const speedKmh = location?.speed ? Math.round(location.speed * 3.6) : null;
-    const heading = location?.heading ? Math.round(location.heading) : null;
+    // Format speed (m/s to km/h) - Ensure no negative speed
+    const speedKmh = location?.speed ? Math.max(0, Math.round(location.speed * 3.6)) : 0;
+
+    // Ensure properly formatted heading
+    const heading = location?.heading && location.heading >= 0 ? Math.round(location.heading) : null;
 
     // Get heading direction
     const getHeadingDirection = (deg) => {

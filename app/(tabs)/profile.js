@@ -721,20 +721,7 @@ export default function ProfileScreen() {
         backgroundColor={isScrolledPastHeader ? "#fff" : "#0469ff"}
         translucent={false}
       />
-      {/* Status bar background for iOS */}
-      {Platform.OS === 'ios' && (
-        <View
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            height: insets.top,
-            backgroundColor: isScrolledPastHeader ? '#fff' : '#0469ff',
-            zIndex: 100,
-          }}
-        />
-      )}
+
       <View style={styles.container}>
         <ScrollView
           style={{ flex: 1 }}

@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, BellOff, FileText, X, Megaphone, Send, Inbox, Image as ImageIcon, Eye } from 'lucide-react-native';
 import { Image } from 'expo-image';
-import Animated, { FadeInDown, FadeIn, FadeOut } from 'react-native-reanimated';
+import Animated, { FadeInDown, FadeIn, FadeOut, SlideInDown, SlideOutDown, Easing } from 'react-native-reanimated';
 import HapticTouchable from '../components/HapticTouch';
 import * as SecureStore from 'expo-secure-store';
 import api from '../../lib/api';
@@ -182,18 +182,23 @@ const NoticeBoardScreen = () => {
   // Modal state
   const [selectedNotice, setSelectedNotice] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
+  const [innerVisible, setInnerVisible] = useState(false);
 
   const openNoticeDetail = useCallback((notice) => {
     setSelectedNotice(notice);
     setModalVisible(true);
+    requestAnimationFrame(() => setInnerVisible(true));
     if (!notice.read && userId && !notice.isSent) {
       markRead.mutate({ noticeId: notice.id, userId, schoolId });
     }
   }, [userId, markRead, schoolId]);
 
   const closeModal = useCallback(() => {
-    setModalVisible(false);
-    setSelectedNotice(null);
+    setInnerVisible(false);
+    setTimeout(() => {
+      setModalVisible(false);
+      setSelectedNotice(null);
+    }, 300);
   }, []);
 
   const openBroadcastScreen = useCallback(() => {
@@ -368,103 +373,117 @@ const NoticeBoardScreen = () => {
       <Modal
         visible={modalVisible}
         transparent
-        animationType="slide"
+        animationType="none"
         onRequestClose={closeModal}
       >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalHeaderTitle}>
-                {selectedNotice?.isSent ? 'Broadcast Details' : 'Notice Details'}
-              </Text>
-              <HapticTouchable onPress={closeModal}>
-                <X size={24} color="#111" />
-              </HapticTouchable>
-            </View>
+        {innerVisible && (
+          <View style={styles.modalOverlay}>
+            <Animated.View
+              style={StyleSheet.absoluteFill}
+              entering={FadeIn.duration(200)}
+              exiting={FadeOut.duration(200)}
+            >
+              <HapticTouchable style={StyleSheet.absoluteFill} onPress={closeModal} />
+            </Animated.View>
 
-            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
-              {selectedNotice && (
-                <>
-                  {/* Image Display */}
-                  {selectedNotice.fileUrl && (
-                    <View style={styles.modalImageContainer}>
-                      <Image
-                        source={{ uri: selectedNotice.fileUrl }}
-                        style={styles.modalImage}
-                        contentFit="cover"
-                      />
-                    </View>
-                  )}
+            <Animated.View
+              style={styles.modalContent}
+              entering={SlideInDown.duration(400).easing(Easing.out(Easing.cubic))}
+              exiting={SlideOutDown.duration(300).easing(Easing.in(Easing.cubic))}
+            >
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalHeaderTitle}>
+                  {selectedNotice?.isSent ? 'Broadcast Details' : 'Notice Details'}
+                </Text>
+                <HapticTouchable onPress={closeModal}>
+                  <X size={24} color="#111" />
+                </HapticTouchable>
+              </View>
 
-                  {/* Issued By with Avatar */}
-                  <View style={styles.issuedBySection}>
-                    <View style={styles.issuedByRow}>
-                      <AuthorAvatar
-                        profilePic={selectedNotice.authorProfilePic}
-                        name={selectedNotice.authorName || selectedNotice.issuedBy}
-                        size={48}
-                        isSent={selectedNotice.isSent}
-                      />
-                      <View style={styles.issuedByInfo}>
-                        <Text style={styles.issuedByName}>
-                          {selectedNotice.authorName || selectedNotice.issuedBy || 'You'}
-                        </Text>
-                        <Text style={styles.issuedByRole}>
-                          {selectedNotice.issuerRole || 'Administration'}
-                        </Text>
+              <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+                {selectedNotice && (
+                  <>
+                    {/* Image Display */}
+                    {selectedNotice.fileUrl && (
+                      <View style={styles.modalImageContainer}>
+                        <Image
+                          source={{ uri: selectedNotice.fileUrl }}
+                          style={styles.modalImage}
+                          contentFit="cover"
+                        />
+                      </View>
+                    )}
+
+                    {/* Issued By with Avatar */}
+                    <View style={styles.issuedBySection}>
+                      <View style={styles.issuedByRow}>
+                        <AuthorAvatar
+                          profilePic={selectedNotice.authorProfilePic}
+                          name={selectedNotice.authorName || selectedNotice.issuedBy}
+                          size={48}
+                          isSent={selectedNotice.isSent}
+                        />
+                        <View style={styles.issuedByInfo}>
+                          <Text style={styles.issuedByName}>
+                            {selectedNotice.authorName || selectedNotice.issuedBy || 'You'}
+                          </Text>
+                          <Text style={styles.issuedByRole}>
+                            {selectedNotice.issuerRole || 'Administration'}
+                          </Text>
+                        </View>
                       </View>
                     </View>
-                  </View>
 
-                  {/* Content */}
-                  <View style={styles.contentSection}>
-                    <Text style={styles.contentTitle}>{selectedNotice.title}</Text>
-                    <Text style={styles.contentDate}>
-                      {selectedNotice.publishedAt
-                        ? new Date(selectedNotice.publishedAt).toLocaleDateString('en-US', {
-                          year: 'numeric',
-                          month: 'long',
-                          day: 'numeric',
-                        })
-                        : ''}
-                    </Text>
-                    <Text style={styles.contentBody}>{selectedNotice.description}</Text>
-                  </View>
-
-                  {/* Important Dates */}
-                  {selectedNotice.importantDates?.length > 0 && (
-                    <View style={styles.datesSection}>
-                      <Text style={styles.datesSectionTitle}>Important Dates</Text>
-                      {selectedNotice.importantDates.map((d, i) => (
-                        <View key={i} style={styles.dateRow}>
-                          <Text style={styles.dateLabel}>{d.label}</Text>
-                          <Text style={styles.dateValue}>{d.value}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-
-                  {/* Expiry */}
-                  {selectedNotice.expiryDate && (
-                    <View style={styles.expiryBadge}>
-                      <Text style={styles.expiryText}>
-                        Expires: {new Date(selectedNotice.expiryDate).toLocaleDateString('en-US', {
-                          month: 'short',
-                          day: 'numeric',
-                          year: 'numeric',
-                        })}
+                    {/* Content */}
+                    <View style={styles.contentSection}>
+                      <Text style={styles.contentTitle}>{selectedNotice.title}</Text>
+                      <Text style={styles.contentDate}>
+                        {selectedNotice.publishedAt
+                          ? new Date(selectedNotice.publishedAt).toLocaleDateString('en-US', {
+                            year: 'numeric',
+                            month: 'long',
+                            day: 'numeric',
+                          })
+                          : ''}
                       </Text>
+                      <Text style={styles.contentBody}>{selectedNotice.description}</Text>
                     </View>
-                  )}
 
-                  <HapticTouchable onPress={closeModal} style={styles.closeBtn}>
-                    <Text style={styles.closeBtnText}>Close</Text>
-                  </HapticTouchable>
-                </>
-              )}
-            </ScrollView>
+                    {/* Important Dates */}
+                    {selectedNotice.importantDates?.length > 0 && (
+                      <View style={styles.datesSection}>
+                        <Text style={styles.datesSectionTitle}>Important Dates</Text>
+                        {selectedNotice.importantDates.map((d, i) => (
+                          <View key={i} style={styles.dateRow}>
+                            <Text style={styles.dateLabel}>{d.label}</Text>
+                            <Text style={styles.dateValue}>{d.value}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+
+                    {/* Expiry */}
+                    {selectedNotice.expiryDate && (
+                      <View style={styles.expiryBadge}>
+                        <Text style={styles.expiryText}>
+                          Expires: {new Date(selectedNotice.expiryDate).toLocaleDateString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                          })}
+                        </Text>
+                      </View>
+                    )}
+
+                    <HapticTouchable onPress={closeModal} style={styles.closeBtn}>
+                      <Text style={styles.closeBtnText}>Close</Text>
+                    </HapticTouchable>
+                  </>
+                )}
+              </ScrollView>
+            </Animated.View>
           </View>
-        </View>
+        )}
       </Modal>
     </View>
   );

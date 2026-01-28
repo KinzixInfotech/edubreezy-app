@@ -16,7 +16,7 @@ import { ArrowLeft, CheckCheck, X, Bell, BellOff, Calendar, AlertCircle, Megapho
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as SecureStore from 'expo-secure-store';
 import api from '../../lib/api';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut, SlideInDown, SlideOutDown, Easing } from 'react-native-reanimated';
 import { format, formatDistanceToNow } from 'date-fns';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -164,13 +164,27 @@ export default function NotificationScreen() {
         }
     }, [userId, data?.unreadCount]);
 
+    // State for inner content visibility to handle exit animations
+    const [innerVisible, setInnerVisible] = useState(false);
+
     const handlePress = (item) => {
         if (!item.isRead) {
             markReadMutation.mutate([item.id]);
         }
         setSelectedNotification(item);
         setModalVisible(true);
+        // Small delay to ensure Modal renders before starting animation
+        requestAnimationFrame(() => setInnerVisible(true));
     };
+
+    const handleCloseModal = useCallback(() => {
+        setInnerVisible(false);
+        // Wait for exit animation to finish before hiding Modal
+        setTimeout(() => {
+            setModalVisible(false);
+            setSelectedNotification(null);
+        }, 300); // Matches exit animation duration
+    }, []);
 
     const handleRefresh = useCallback(async () => {
         setRefreshing(true);
@@ -271,88 +285,98 @@ export default function NotificationScreen() {
                 }}
             />
 
-            {/* Detail Modal - Bottom Sheet Style */}
+            {/* Detail Modal - Custom Reanimated Bottom Sheet */}
             <Modal
-                animationType="slide"
+                animationType="none"
                 transparent={true}
                 visible={modalVisible}
-                onRequestClose={() => setModalVisible(false)}
+                onRequestClose={handleCloseModal}
             >
-                <TouchableOpacity
-                    style={styles.modalOverlay}
-                    activeOpacity={1}
-                    onPress={() => setModalVisible(false)}
-                >
-                    <TouchableOpacity
-                        activeOpacity={1}
-                        style={styles.modalContent}
-                        onPress={(e) => e.stopPropagation()}
+                {innerVisible && (
+                    <Animated.View
+                        entering={FadeIn.duration(200)}
+                        exiting={FadeOut.duration(200)}
+                        style={styles.modalOverlay}
                     >
-                        {/* Handle bar */}
-                        <View style={styles.modalHandle} />
-
-                        {/* Header */}
-                        <View style={styles.modalHeader}>
-                            <View style={styles.modalTypeContainer}>
-                                {(() => {
-                                    const { icon: Icon, color, bg } = getNotificationIcon(selectedNotification?.type);
-                                    return (
-                                        <View style={[styles.modalIconWrapper, { backgroundColor: bg }]}>
-                                            <Icon size={18} color={color} />
-                                        </View>
-                                    );
-                                })()}
-                                <Text style={styles.modalType}>
-                                    {selectedNotification?.type || 'Notification'}
-                                </Text>
-                            </View>
-                            <TouchableOpacity
-                                onPress={() => setModalVisible(false)}
-                                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                            >
-                                <X size={24} color="#8E8E93" />
-                            </TouchableOpacity>
-                        </View>
-
-                        {/* Title */}
-                        <Text style={styles.modalTitle}>{selectedNotification?.title}</Text>
-
-                        {/* Time */}
-                        <Text style={styles.modalTime}>
-                            {selectedNotification?.createdAt
-                                ? format(new Date(selectedNotification.createdAt), 'MMMM d, yyyy • h:mm a')
-                                : ''
-                            }
-                        </Text>
-
-                        {/* Message */}
-                        <Text style={styles.modalMessage}>{selectedNotification?.message}</Text>
-
-                        {/* Sender */}
-                        {selectedNotification?.sender && (
-                            <View style={styles.modalSender}>
-                                <Text style={styles.modalSenderLabel}>From</Text>
-                                <Text style={styles.modalSenderName}>
-                                    {selectedNotification.sender.name}
-                                    {selectedNotification.sender.role?.name && (
-                                        <Text style={styles.modalSenderRole}>
-                                            {' '}• {selectedNotification.sender.role.name}
-                                        </Text>
-                                    )}
-                                </Text>
-                            </View>
-                        )}
-
-                        {/* Close Button */}
                         <TouchableOpacity
-                            style={styles.closeButton}
-                            onPress={() => setModalVisible(false)}
-                            activeOpacity={0.7}
+                            style={StyleSheet.absoluteFill}
+                            activeOpacity={1}
+                            onPress={handleCloseModal}
+                        />
+
+                        <Animated.View
+                            entering={SlideInDown.duration(400).easing(Easing.out(Easing.cubic))}
+                            exiting={SlideOutDown.duration(300).easing(Easing.in(Easing.cubic))}
+                            style={styles.modalContent}
                         >
-                            <Text style={styles.closeButtonText}>Done</Text>
-                        </TouchableOpacity>
-                    </TouchableOpacity>
-                </TouchableOpacity>
+                            <TouchableOpacity activeOpacity={1} onPress={(e) => e.stopPropagation()}>
+                                {/* Handle bar */}
+                                <View style={styles.modalHandle} />
+
+                                {/* Header */}
+                                <View style={styles.modalHeader}>
+                                    <View style={styles.modalTypeContainer}>
+                                        {(() => {
+                                            const { icon: Icon, color, bg } = getNotificationIcon(selectedNotification?.type);
+                                            return (
+                                                <View style={[styles.modalIconWrapper, { backgroundColor: bg }]}>
+                                                    <Icon size={18} color={color} />
+                                                </View>
+                                            );
+                                        })()}
+                                        <Text style={styles.modalType}>
+                                            {selectedNotification?.type || 'Notification'}
+                                        </Text>
+                                    </View>
+                                    <TouchableOpacity
+                                        onPress={handleCloseModal}
+                                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                                    >
+                                        <X size={24} color="#8E8E93" />
+                                    </TouchableOpacity>
+                                </View>
+
+                                {/* Title */}
+                                <Text style={styles.modalTitle}>{selectedNotification?.title}</Text>
+
+                                {/* Time */}
+                                <Text style={styles.modalTime}>
+                                    {selectedNotification?.createdAt
+                                        ? format(new Date(selectedNotification.createdAt), 'MMMM d, yyyy • h:mm a')
+                                        : ''
+                                    }
+                                </Text>
+
+                                {/* Message */}
+                                <Text style={styles.modalMessage}>{selectedNotification?.message}</Text>
+
+                                {/* Sender */}
+                                {selectedNotification?.sender && (
+                                    <View style={styles.modalSender}>
+                                        <Text style={styles.modalSenderLabel}>From</Text>
+                                        <Text style={styles.modalSenderName}>
+                                            {selectedNotification.sender.name}
+                                            {selectedNotification.sender.role?.name && (
+                                                <Text style={styles.modalSenderRole}>
+                                                    {' '}• {selectedNotification.sender.role.name}
+                                                </Text>
+                                            )}
+                                        </Text>
+                                    </View>
+                                )}
+
+                                {/* Close Button */}
+                                <TouchableOpacity
+                                    style={styles.closeButton}
+                                    onPress={handleCloseModal}
+                                    activeOpacity={0.7}
+                                >
+                                    <Text style={styles.closeButtonText}>Done</Text>
+                                </TouchableOpacity>
+                            </TouchableOpacity>
+                        </Animated.View>
+                    </Animated.View>
+                )}
             </Modal>
         </SafeAreaView>
     );

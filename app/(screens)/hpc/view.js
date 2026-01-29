@@ -32,6 +32,7 @@ import {
     TrendingUp,
     CheckCircle2,
     AlertCircle,
+    Pencil,
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as FileSystem from 'expo-file-system';
@@ -549,8 +550,30 @@ export default function HPCViewScreen() {
                         </View>
                     )}
 
-                <View style={{ height: 40 }} />
+                <View style={{ height: 100 }} />
             </ScrollView>
+
+            {/* Sticky Bottom: Write Self Reflection Button */}
+            <Animated.View entering={FadeInDown.delay(300).duration(400)} style={styles.stickyBottom}>
+                <HapticTouchable
+                    onPress={() => router.push('/hpc/student-reflection')}
+                >
+                    <LinearGradient
+                        colors={['#8B5CF6', '#7C3AED']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.reflectionButton}
+                    >
+                        <View style={styles.reflectionIconBox}>
+                            <Pencil size={24} color="#fff" />
+                        </View>
+                        <View style={styles.reflectionTextBox}>
+                            <Text style={styles.reflectionTitle}>Write Self Reflection</Text>
+                            <Text style={styles.reflectionSubtitle}>Share your thoughts on your learning journey</Text>
+                        </View>
+                    </LinearGradient>
+                </HapticTouchable>
+            </Animated.View>
         </View>
     );
 }
@@ -917,5 +940,42 @@ const styles = StyleSheet.create({
         fontSize: 13,
         color: '#999',
         marginTop: 4,
+    },
+    stickyBottom: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        padding: 16,
+        paddingBottom: 24,
+        backgroundColor: '#f8f9fa',
+    },
+    reflectionButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+        borderRadius: 16,
+    },
+    reflectionIconBox: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    reflectionTextBox: {
+        flex: 1,
+        marginLeft: 14,
+    },
+    reflectionTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#fff',
+    },
+    reflectionSubtitle: {
+        fontSize: 12,
+        color: 'rgba(255,255,255,0.85)',
+        marginTop: 2,
     },
 });

@@ -180,15 +180,26 @@ export default function TeacherStudentSelectScreen() {
     const [selectedTerm, setSelectedTerm] = useState(1);
 
     const handleStudentSelect = (student) => {
+        // Check if we're in narrative feedback mode
+        const feedbackMode = params.feedbackMode;
+
+        let targetRoute = '/hpc/teacher-assess';
+        if (feedbackMode === 'narrative') {
+            targetRoute = '/hpc/teacher-narrative';
+        } else if (feedbackMode === 'view_feedback') {
+            targetRoute = '/hpc/teacher-feedback-view';
+        }
+
         router.push({
-            pathname: '/hpc/teacher-assess',
+            pathname: targetRoute,
             params: {
                 childData: JSON.stringify({
                     studentId: student.id,
                     name: student.name,
                     ...student
                 }),
-                termNumber: selectedTerm
+                termNumber: selectedTerm,
+                ...(feedbackMode === 'view_feedback' && { viewingOnly: 'true' })
             }
         });
     };

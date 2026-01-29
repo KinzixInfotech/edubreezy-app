@@ -8,6 +8,9 @@ export default function HPCLayout() {
             <Stack.Screen name="teacher-assess" />
             <Stack.Screen name="teacher-student-select" />
             <Stack.Screen name="parent-view" />
+            <Stack.Screen name="student-reflection" />
+            <Stack.Screen name="teacher-narrative" />
+            <Stack.Screen name="parent-feedback" />
         </Stack>
     );
 }

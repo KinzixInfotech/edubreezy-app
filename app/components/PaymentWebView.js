@@ -22,8 +22,70 @@ export default function PaymentWebView({
     const pollingRef = useRef(null);
     const webViewRef = useRef(null);
 
-    // Generate HTML form to auto-submit to payment gateway
+    // Generate HTML form to auto-submit to payment gateway or Load Razorpay
     useEffect(() => {
+        if (!paymentData) return;
+
+        // Handle Razorpay
+        if (paymentData.type === 'RAZORPAY') {
+            const { keyId, order, prefill, theme } = paymentData;
+            const html = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                </head>
+                <body>
+                    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+                    <script>
+                    var options = {
+                        "key": "${keyId}",
+                        "amount": "${order.amount}",
+                        "currency": "${order.currency}",
+                        "name": "EduBreezy",
+                        "description": "Fee Payment",
+                        "order_id": "${order.id}",
+                        "handler": function (response){
+                            window.ReactNativeWebView.postMessage(JSON.stringify({
+                                type: 'RAZORPAY_RESULT',
+                                status: 'SUCCESS',
+                                data: response
+                            }));
+                        },
+                        "prefill": {
+                            "name": "${prefill?.name || ''}",
+                            "email": "${prefill?.email || ''}",
+                            "contact": "${prefill?.contact || ''}"
+                        },
+                        "theme": {
+                            "color": "${theme?.color || '#0469ff'}"
+                        },
+                        "modal": {
+                            "ondismiss": function(){
+                                window.ReactNativeWebView.postMessage(JSON.stringify({
+                                    type: 'RAZORPAY_RESULT',
+                                    status: 'CANCELLED'
+                                }));
+                            }
+                        }
+                    };
+                    var rzp1 = new Razorpay(options);
+                    rzp1.on('payment.failed', function (response){
+                        window.ReactNativeWebView.postMessage(JSON.stringify({
+                            type: 'RAZORPAY_RESULT',
+                            status: 'FAILED',
+                            data: response.error
+                        }));
+                    });
+                    rzp1.open();
+                    </script>
+                </body>
+                </html>
+            `;
+            setHtmlContent(html);
+            return;
+        }
+
         if (!paymentData?.redirectUrl) return;
 
         const { redirectUrl, params, method = 'POST' } = paymentData;
@@ -69,9 +131,28 @@ export default function PaymentWebView({
         setHtmlContent(html);
     }, [paymentData]);
 
-    // Start polling for payment status
+    // Handle messages from WebView (Razorpay)
+    const handleMessage = (event) => {
+        try {
+            const data = JSON.parse(event.nativeEvent.data);
+            if (data.type === 'RAZORPAY_RESULT') {
+                if (data.status === 'SUCCESS') {
+                    // We need to verify this signature on backend
+                    onPaymentComplete?.('SUCCESS', data.data);
+                } else if (data.status === 'FAILED') {
+                    onPaymentComplete?.('FAILED', data.data);
+                } else {
+                    onClose?.();
+                }
+            }
+        } catch (e) {
+            console.error("WebView Message Error", e);
+        }
+    };
+
+    // Start polling for payment status (only for non-Razorpay or standard redirect)
     useEffect(() => {
-        if (!visible || !paymentData?.orderId) return;
+        if (!visible || !paymentData?.orderId || paymentData.type === 'RAZORPAY') return;
 
         const pollStatus = async () => {
             try {
@@ -97,7 +178,7 @@ export default function PaymentWebView({
         return () => {
             if (pollingRef.current) clearInterval(pollingRef.current);
         };
-    }, [visible, paymentData?.orderId]);
+    }, [visible, paymentData?.orderId, paymentData?.type]);
 
     const handleClose = () => {
         if (pollingRef.current) clearInterval(pollingRef.current);
@@ -164,9 +245,9 @@ export default function PaymentWebView({
                         ref={webViewRef}
                         source={{ html: htmlContent }}
                         style={styles.webView}
-                        onLoadStart={() => setLoading(true)}
                         onLoadEnd={() => setLoading(false)}
                         onNavigationStateChange={handleNavigationChange}
+                        onMessage={handleMessage}
                         javaScriptEnabled={true}
                         domStorageEnabled={true}
                         startInLoadingState={true}

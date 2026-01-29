@@ -6,6 +6,8 @@ import {
   RefreshControl,
   Alert,
   ActivityIndicator,
+  Modal,
+  Image
 } from 'react-native';
 import { useState, useMemo, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -20,7 +22,9 @@ import {
   ArrowLeft,
   ChevronDown,
   Receipt,
-  Info
+  Info,
+  X,
+  ArrowRight
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
@@ -28,6 +32,7 @@ import * as SecureStore from 'expo-secure-store';
 import api from '../../lib/api';
 import HapticTouchable from '../components/HapticTouch';
 import { StatusBar } from 'expo-status-bar';
+import RazorpayCheckout from 'react-native-razorpay';
 import PaymentWebView from '../components/PaymentWebView';
 
 export default function PayFeesScreen() {
@@ -42,6 +47,10 @@ export default function PayFeesScreen() {
   // Payment WebView state
   const [showPaymentWebView, setShowPaymentWebView] = useState(false);
   const [paymentData, setPaymentData] = useState(null);
+
+  // Payment Confirmation Modal State
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [pendingOrder, setPendingOrder] = useState(null);
 
   // API base URL for payment
   const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
@@ -83,6 +92,18 @@ export default function PayFeesScreen() {
     enabled: !!childData && !!academicYear?.id,
     staleTime: 1000 * 60 * 2,
     refetchOnMount: 'always', // Ensure fresh load
+  });
+
+  // Fetch school details for branding (name, logo)
+  const { data: schoolDetails } = useQuery({
+    queryKey: ['school-details', schoolId],
+    queryFn: async () => {
+      // Endpoint: /api/schools/get-school/[schoolId]
+      const res = await api.get(`/schools/get-school/${schoolId}`);
+      return res.data?.school;
+    },
+    enabled: !!schoolId,
+    staleTime: Infinity,
   });
 
   // Payment mutation
@@ -186,13 +207,13 @@ export default function PayFeesScreen() {
       `Pay ₹${totalPaymentAmount.toLocaleString()} for ${selectedInstallments.length} installment(s) online?`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Pay Now', onPress: initiateOnlinePayment }
+        { text: 'Pay Now', onPress: createOrder }
       ]
     );
   };
 
-  // Initiate online payment via gateway
-  const initiateOnlinePayment = async () => {
+  // Step 1: Create Order (Initiate)
+  const createOrder = async () => {
     setIsProcessing(true);
 
     try {
@@ -212,8 +233,28 @@ export default function PayFeesScreen() {
       const result = res.data;
 
       if (result.success) {
-        if (result.type === 'REDIRECT') {
-          // Open WebView for redirect-based payment
+        if (result.type === 'RAZORPAY') {
+          // Store order details and show confirmation screen
+          setPendingOrder({
+            type: 'RAZORPAY',
+            keyId: result.keyId,
+            order: result.order,
+            orderId: result.orderId,
+            amount: result.order.amount,
+            currency: result.order.currency,
+            schoolName: schoolDetails?.name || 'EduBreezy',
+            description: `Fee Payment - ${childData.name}`,
+            image: schoolDetails?.profilePicture,
+            prefill: {
+              email: userData?.email || 'test@example.com',
+              contact: userData?.phone || '9999999999',
+              name: childData.name
+            },
+            theme: { color: '#0469ff' }
+          });
+          setShowConfirmation(true);
+        } else if (result.type === 'REDIRECT') {
+          // Redirect flows (open WebView immediately)
           setPaymentData({
             redirectUrl: result.redirectUrl,
             params: result.params,
@@ -235,19 +276,92 @@ export default function PayFeesScreen() {
     }
   };
 
-  // Handle payment completion from WebView
-  const handlePaymentComplete = (status) => {
+  // Step 2: Proceed to Actual Payment (Razorpay)
+  const proceedToPayment = () => {
+    setShowConfirmation(false);
+
+    if (!pendingOrder) return;
+
+    setIsProcessing(true); // Start loading for payment flow
+
+    const options = {
+      description: pendingOrder.description,
+      image: pendingOrder.image,
+      currency: pendingOrder.currency,
+      key: pendingOrder.keyId,
+      amount: pendingOrder.amount,
+      name: pendingOrder.schoolName,
+      order_id: pendingOrder.order.id,
+      prefill: pendingOrder.prefill,
+      theme: pendingOrder.theme
+    };
+
+    // Delay to allowing Modal to fully dismiss before opening new Native UI
+    setTimeout(() => {
+      RazorpayCheckout.open(options).then(async (data) => {
+        // Success: Calls backend verify
+        await handlePaymentComplete('SUCCESS', data);
+      }).catch((error) => {
+        // Failure/Cancel
+        console.log("Razorpay Error", error);
+        setIsProcessing(false); // Stop loading immediately
+
+        if (error.code === 0) {
+          // Just log cancellation, no alert needed usually, or a subtle toast
+          console.log('User cancelled payment');
+        } else {
+          Alert.alert('Payment Failed', error.description || 'Something went wrong.');
+        }
+      });
+    }, 500);
+  };
+
+  // Handle payment completion from WebView or Native SDK
+  const handlePaymentComplete = async (status, data) => {
     setShowPaymentWebView(false);
     setPaymentData(null);
 
     if (status === 'SUCCESS') {
-      Alert.alert('Payment Successful! 🎉', 'Your payment has been processed successfully.');
-      queryClient.invalidateQueries(['student-fee']);
-      setSelectedInstallments([]);
-    } else if (status === 'FAILED') {
-      Alert.alert('Payment Failed', 'The payment could not be completed. Please try again.');
+      // Check if it's Razorpay verification data
+      if (data && data.razorpay_signature) {
+        try {
+          // Keep isProcessing true (it was true from proceedToPayment)
+          const verifyRes = await api.post('/payment/razorpay/verify', data);
+
+          if (verifyRes.data.success) {
+            // Success!
+            queryClient.invalidateQueries(['student-fee']);
+            setSelectedInstallments([]);
+
+            Alert.alert(
+              'Payment Successful! 🎉',
+              `Receipt: ${verifyRes.data.payment?.receiptNumber || 'Generated'}\nAmount: ${formatCurrency(verifyRes.data.payment?.amount)}\n\nYour transaction has been recorded successfully.`,
+              [{ text: 'OK' }]
+            );
+          } else {
+            Alert.alert('Verification Failed', 'Payment verification failed. Please contact support.');
+          }
+        } catch (error) {
+          console.error('Verification error:', error);
+          Alert.alert('Verification Error', error.response?.data?.error || 'Failed to verify payment');
+        } finally {
+          setIsProcessing(false);
+        }
+      } else {
+        // Standard redirect success (already verified via polling/webhook)
+        Alert.alert('Payment Successful! 🎉', 'Your payment has been processed successfully.');
+        queryClient.invalidateQueries(['student-fee']);
+        setSelectedInstallments([]);
+        setIsProcessing(false);
+      }
+    } else {
+      // Failed or Cancelled from WebView or other flows
+      setIsProcessing(false);
+      if (status === 'FAILED') {
+        const msg = (data && data.description) ? data.description : 'The payment could not be completed.';
+        Alert.alert('Payment Failed', msg);
+      }
     }
-    // CANCELLED: no alert needed
   };
 
   if (!childData) {
@@ -529,6 +643,58 @@ export default function PayFeesScreen() {
         onPaymentComplete={handlePaymentComplete}
         apiBaseUrl={API_BASE_URL}
       />
+
+      {/* Confirmation Modal - Replaced with Absolute View to allow Razorpay Native UI 
+          to present correctly on top without ViewController hierarchy conflicts */}
+      {showConfirmation && (
+        <View style={styles.absoluteOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Confirm Payment</Text>
+              <HapticTouchable onPress={() => setShowConfirmation(false)}>
+                <X size={24} color="#666" />
+              </HapticTouchable>
+            </View>
+
+            <View style={styles.modalBody}>
+              <View style={styles.schoolInfo}>
+                {pendingOrder?.image && (
+                  <Image source={{ uri: pendingOrder.image }} style={styles.schoolLogo} />
+                )}
+                <Text style={styles.schoolName}>{pendingOrder?.schoolName}</Text>
+              </View>
+
+              <View style={styles.divider} />
+
+              <View style={styles.orderRow}>
+                <Text style={styles.orderLabel}>Order ID</Text>
+                <Text style={styles.orderValue}>{pendingOrder?.orderId || '...'}</Text>
+              </View>
+
+              <View style={styles.orderRow}>
+                <Text style={styles.orderLabel}>Student</Text>
+                <Text style={styles.orderValue}>{childData?.name}</Text>
+              </View>
+
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Total Amount</Text>
+                <Text style={styles.totalValue}>{formatCurrency(totalPaymentAmount)}</Text>
+              </View>
+
+              <Text style={styles.secureText}>🔒 Secure Payment via Razorpay</Text>
+            </View>
+
+            <View style={styles.modalFooter}>
+              <HapticTouchable onPress={proceedToPayment} style={styles.proceedButton}>
+                <LinearGradient colors={['#0469ff', '#0347b8']} style={styles.gradientButton}>
+                  <Text style={styles.proceedButtonText}>Proceed to Pay</Text>
+                  <ArrowRight size={20} color="#fff" />
+                </LinearGradient>
+              </HapticTouchable>
+            </View>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -685,4 +851,33 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
+
+  // Modal Styles
+  absoluteOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 9999, // Ensure it sits on top of everything
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20
+  },
+  modalContent: { backgroundColor: '#fff', borderRadius: 24, width: '100%', maxWidth: 400, overflow: 'hidden', elevation: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84 },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+  modalTitle: { fontSize: 18, fontWeight: '700', color: '#111' },
+  modalBody: { padding: 24, alignItems: 'center' },
+  schoolInfo: { alignItems: 'center', gap: 12, marginBottom: 20 },
+  schoolLogo: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#f5f5f5' },
+  schoolName: { fontSize: 16, fontWeight: '600', color: '#111', textAlign: 'center' },
+  divider: { height: 1, backgroundColor: '#f0f0f0', width: '100%', marginBottom: 20 },
+  orderRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: 12 },
+  orderLabel: { fontSize: 14, color: '#666' },
+  orderValue: { fontSize: 14, fontWeight: '600', color: '#111' },
+  totalRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginTop: 8, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#f0f0f0' },
+  totalLabel: { fontSize: 16, fontWeight: '700', color: '#111' },
+  totalValue: { fontSize: 20, fontWeight: '700', color: '#0469ff' },
+  secureText: { marginTop: 24, fontSize: 12, color: '#666', flexDirection: 'row', alignItems: 'center' },
+  modalFooter: { padding: 20, borderTopWidth: 1, borderTopColor: '#f0f0f0' },
+  proceedButton: { width: '100%', borderRadius: 16, overflow: 'hidden' },
+  gradientButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, gap: 8 },
+  proceedButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 });

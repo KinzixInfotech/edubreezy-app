@@ -23,7 +23,9 @@ import {
     Umbrella,
     BellOff,
     Play,
-    AlertTriangle
+    AlertTriangle,
+    MessageSquare,
+    Pencil
 } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
@@ -4562,6 +4564,12 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                     bgColor: '#FEF3C7',
                     href: '/teachers/exam-results',
                 },
+
+            ],
+        },
+        {
+            title: 'Holistic Progress',
+            actions: [
                 {
                     icon: GraduationCap,
                     label: 'Holistic Progress',
@@ -4572,6 +4580,19 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                         teacherData: JSON.stringify(teacher),
                         schoolId: schoolId,
                         teacherId: teacher?.id || userId // Fallback to userId if teacher.id missing (though teacher.id is preferred for teacher table)
+                    },
+                },
+                {
+                    icon: MessageSquare,
+                    label: 'View Feedback',
+                    color: '#EC4899',
+                    bgColor: '#FCE7F3',
+                    href: '/hpc/teacher-student-select',
+                    params: {
+                        teacherData: JSON.stringify(teacher),
+                        schoolId: schoolId,
+                        teacherId: teacher?.id || userId,
+                        feedbackMode: 'view_feedback'
                     },
                 },
             ],

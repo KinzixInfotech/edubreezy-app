@@ -1,6 +1,6 @@
 // Teacher SEL Assessment Screen - HPC
 // Teachers can assess students on Social-Emotional Learning parameters
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
     View,
     Text,
@@ -22,6 +22,7 @@ import {
     Users,
     CheckCircle,
     ChevronDown,
+    MessageSquare,
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import api from '../../../lib/api';
@@ -154,14 +155,18 @@ export default function TeacherSELAssessScreen() {
         },
         enabled: !!schoolId && !!studentId && !!academicYear?.id,
         staleTime: 1000 * 60 * 5,
-        onSuccess: (data) => {
+    });
+
+    // Populate assessments from existing data (React Query v5 compatible)
+    useEffect(() => {
+        if (existingAssessments && existingAssessments.length > 0) {
             const initial = {};
-            data.forEach((a) => {
+            existingAssessments.forEach((a) => {
                 initial[a.parameterId] = a.grade;
             });
             setAssessments(initial);
-        },
-    });
+        }
+    }, [existingAssessments]);
 
     // Group parameters by category
     const groupedParams = useMemo(() => {
@@ -397,8 +402,36 @@ export default function TeacherSELAssessScreen() {
                     </LinearGradient>
                 </HapticTouchable>
 
-                <View style={{ height: 40 }} />
+                <View style={{ height: 120 }} />
             </ScrollView>
+
+            {/* Sticky Bottom: Give Narrative Feedback */}
+            <Animated.View entering={FadeInDown.delay(300).duration(400)} style={styles.stickyBottom}>
+                <HapticTouchable
+                    onPress={() => router.push({
+                        pathname: '/hpc/teacher-narrative',
+                        params: {
+                            childData: JSON.stringify(childData),
+                            termNumber: termNumber
+                        }
+                    })}
+                >
+                    <LinearGradient
+                        colors={['#8B5CF6', '#7C3AED']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.narrativeButton}
+                    >
+                        <View style={styles.narrativeIconBox}>
+                            <MessageSquare size={24} color="#fff" />
+                        </View>
+                        <View style={styles.narrativeTextBox}>
+                            <Text style={styles.narrativeTitle}>Give Narrative Feedback</Text>
+                            <Text style={styles.narrativeSubtitle}>Write detailed feedback for this student</Text>
+                        </View>
+                    </LinearGradient>
+                </HapticTouchable>
+            </Animated.View>
         </View>
     );
 }
@@ -628,5 +661,42 @@ const styles = StyleSheet.create({
     },
     termPillTextActive: {
         color: '#EC4899',
+    },
+    stickyBottom: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        padding: 16,
+        paddingBottom: 24,
+        backgroundColor: '#f8f9fa',
+    },
+    narrativeButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+        borderRadius: 16,
+    },
+    narrativeIconBox: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    narrativeTextBox: {
+        flex: 1,
+        marginLeft: 14,
+    },
+    narrativeTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#fff',
+    },
+    narrativeSubtitle: {
+        fontSize: 12,
+        color: 'rgba(255,255,255,0.85)',
+        marginTop: 2,
     },
 });

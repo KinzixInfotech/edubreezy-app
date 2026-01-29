@@ -485,8 +485,33 @@ export default function ParentHPCView() {
                         </View>
                     )}
 
-                <View style={{ height: 40 }} />
+                <View style={{ height: 100 }} />
             </ScrollView>
+
+            {/* Sticky Bottom: Submit Feedback Button */}
+            <Animated.View entering={FadeInDown.delay(300).duration(400)} style={styles.stickyBottom}>
+                <HapticTouchable
+                    onPress={() => router.push({
+                        pathname: '/hpc/parent-feedback',
+                        params: { studentId, studentName: studentName || student?.name }
+                    })}
+                >
+                    <LinearGradient
+                        colors={['#EC4899', '#DB2777']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.feedbackButton}
+                    >
+                        <View style={styles.feedbackIconBox}>
+                            <MessageSquare size={24} color="#fff" />
+                        </View>
+                        <View style={styles.feedbackTextBox}>
+                            <Text style={styles.feedbackTitle}>Share Your Feedback</Text>
+                            <Text style={styles.feedbackSubtitle}>Help teachers understand your child better</Text>
+                        </View>
+                    </LinearGradient>
+                </HapticTouchable>
+            </Animated.View>
         </View>
     );
 }
@@ -849,5 +874,42 @@ const styles = StyleSheet.create({
         fontSize: 13,
         color: '#aaa',
         marginTop: 4,
+    },
+    stickyBottom: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        padding: 16,
+        paddingBottom: 24,
+        backgroundColor: '#f8f9fa',
+    },
+    feedbackButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+        borderRadius: 16,
+    },
+    feedbackIconBox: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    feedbackTextBox: {
+        flex: 1,
+        marginLeft: 14,
+    },
+    feedbackTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#fff',
+    },
+    feedbackSubtitle: {
+        fontSize: 12,
+        color: 'rgba(255,255,255,0.85)',
+        marginTop: 2,
     },
 });

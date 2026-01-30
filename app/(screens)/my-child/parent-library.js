@@ -5,6 +5,7 @@ import {
     View,
     Text,
     StyleSheet,
+    Platform,
     ScrollView,
     RefreshControl,
     ActivityIndicator,
@@ -15,7 +16,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
 import {
     BookOpen,
@@ -75,6 +76,17 @@ export default function ParentLibraryScreen() {
     const parentUserId = userData?.id;
     const studentId = childData?.studentId || childData?.id;
 
+    // Force refresh on focus
+    useFocusEffect(
+        useCallback(() => {
+            const refreshData = async () => {
+                await queryClient.invalidateQueries(['parent-library']);
+                await queryClient.invalidateQueries(['library-catalog']);
+            };
+            refreshData();
+        }, [])
+    );
+
     // Fetch library data
     const { data: libraryData, isLoading } = useQuery({
         queryKey: ['parent-library', schoolId, parentId, studentId],
@@ -86,7 +98,7 @@ export default function ParentLibraryScreen() {
             return res.data;
         },
         enabled: !!schoolId && !!parentId && !!studentId,
-        staleTime: 1000 * 60 * 2,
+        staleTime: 0, // Always fresh
     });
 
     // Fetch all library books (catalog)
@@ -100,7 +112,7 @@ export default function ParentLibraryScreen() {
             return res.data || [];
         },
         enabled: !!schoolId && activeTab === 'catalog',
-        staleTime: 1000 * 60 * 5,
+        staleTime: 0, // Always fresh
     });
 
     const borrowedBooks = libraryData?.borrowedBooks || [];
@@ -370,7 +382,7 @@ export default function ParentLibraryScreen() {
         <View style={styles.container}>
             <StatusBar style="dark" />
             {/* Header */}
-            <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
+            <Animated.View entering={FadeInDown.duration(400)} style={[styles.header, Platform.OS === 'ios' && { paddingTop: 60 }]}>
                 <HapticTouchable onPress={() => router.back()}>
                     <View style={styles.backButton}>
                         <ArrowLeft size={24} color="#111" />

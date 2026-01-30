@@ -733,7 +733,13 @@ export default function ProfileScreen() {
           onScroll={handleScroll}
           scrollEventThrottle={16}
           refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#0469ff" />
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor="#0469ff"
+              colors={['#0469ff']} // For Android
+              title="Refreshing..." // Optional: adds text on iOS
+            />
           }
         >
           {/* Profile Header with Gradient - Matching Homepage */}

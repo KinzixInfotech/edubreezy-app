@@ -7,6 +7,7 @@ import {
     StyleSheet,
     ScrollView,
     RefreshControl,
+    Platform,
     ActivityIndicator,
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
@@ -114,7 +115,7 @@ export default function StudentExamResultsScreen() {
         <View style={styles.container}>
             <StatusBar style='dark' />
             {/* Header */}
-            <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
+            <Animated.View entering={FadeInDown.duration(400)} style={[styles.header, Platform.OS === 'ios' && { paddingTop: 60 }]}>
                 <HapticTouchable onPress={() => router.back()}>
                     <View style={styles.backButton}>
                         <ArrowLeft size={24} color="#111" />

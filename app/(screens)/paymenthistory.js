@@ -7,10 +7,10 @@ import {
     StyleSheet,
     ScrollView,
     RefreshControl,
+    Platform,
     Alert,
     ActivityIndicator,
     Share,
-    Platform,
 } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { useState, useCallback } from 'react';
@@ -265,7 +265,7 @@ Thank you for your payment!
         <View style={styles.container}>
             <StatusBar style="dark" />
             {/* Header */}
-            <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
+            <Animated.View entering={FadeInDown.duration(400)} style={[styles.header, Platform.OS === 'ios' ? { paddingTop: 60 } : { paddingTop: 20 }]}>
                 <HapticTouchable onPress={() => router.back()}>
                     <View style={styles.backButton}>
                         <ArrowLeft size={24} color="#111" />
@@ -274,7 +274,7 @@ Thank you for your payment!
                 <View style={styles.headerCenter}>
                     <Text style={styles.headerTitle}>Payment History</Text>
                     <Text style={styles.headerSubtitle}>
-                        {childData.name} - {childData.class?.className}
+                        {childData.name} {childData.class?.className}
                     </Text>
                 </View>
                 <View style={{ width: 40 }} />

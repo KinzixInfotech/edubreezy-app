@@ -6,6 +6,7 @@ import {
   RefreshControl,
   Alert,
   ActivityIndicator,
+  Platform,
   Modal,
   Image
 } from 'react-native';
@@ -242,9 +243,9 @@ export default function PayFeesScreen() {
             orderId: result.orderId,
             amount: result.order.amount,
             currency: result.order.currency,
-            schoolName: schoolDetails?.name || 'EduBreezy',
+            schoolName: 'EduBreezy',
             description: `Fee Payment - ${childData.name}`,
-            image: schoolDetails?.profilePicture,
+            image: 'https://edubreezy.com/web-app-manifest-192x192.png',
             prefill: {
               email: userData?.email || 'test@example.com',
               contact: userData?.phone || '9999999999',
@@ -382,7 +383,7 @@ export default function PayFeesScreen() {
     <View style={styles.container}>
       <StatusBar style="dark" />
       {/* Header */}
-      <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
+      <Animated.View entering={FadeInDown.duration(400)} style={[styles.header, Platform.OS === 'ios' && { paddingTop: 60 }]}>
         <HapticTouchable onPress={() => router.back()}>
           <View style={styles.backButton}>
             <ArrowLeft size={24} color="#111" />

@@ -9,6 +9,7 @@ import {
     RefreshControl,
     ActivityIndicator,
     Modal,
+    Platform,
     TouchableOpacity,
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -66,7 +67,7 @@ export default function ParentExamsScreen() {
             return res.data;
         },
         enabled: !!schoolId && !!childId,
-        staleTime: 1000 * 60 * 2,
+        staleTime: 0,
     });
 
     const results = examData?.results || [];
@@ -147,7 +148,7 @@ export default function ParentExamsScreen() {
             <StatusBar style="dark" />
 
             {/* Header */}
-            <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
+            <Animated.View entering={FadeInDown.duration(400)} style={[styles.header, Platform.OS === 'ios' && { paddingTop: 60 }]}>
                 <HapticTouchable onPress={() => router.back()}>
                     <View style={styles.backButton}>
                         <ArrowLeft size={24} color="#111" />

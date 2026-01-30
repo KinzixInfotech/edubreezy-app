@@ -15,10 +15,12 @@ import { z } from 'zod';
 import {
     Calendar, Clock, MapPin, CheckCircle, XCircle, Clock4, AlertCircle,
     TrendingUp, Timer, Zap, FileText, Send, X as CloseIcon, AlertTriangle,
-    Info, ChevronRight, Umbrella, Bell, LogOut
+    Info, ChevronRight, Umbrella, Bell, LogOut, ArrowLeft
 } from 'lucide-react-native';
+import { router } from 'expo-router';
 import api, { API_BASE_URL } from '../../../lib/api';
-import { getSchoolLocation, isNearSchool, getDistanceMeters } from '../../../lib/geofence-service';
+import { getSchoolLocation, isNearSchool, getDistanceMeters, formatDistance } from '../../../lib/geofence-service';
+import { useAttendanceReminder, REMINDER_TYPES } from '../../../contexts/AttendanceReminderContext';
 import { StatusBar } from 'expo-status-bar';
 
 // Configure notification handler
@@ -63,6 +65,7 @@ const regularizationSchema = z.object({
 export default function SelfAttendance() {
     const [user, setUser] = useState(null);
     const queryClient = useQueryClient();
+    const { triggerTestReminder } = useAttendanceReminder(); // DEBUG: For testing reminders
     const [refreshing, setRefreshing] = useState(false);
     const [location, setLocation] = useState(null);
     const [locationError, setLocationError] = useState(null);
@@ -164,8 +167,8 @@ export default function SelfAttendance() {
                     accuracy: loc.coords.accuracy
                 });
 
-                // Calculate distance if school location is available
-                if (schoolLocation?.latitude && schoolLocation?.longitude) {
+                // Calculate distance if school location is available and geofencing is enabled
+                if (schoolLocation?.enableGeoFencing && schoolLocation?.latitude && schoolLocation?.longitude) {
                     const dist = getDistanceMeters(
                         loc.coords.latitude,
                         loc.coords.longitude,
@@ -176,12 +179,19 @@ export default function SelfAttendance() {
 
                     const radius = schoolLocation.attendanceRadius || 500;
                     setIsWithinRadius(dist <= radius);
+                } else if (schoolLocation?.latitude && schoolLocation?.longitude) {
+                    // School location exists but geofencing is disabled - calculate distance for display only
+                    const dist = getDistanceMeters(
+                        loc.coords.latitude,
+                        loc.coords.longitude,
+                        schoolLocation.latitude,
+                        schoolLocation.longitude
+                    );
+                    setDistanceToSchool(Math.round(dist));
+                    setIsWithinRadius(true); // Always allow if geofencing is disabled
                 } else {
-                    // If no school location set, assume generic success or handle as "no restriction"
-                    // But requirement implies strict check. sticking to strict if location exists.
-                    // If no location configured, maybe allow? Let's assume strict if config exists.
-                    setIsWithinRadius(true); // Allow if no school location configured? Or block?
-                    // For now defaulting to true if no config to avoid breaking existing users.
+                    // No school location configured - allow attendance
+                    setIsWithinRadius(true);
                 }
             } catch (err) {
                 setLocationError(err.message || 'Failed to get location');
@@ -194,7 +204,7 @@ export default function SelfAttendance() {
                 appVersion: '1.0.0'
             });
         })();
-    }, [userId, schoolId]);
+    }, [userId, schoolId, schoolLocation]);
 
     // Fetch attendance status
     const { data, isLoading, error } = useQuery({
@@ -474,9 +484,9 @@ export default function SelfAttendance() {
         mutationFn: async () => {
             if (!location) throw new Error('Location not available');
 
-            // Proximity Check
-            if (schoolLocation && isWithinRadius === false) {
-                const radius = schoolLocation.attendanceRadius || 500;
+            // Proximity Check - only enforce if geofencing is enabled
+            if (config?.enableGeoFencing && schoolLocation?.enableGeoFencing && isWithinRadius === false) {
+                const radius = config?.allowedRadius || schoolLocation.attendanceRadius || 500;
                 throw new Error(`You are too far from school. Please ensure you are within ${radius}m.`);
             }
 
@@ -519,9 +529,9 @@ export default function SelfAttendance() {
         mutationFn: async () => {
             if (!location) throw new Error('Location not available');
 
-            // Proximity Check
-            if (schoolLocation && isWithinRadius === false) {
-                const radius = schoolLocation.attendanceRadius || 500;
+            // Proximity Check - only enforce if geofencing is enabled
+            if (config?.enableGeoFencing && schoolLocation?.enableGeoFencing && isWithinRadius === false) {
+                const radius = config?.allowedRadius || schoolLocation.attendanceRadius || 500;
                 throw new Error(`You are too far from school. Please ensure you are within ${radius}m.`);
             }
 
@@ -718,682 +728,720 @@ export default function SelfAttendance() {
     }
 
     return (
-        <ScrollView
-            style={styles.container}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" />}
-        >
+        <View style={styles.container}>
             <StatusBar style='dark' />
-            {/* Header */}
+            {/* Header - Fixed/Sticky */}
             <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
-                <View style={styles.headerTop}>
-                    <View>
-                        <Text style={styles.headerTitle}>Attendance</Text>
-                        <Text style={styles.headerDate}>
-                            {new Date().toLocaleDateString('en-US', {
-                                weekday: 'long',
-                                month: 'long',
-                                day: 'numeric'
-                            })}
+                <Pressable onPress={() => router.back()} style={styles.backButton}>
+                    <ArrowLeft size={24} color="#111" />
+                </Pressable>
+                <Text style={styles.headerTitle}>Attendance</Text>
+                {config?.enableGeoFencing && location ? (
+                    <View style={[styles.locationBadge, !isWithinRadius && styles.locationBadgeError]}>
+                        {isWithinRadius ? (
+                            <MapPin size={14} color="#10B981" />
+                        ) : (
+                            <AlertCircle size={14} color="#EF4444" />
+                        )}
+                        <Text style={[styles.locationText, !isWithinRadius && styles.locationTextError]}>
+                            {isWithinRadius
+                                ? `${distanceToSchool ? formatDistance(distanceToSchool) : 'Ready'}`
+                                : `${distanceToSchool ? formatDistance(distanceToSchool) : '...'}`
+                            }
                         </Text>
                     </View>
-                    {config?.enableGeoFencing && location && (
-                        <View style={[styles.locationBadge, !isWithinRadius && styles.locationBadgeError]}>
-                            {isWithinRadius ? (
-                                <MapPin size={16} color="#10B981" />
-                            ) : (
-                                <AlertCircle size={16} color="#EF4444" />
-                            )}
-                            <Text style={[styles.locationText, !isWithinRadius && styles.locationTextError]}>
-                                {isWithinRadius
-                                    ? `GPS Ready (${distanceToSchool ? formatDistance(distanceToSchool) : ''})`
-                                    : `Too Far (${distanceToSchool ? formatDistance(distanceToSchool) : 'Checking...'})`
-                                }
-                            </Text>
-                        </View>
-                    )}
-                </View>
+                ) : (
+                    <View style={{ width: 40 }} />
+                )}
             </Animated.View>
 
-            {/* Location Error */}
-            {locationError && (
-                <Animated.View entering={FadeInDown.delay(100)} style={styles.errorCard}>
-                    <AlertCircle size={20} color="#EF4444" />
-                    <Text style={styles.errorCardText}>{locationError}</Text>
-                </Animated.View>
-            )}
+            <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={{ paddingBottom: 20 }}
+                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" />}
+            >
 
-            {/* On Leave Alert */}
-            {onLeave && leaveDetails && (
-                <Animated.View entering={FadeInDown.delay(200)} style={styles.leaveCard}>
-                    <Umbrella size={28} color="#3B82F6" />
-                    <View style={styles.leaveContent}>
-                        <Text style={styles.leaveTitle}>You're on Leave</Text>
-                        <Text style={styles.leaveSubtitle}>
-                            {leaveDetails.leaveType} Leave • {new Date(leaveDetails.startDate).toLocaleDateString('en-IN')} - {new Date(leaveDetails.endDate).toLocaleDateString('en-IN')}
-                        </Text>
-                        <Text style={styles.leaveReason} numberOfLines={2}>{leaveDetails.reason}</Text>
-                    </View>
-                </Animated.View>
-            )}
+                {/* Date Subheader */}
+                <View style={styles.dateHeader}>
+                    <Text style={styles.headerDate}>
+                        {new Date().toLocaleDateString('en-US', {
+                            weekday: 'long',
+                            month: 'long',
+                            day: 'numeric'
+                        })}
+                    </Text>
+                </View>
 
-            {/* Non-Working Day */}
-            {!isWorkingDay && !onLeave && (
-                <Animated.View entering={FadeInDown.delay(200)} style={styles.alertCard}>
-                    <AlertCircle size={24} color="#F59E0B" />
-                    <View style={styles.alertContent}>
-                        <Text style={styles.alertTitle}>
-                            {dayType === 'HOLIDAY' ? `Holiday: ${data?.holidayName}` : dayType}
-                        </Text>
-                        <Text style={styles.alertMessage}>No attendance required today</Text>
-                    </View>
-                </Animated.View>
-            )}
-
-            {/* Live Timer - Enhanced with work progress */}
-            {!onLeave && attendance?.checkInTime && !attendance?.checkOutTime && (
-                <Animated.View entering={FadeInDown.delay(350)} style={styles.timerCard}>
-                    <Animated.View style={[styles.pulseCircle, animatedPulse]} />
-                    <View style={styles.timerContent}>
-                        <Zap size={28} color="#F59E0B" />
-                        <Text style={styles.timerLabel}>Live Working Time</Text>
-                        <Text style={styles.timerValue}>{liveHours.toFixed(2)} hrs</Text>
-                        <Text style={styles.timerSub}>
-                            Since {new Date(attendance.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </Text>
-                        {/* Work Progress Indicator */}
-                        <View style={styles.progressHint}>
-                            <Text style={styles.progressText}>{getWorkProgressMessage()}</Text>
+                {/* DEBUG: Test Reminder Buttons - Remove in production */}
+                {__DEV__ && (
+                    <View style={{ padding: 16, backgroundColor: '#FEF3C7', margin: 16, borderRadius: 12, borderWidth: 1, borderColor: '#F59E0B' }}>
+                        <Text style={{ fontWeight: '700', fontSize: 14, color: '#92400E', marginBottom: 8 }}>🧪 DEV: Test Reminders</Text>
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                            <Pressable
+                                onPress={() => triggerTestReminder(REMINDER_TYPES.CHECK_IN_OPEN)}
+                                style={{ backgroundColor: '#10B981', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
+                                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 12 }}>Check-In</Text>
+                            </Pressable>
+                            <Pressable
+                                onPress={() => triggerTestReminder(REMINDER_TYPES.LATE_WARNING)}
+                                style={{ backgroundColor: '#F59E0B', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
+                                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 12 }}>Late Warning</Text>
+                            </Pressable>
+                            <Pressable
+                                onPress={() => triggerTestReminder(REMINDER_TYPES.CHECK_OUT_OPEN)}
+                                style={{ backgroundColor: '#3B82F6', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
+                                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 12 }}>Check-Out</Text>
+                            </Pressable>
+                            <Pressable
+                                onPress={() => triggerTestReminder(REMINDER_TYPES.CHECK_OUT_WARNING)}
+                                style={{ backgroundColor: '#EF4444', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
+                                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 12 }}>Checkout Warn</Text>
+                            </Pressable>
                         </View>
                     </View>
-                </Animated.View>
-            )}
+                )}
 
-            {/* Status Card - Enhanced with contextual guidance */}
-            {!onLeave && (
-                <Animated.View entering={FadeInDown.delay(400)} style={styles.statusCard}>
-                    {/* No attendance OR attendance with no checkInTime = Not Marked */}
-                    {(!attendance || !attendance.checkInTime) && attendance?.status !== 'ABSENT' ? (
-                        <>
-                            <View style={[styles.statusIcon, { backgroundColor: '#F1F5F9' }]}>
-                                <Clock size={48} color="#94A3B8" />
-                            </View>
-                            <Text style={styles.statusTitle}>Not Marked Yet</Text>
-                            <Text style={styles.statusSubtitle}>
-                                {windows?.checkIn?.isOpen
-                                    ? `Window open until ${new Date(windows.checkIn.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-                                    : getCheckInStatusMessage() || 'Check-in window not available'}
+                {/* Location Error */}
+                {locationError && (
+                    <Animated.View entering={FadeInDown.delay(100)} style={styles.errorCard}>
+                        <AlertCircle size={20} color="#EF4444" />
+                        <Text style={styles.errorCardText}>{locationError}</Text>
+                    </Animated.View>
+                )}
+
+                {/* On Leave Alert */}
+                {onLeave && leaveDetails && (
+                    <Animated.View entering={FadeInDown.delay(200)} style={styles.leaveCard}>
+                        <Umbrella size={28} color="#3B82F6" />
+                        <View style={styles.leaveContent}>
+                            <Text style={styles.leaveTitle}>You're on Leave</Text>
+                            <Text style={styles.leaveSubtitle}>
+                                {leaveDetails.leaveType} Leave • {new Date(leaveDetails.startDate).toLocaleDateString('en-IN')} - {new Date(leaveDetails.endDate).toLocaleDateString('en-IN')}
                             </Text>
-                            {canCheckIn && location && (
-                                <View style={styles.statusHintBox}>
-                                    <CheckCircle size={16} color="#10B981" />
-                                    <Text style={styles.statusHintText}>Ready to check in! Tap the button below.</Text>
+                            <Text style={styles.leaveReason} numberOfLines={2}>{leaveDetails.reason}</Text>
+                        </View>
+                    </Animated.View>
+                )}
+
+                {/* Non-Working Day */}
+                {!isWorkingDay && !onLeave && (
+                    <Animated.View entering={FadeInDown.delay(200)} style={styles.alertCard}>
+                        <AlertCircle size={24} color="#F59E0B" />
+                        <View style={styles.alertContent}>
+                            <Text style={styles.alertTitle}>
+                                {dayType === 'HOLIDAY' ? `Holiday: ${data?.holidayName}` : dayType}
+                            </Text>
+                            <Text style={styles.alertMessage}>No attendance required today</Text>
+                        </View>
+                    </Animated.View>
+                )}
+
+                {/* Live Timer - Enhanced with work progress */}
+                {!onLeave && attendance?.checkInTime && !attendance?.checkOutTime && (
+                    <Animated.View entering={FadeInDown.delay(350)} style={styles.timerCard}>
+                        <Animated.View style={[styles.pulseCircle, animatedPulse]} />
+                        <View style={styles.timerContent}>
+                            <Zap size={28} color="#F59E0B" />
+                            <Text style={styles.timerLabel}>Live Working Time</Text>
+                            <Text style={styles.timerValue}>{liveHours.toFixed(2)} hrs</Text>
+                            <Text style={styles.timerSub}>
+                                Since {new Date(attendance.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </Text>
+                            {/* Work Progress Indicator */}
+                            <View style={styles.progressHint}>
+                                <Text style={styles.progressText}>{getWorkProgressMessage()}</Text>
+                            </View>
+                        </View>
+                    </Animated.View>
+                )}
+
+                {/* Status Card - Enhanced with contextual guidance */}
+                {!onLeave && (
+                    <Animated.View entering={FadeInDown.delay(400)} style={styles.statusCard}>
+                        {/* No attendance OR attendance with no checkInTime = Not Marked */}
+                        {(!attendance || !attendance.checkInTime) && attendance?.status !== 'ABSENT' ? (
+                            <>
+                                <View style={[styles.statusIcon, { backgroundColor: '#F1F5F9' }]}>
+                                    <Clock size={48} color="#94A3B8" />
                                 </View>
-                            )}
-                            {!location && locationError && (
-                                <View style={[styles.statusHintBox, { backgroundColor: '#FEF2F2' }]}>
-                                    <AlertCircle size={16} color="#EF4444" />
-                                    <Text style={[styles.statusHintText, { color: '#991B1B' }]}>Enable location to check in</Text>
+                                <Text style={styles.statusTitle}>Not Marked Yet</Text>
+                                <Text style={styles.statusSubtitle}>
+                                    {windows?.checkIn?.isOpen
+                                        ? `Window open until ${new Date(windows.checkIn.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                                        : getCheckInStatusMessage() || 'Check-in window not available'}
+                                </Text>
+                                {canCheckIn && location && (
+                                    <View style={styles.statusHintBox}>
+                                        <CheckCircle size={16} color="#10B981" />
+                                        <Text style={styles.statusHintText}>Ready to check in! Tap the button below.</Text>
+                                    </View>
+                                )}
+                                {!location && locationError && (
+                                    <View style={[styles.statusHintBox, { backgroundColor: '#FEF2F2' }]}>
+                                        <AlertCircle size={16} color="#EF4444" />
+                                        <Text style={[styles.statusHintText, { color: '#991B1B' }]}>Enable location to check in</Text>
+                                    </View>
+                                )}
+                                {config?.enableGeoFencing && location && !isWithinRadius && schoolLocation && (
+                                    <View style={[styles.statusHintBox, { backgroundColor: '#FEF2F2' }]}>
+                                        <AlertTriangle size={16} color="#DC2626" />
+                                        <Text style={[styles.statusHintText, { color: '#991B1B' }]}>
+                                            You are too far from school ({distanceToSchool ? formatDistance(distanceToSchool) : 'calculating...'}).
+                                            Radius: {config?.allowedRadius || schoolLocation.attendanceRadius || 500}m
+                                        </Text>
+                                    </View>
+                                )}
+                                {!windows?.checkIn?.isOpen && !canCheckIn && (
+                                    <View style={[styles.statusHintBox, { backgroundColor: '#FEF3C7' }]}>
+                                        <AlertTriangle size={16} color="#D97706" />
+                                        <Text style={[styles.statusHintText, { color: '#92400E' }]}>
+                                            Check-in window is closed. Apply for regularization if needed.
+                                        </Text>
+                                    </View>
+                                )}
+                            </>
+                        ) : attendance?.status === 'ABSENT' ? (
+                            <>
+                                <View style={[styles.statusIcon, { backgroundColor: '#FEE2E2' }]}>
+                                    <XCircle size={48} color="#EF4444" />
                                 </View>
-                            )}
-                            {location && !isWithinRadius && schoolLocation && (
-                                <View style={[styles.statusHintBox, { backgroundColor: '#FEF2F2' }]}>
-                                    <AlertTriangle size={16} color="#DC2626" />
-                                    <Text style={[styles.statusHintText, { color: '#991B1B' }]}>
-                                        You are too far from school ({distanceToSchool ? formatDistance(distanceToSchool) : 'calculating...'}).
-                                        Radius: {schoolLocation.attendanceRadius || 500}m
-                                    </Text>
-                                </View>
-                            )}
-                            {!windows?.checkIn?.isOpen && !canCheckIn && (
+                                <Text style={styles.statusTitle}>Marked Absent</Text>
+                                <Text style={styles.statusSubtitle}>
+                                    {attendance.remarks || 'You missed the check-in window today'}
+                                </Text>
                                 <View style={[styles.statusHintBox, { backgroundColor: '#FEF3C7' }]}>
                                     <AlertTriangle size={16} color="#D97706" />
                                     <Text style={[styles.statusHintText, { color: '#92400E' }]}>
-                                        Check-in window is closed. Apply for regularization if needed.
+                                        Think this is a mistake? Apply for regularization below.
                                     </Text>
                                 </View>
-                            )}
-                        </>
-                    ) : attendance?.status === 'ABSENT' ? (
-                        <>
-                            <View style={[styles.statusIcon, { backgroundColor: '#FEE2E2' }]}>
-                                <XCircle size={48} color="#EF4444" />
-                            </View>
-                            <Text style={styles.statusTitle}>Marked Absent</Text>
-                            <Text style={styles.statusSubtitle}>
-                                {attendance.remarks || 'You missed the check-in window today'}
-                            </Text>
-                            <View style={[styles.statusHintBox, { backgroundColor: '#FEF3C7' }]}>
-                                <AlertTriangle size={16} color="#D97706" />
-                                <Text style={[styles.statusHintText, { color: '#92400E' }]}>
-                                    Think this is a mistake? Apply for regularization below.
-                                </Text>
-                            </View>
-                        </>
-                    ) : attendance?.checkOutTime ? (
-                        <>
-                            <View style={[styles.statusIcon, { backgroundColor: '#DCFCE7' }]}>
-                                <CheckCircle size={48} color="#10B981" />
-                            </View>
-                            <Text style={styles.statusTitle}>Day Complete ✨</Text>
-                            <Text style={styles.statusSubtitle}>
-                                {attendance.workingHours?.toFixed(1) || '0'}h worked today
-                            </Text>
-                            <View style={styles.timeRangeRow}>
-                                <Text style={styles.timeRangeText}>
-                                    {new Date(attendance.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                    {' → '}
-                                    {new Date(attendance.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </Text>
-                            </View>
-                        </>
-                    ) : attendance?.checkInTime ? (
-                        <>
-                            <View style={[
-                                styles.statusIcon,
-                                { backgroundColor: attendance.status === 'LATE' ? '#FEF3C7' : '#DCFCE7' }
-                            ]}>
-                                {attendance.status === 'LATE' ? (
-                                    <Clock4 size={48} color="#F59E0B" />
-                                ) : (
+                            </>
+                        ) : attendance?.checkOutTime ? (
+                            <>
+                                <View style={[styles.statusIcon, { backgroundColor: '#DCFCE7' }]}>
                                     <CheckCircle size={48} color="#10B981" />
-                                )}
-                            </View>
-                            <Text style={styles.statusTitle}>
-                                {attendance.status === 'LATE' ? 'Checked In (Late)' : 'Checked In'}
-                            </Text>
-                            <Text style={styles.statusSubtitle}>
-                                at {new Date(attendance.checkInTime).toLocaleTimeString('en-US', {
-                                    hour: '2-digit',
-                                    minute: '2-digit'
-                                })}
-                            </Text>
-                            {attendance.lateByMinutes > 0 && (
-                                <View style={styles.lateBadge}>
-                                    <Text style={styles.lateBadgeText}>
-                                        Late by {attendance.lateByMinutes} min
+                                </View>
+                                <Text style={styles.statusTitle}>Day Complete ✨</Text>
+                                <Text style={styles.statusSubtitle}>
+                                    {attendance.workingHours?.toFixed(1) || '0'}h worked today
+                                </Text>
+                                <View style={styles.timeRangeRow}>
+                                    <Text style={styles.timeRangeText}>
+                                        {new Date(attendance.checkInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        {' → '}
+                                        {new Date(attendance.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                     </Text>
                                 </View>
-                            )}
-                            {/* Check-out hint */}
-                            {!canCheckOut && windows?.checkOut && (
-                                <View style={[styles.statusHintBox, { backgroundColor: '#EEF2FF' }]}>
-                                    <Info size={16} color="#4F46E5" />
-                                    <Text style={[styles.statusHintText, { color: '#3730A3' }]}>
-                                        {getCheckOutStatusMessage()}
-                                    </Text>
+                            </>
+                        ) : attendance?.checkInTime ? (
+                            <>
+                                <View style={[
+                                    styles.statusIcon,
+                                    { backgroundColor: attendance.status === 'LATE' ? '#FEF3C7' : '#DCFCE7' }
+                                ]}>
+                                    {attendance.status === 'LATE' ? (
+                                        <Clock4 size={48} color="#F59E0B" />
+                                    ) : (
+                                        <CheckCircle size={48} color="#10B981" />
+                                    )}
                                 </View>
-                            )}
-                        </>
-                    ) : null}
-                </Animated.View>
-            )}
-
-            {/* Action Buttons - Only show if working day and not on leave */}
-            {isWorkingDay && !onLeave && (
-                <Animated.View entering={FadeInDown.delay(500)} style={styles.actionContainer}>
-                    {canCheckIn && (
-                        <AnimatedPressable
-                            entering={FadeInUp.delay(100)}
-                            style={[styles.actionButton, styles.checkInButton]}
-                            onPress={() => checkInMutation.mutate()}
-                            disabled={checkInMutation.isPending || !location}
-                        >
-                            {checkInMutation.isPending ? (
-                                <ActivityIndicator color="#fff" />
-                            ) : (
-                                <>
-                                    <CheckCircle size={24} color="#fff" />
-                                    <Text style={styles.actionButtonText}>Check In Now</Text>
-                                </>
-                            )}
-                        </AnimatedPressable>
-                    )}
-
-                    {canCheckOut && (
-                        <AnimatedPressable
-                            entering={FadeInUp.delay(200)}
-                            style={[styles.actionButton, styles.checkOutButton]}
-                            onPress={() => checkOutMutation.mutate()}
-                            disabled={checkOutMutation.isPending}
-                        >
-                            {checkOutMutation.isPending ? (
-                                <ActivityIndicator color="#fff" />
-                            ) : (
-                                <>
-                                    <Clock size={24} color="#fff" />
-                                    <Text style={styles.actionButtonText}>Check Out</Text>
-                                </>
-                            )}
-                        </AnimatedPressable>
-                    )}
-                </Animated.View>
-            )}
-
-            {/* Leave & Regularization Buttons */}
-            <Animated.View entering={FadeInDown.delay(550)} style={styles.secondaryActions}>
-                <Pressable
-                    style={styles.secondaryButton}
-                    onPress={() => setShowLeaveModal(true)}
-                >
-                    <FileText size={20} color="#3B82F6" />
-                    <Text style={styles.secondaryButtonText}>Apply Leave</Text>
-                </Pressable>
-                <Pressable
-                    style={styles.secondaryButton}
-                    onPress={() => setShowRegularizationModal(true)}
-                >
-                    <Calendar size={20} color="#F59E0B" />
-                    <Text style={styles.secondaryButtonText}>Regularization</Text>
-                </Pressable>
-            </Animated.View>
-
-            {/* Windows Info - Enhanced with contextual messages */}
-            {isWorkingDay && !onLeave && windows?.checkIn && (
-                <Animated.View entering={FadeInDown.delay(250)} style={styles.windowCard}>
-                    <View style={styles.windowHeader}>
-                        <Timer size={18} color="#0469ff" />
-                        <Text style={styles.windowTitle}>Check-In Window</Text>
-                    </View>
-                    <Text style={styles.windowTime}>
-                        {new Date(windows.checkIn.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        {' - '}
-                        {new Date(windows.checkIn.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </Text>
-                    {windows.checkIn.isOpen ? (
-                        <View style={[styles.windowStatus, { backgroundColor: '#DCFCE7' }]}>
-                            <CheckCircle size={14} color="#10B981" />
-                            <Text style={[styles.windowStatusText, { color: '#10B981' }]}>
-                                {getCheckInStatusMessage()}
-                            </Text>
-                        </View>
-                    ) : (
-                        <View style={[styles.windowStatus, { backgroundColor: '#FEE2E2' }]}>
-                            <XCircle size={14} color="#EF4444" />
-                            <Text style={[styles.windowStatusText, { color: '#EF4444' }]}>
-                                {getCheckInStatusMessage()}
-                            </Text>
-                        </View>
-                    )}
-                </Animated.View>
-            )}
-
-            {isWorkingDay && !onLeave && windows?.checkOut && attendance?.checkInTime && (
-                <Animated.View entering={FadeInDown.delay(300)} style={styles.checkOutCard}>
-                    <View style={styles.windowHeader}>
-                        <LogOut size={18} color="#10B981" />
-                        <Text style={styles.windowTitle}>Check-Out Window</Text>
-                    </View>
-                    <Text style={styles.windowTime}>
-                        {new Date(windows.checkOut.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        {' - '}
-                        {new Date(windows.checkOut.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </Text>
-                    {windows.checkOut.minTime && !windows.checkOut.isOpen && (
-                        <View style={styles.minTimeHint}>
-                            <Info size={14} color="#F59E0B" />
-                            <Text style={styles.minTimeText}>
-                                Minimum {config?.halfDayHours || 4}h required • Available after{' '}
-                                {new Date(windows.checkOut.minTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </Text>
-                        </View>
-                    )}
-                    {windows.checkOut.isOpen ? (
-                        <View style={[styles.windowStatus, { backgroundColor: '#DCFCE7' }]}>
-                            <CheckCircle size={14} color="#10B981" />
-                            <Text style={[styles.windowStatusText, { color: '#10B981' }]}>
-                                {getCheckOutStatusMessage()}
-                            </Text>
-                        </View>
-                    ) : (
-                        <View style={[styles.windowStatus, { backgroundColor: new Date() < new Date(windows.checkOut.start) ? '#FEF3C7' : '#FEE2E2' }]}>
-                            {new Date() < new Date(windows.checkOut.start) ? (
-                                <Clock4 size={14} color="#F59E0B" />
-                            ) : (
-                                <XCircle size={14} color="#EF4444" />
-                            )}
-                            <Text style={[styles.windowStatusText, { color: new Date() < new Date(windows.checkOut.start) ? '#92400E' : '#EF4444' }]}>
-                                {getCheckOutStatusMessage()}
-                            </Text>
-                        </View>
-                    )}
-                </Animated.View>
-            )}
-
-            {/* Stats */}
-            <View style={styles.infoGrid}>
-                <Animated.View entering={FadeInDown.delay(700)} style={styles.infoCard}>
-                    <Clock size={20} color="#0469ff" />
-                    <Text style={styles.infoLabel}>Office Hours</Text>
-                    <Text style={styles.infoValue}>
-                        {config ? `${config.startTime} – ${config.endTime}` : '—'}
-                    </Text>
-                </Animated.View>
-
-                <Animated.View entering={FadeInDown.delay(750)} style={styles.infoCard}>
-                    <TrendingUp size={20} color="#10B981" />
-                    <Text style={styles.infoLabel}>This Month</Text>
-                    <Text style={styles.infoValue}>
-                        {monthlyStats?.attendancePercentage?.toFixed(0)}%
-                    </Text>
-                </Animated.View>
-            </View>
-
-            {/* Leave Requests Section */}
-            {leaveData?.leaves && leaveData.leaves.length > 0 && (
-                <Animated.View entering={FadeInDown.delay(600)} style={styles.requestSection}>
-                    <Text style={styles.sectionTitle}>Leave Requests</Text>
-                    {leaveData.leaves.map((leave) => (
-                        <View key={leave.id} style={styles.requestCard}>
-                            <View style={styles.requestHeader}>
-                                <View style={[styles.statusBadge, { backgroundColor: getStatusBg(leave.status) }]}>
-                                    <Text style={[styles.statusBadgeText, { color: getStatusColor(leave.status) }]}>
-                                        {leave.status}
-                                    </Text>
-                                </View>
-                                <Text style={styles.leaveType}>{leave.leaveType}</Text>
-                            </View>
-                            <View style={styles.requestBody}>
-                                <View style={styles.requestRow}>
-                                    <Calendar size={16} color="#666" />
-                                    <Text style={styles.requestDate}>
-                                        {new Date(leave.startDate).toLocaleDateString('en-IN')} - {new Date(leave.endDate).toLocaleDateString('en-IN')}
-                                    </Text>
-                                    <Text style={styles.requestDays}>({leave.totalDays} days)</Text>
-                                </View>
-                                <Text style={styles.requestReason} numberOfLines={2}>{leave.reason}</Text>
-                                {leave.status === 'REJECTED' && leave.reviewRemarks && (
-                                    <View style={styles.remarksBox}>
-                                        <AlertTriangle size={14} color="#EF4444" />
-                                        <Text style={styles.remarksText}>{leave.reviewRemarks}</Text>
+                                <Text style={styles.statusTitle}>
+                                    {attendance.status === 'LATE' ? 'Checked In (Late)' : 'Checked In'}
+                                </Text>
+                                <Text style={styles.statusSubtitle}>
+                                    at {new Date(attendance.checkInTime).toLocaleTimeString('en-US', {
+                                        hour: '2-digit',
+                                        minute: '2-digit'
+                                    })}
+                                </Text>
+                                {attendance.lateByMinutes > 0 && (
+                                    <View style={styles.lateBadge}>
+                                        <Text style={styles.lateBadgeText}>
+                                            Late by {attendance.lateByMinutes} min
+                                        </Text>
                                     </View>
                                 )}
-                            </View>
-                        </View>
-                    ))}
+                                {/* Check-out hint */}
+                                {!canCheckOut && windows?.checkOut && (
+                                    <View style={[styles.statusHintBox, { backgroundColor: '#EEF2FF' }]}>
+                                        <Info size={16} color="#4F46E5" />
+                                        <Text style={[styles.statusHintText, { color: '#3730A3' }]}>
+                                            {getCheckOutStatusMessage()}
+                                        </Text>
+                                    </View>
+                                )}
+                            </>
+                        ) : null}
+                    </Animated.View>
+                )}
+
+                {/* Action Buttons - Only show if working day and not on leave */}
+                {isWorkingDay && !onLeave && (
+                    <Animated.View entering={FadeInDown.delay(500)} style={styles.actionContainer}>
+                        {canCheckIn && (
+                            <AnimatedPressable
+                                entering={FadeInUp.delay(100)}
+                                style={[styles.actionButton, styles.checkInButton]}
+                                onPress={() => checkInMutation.mutate()}
+                                disabled={checkInMutation.isPending || !location}
+                            >
+                                {checkInMutation.isPending ? (
+                                    <ActivityIndicator color="#fff" />
+                                ) : (
+                                    <>
+                                        <CheckCircle size={24} color="#fff" />
+                                        <Text style={styles.actionButtonText}>Check In Now</Text>
+                                    </>
+                                )}
+                            </AnimatedPressable>
+                        )}
+
+                        {canCheckOut && (
+                            <AnimatedPressable
+                                entering={FadeInUp.delay(200)}
+                                style={[styles.actionButton, styles.checkOutButton]}
+                                onPress={() => checkOutMutation.mutate()}
+                                disabled={checkOutMutation.isPending}
+                            >
+                                {checkOutMutation.isPending ? (
+                                    <ActivityIndicator color="#fff" />
+                                ) : (
+                                    <>
+                                        <Clock size={24} color="#fff" />
+                                        <Text style={styles.actionButtonText}>Check Out</Text>
+                                    </>
+                                )}
+                            </AnimatedPressable>
+                        )}
+                    </Animated.View>
+                )}
+
+                {/* Leave & Regularization Buttons */}
+                <Animated.View entering={FadeInDown.delay(550)} style={styles.secondaryActions}>
+                    <Pressable
+                        style={styles.secondaryButton}
+                        onPress={() => setShowLeaveModal(true)}
+                    >
+                        <FileText size={20} color="#3B82F6" />
+                        <Text style={styles.secondaryButtonText}>Apply Leave</Text>
+                    </Pressable>
+                    <Pressable
+                        style={styles.secondaryButton}
+                        onPress={() => setShowRegularizationModal(true)}
+                    >
+                        <Calendar size={20} color="#F59E0B" />
+                        <Text style={styles.secondaryButtonText}>Regularization</Text>
+                    </Pressable>
                 </Animated.View>
-            )}
 
-            {/* Leave Request Modal */}
-            <Modal
-                visible={showLeaveModal}
-                transparent
-                animationType="slide"
-                onRequestClose={() => setShowLeaveModal(false)}
-            >
-                <KeyboardAvoidingView
-                    style={{ flex: 1 }}
-                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                    keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-                >
-                    <View style={styles.modalOverlay}>
-                        <View style={styles.modalContent}>
-                            <View style={styles.modalHeader}>
-                                <Text style={styles.modalTitle}>Apply for Leave</Text>
-                                <Pressable onPress={() => setShowLeaveModal(false)}>
-                                    <CloseIcon size={24} color="#666" />
-                                </Pressable>
+                {/* Windows Info - Enhanced with contextual messages */}
+                {isWorkingDay && !onLeave && windows?.checkIn && (
+                    <Animated.View entering={FadeInDown.delay(250)} style={styles.windowCard}>
+                        <View style={styles.windowHeader}>
+                            <Timer size={18} color="#0469ff" />
+                            <Text style={styles.windowTitle}>Check-In Window</Text>
+                        </View>
+                        <Text style={styles.windowTime}>
+                            {new Date(windows.checkIn.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {' - '}
+                            {new Date(windows.checkIn.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </Text>
+                        {windows.checkIn.isOpen ? (
+                            <View style={[styles.windowStatus, { backgroundColor: '#DCFCE7' }]}>
+                                <CheckCircle size={14} color="#10B981" />
+                                <Text style={[styles.windowStatusText, { color: '#10B981' }]}>
+                                    {getCheckInStatusMessage()}
+                                </Text>
                             </View>
+                        ) : (
+                            <View style={[styles.windowStatus, { backgroundColor: '#FEE2E2' }]}>
+                                <XCircle size={14} color="#EF4444" />
+                                <Text style={[styles.windowStatusText, { color: '#EF4444' }]}>
+                                    {getCheckInStatusMessage()}
+                                </Text>
+                            </View>
+                        )}
+                    </Animated.View>
+                )}
 
-                            <ScrollView style={styles.modalForm} contentContainerStyle={{
-                                paddingBottom: 30,
-                            }}>
-                                <Text style={styles.inputLabel}>Leave Type</Text>
-                                <View style={styles.pickerContainer}>
-                                    {['CASUAL', 'SICK', 'EARNED', 'EMERGENCY'].map((type) => (
-                                        <Pressable
-                                            key={type}
-                                            style={[
-                                                styles.pickerOption,
-                                                leaveForm.leaveType === type && styles.pickerOptionActive
-                                            ]}
-                                            onPress={() => setLeaveForm({ ...leaveForm, leaveType: type })}
-                                        >
-                                            <Text style={[
-                                                styles.pickerOptionText,
-                                                leaveForm.leaveType === type && styles.pickerOptionTextActive
-                                            ]}>
-                                                {type}
-                                            </Text>
-                                        </Pressable>
-                                    ))}
+                {isWorkingDay && !onLeave && windows?.checkOut && attendance?.checkInTime && (
+                    <Animated.View entering={FadeInDown.delay(300)} style={styles.checkOutCard}>
+                        <View style={styles.windowHeader}>
+                            <LogOut size={18} color="#10B981" />
+                            <Text style={styles.windowTitle}>Check-Out Window</Text>
+                        </View>
+                        <Text style={styles.windowTime}>
+                            {new Date(windows.checkOut.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            {' - '}
+                            {new Date(windows.checkOut.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </Text>
+                        {windows.checkOut.minTime && !windows.checkOut.isOpen && (
+                            <View style={styles.minTimeHint}>
+                                <Info size={14} color="#F59E0B" />
+                                <Text style={styles.minTimeText}>
+                                    Minimum {config?.halfDayHours || 4}h required • Available after{' '}
+                                    {new Date(windows.checkOut.minTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </Text>
+                            </View>
+                        )}
+                        {windows.checkOut.isOpen ? (
+                            <View style={[styles.windowStatus, { backgroundColor: '#DCFCE7' }]}>
+                                <CheckCircle size={14} color="#10B981" />
+                                <Text style={[styles.windowStatusText, { color: '#10B981' }]}>
+                                    {getCheckOutStatusMessage()}
+                                </Text>
+                            </View>
+                        ) : (
+                            <View style={[styles.windowStatus, { backgroundColor: new Date() < new Date(windows.checkOut.start) ? '#FEF3C7' : '#FEE2E2' }]}>
+                                {new Date() < new Date(windows.checkOut.start) ? (
+                                    <Clock4 size={14} color="#F59E0B" />
+                                ) : (
+                                    <XCircle size={14} color="#EF4444" />
+                                )}
+                                <Text style={[styles.windowStatusText, { color: new Date() < new Date(windows.checkOut.start) ? '#92400E' : '#EF4444' }]}>
+                                    {getCheckOutStatusMessage()}
+                                </Text>
+                            </View>
+                        )}
+                    </Animated.View>
+                )}
+
+                {/* Stats */}
+                <View style={styles.infoGrid}>
+                    <Animated.View entering={FadeInDown.delay(700)} style={styles.infoCard}>
+                        <Clock size={20} color="#0469ff" />
+                        <Text style={styles.infoLabel}>Office Hours</Text>
+                        <Text style={styles.infoValue}>
+                            {config ? `${config.startTime} – ${config.endTime}` : '—'}
+                        </Text>
+                    </Animated.View>
+
+                    <Animated.View entering={FadeInDown.delay(750)} style={styles.infoCard}>
+                        <TrendingUp size={20} color="#10B981" />
+                        <Text style={styles.infoLabel}>This Month</Text>
+                        <Text style={styles.infoValue}>
+                            {monthlyStats?.attendancePercentage?.toFixed(0)}%
+                        </Text>
+                    </Animated.View>
+                </View>
+
+                {/* Leave Requests Section */}
+                {leaveData?.leaves && leaveData.leaves.length > 0 && (
+                    <Animated.View entering={FadeInDown.delay(600)} style={styles.requestSection}>
+                        <Text style={styles.sectionTitle}>Leave Requests</Text>
+                        {leaveData.leaves.map((leave) => (
+                            <View key={leave.id} style={styles.requestCard}>
+                                <View style={styles.requestHeader}>
+                                    <View style={[styles.statusBadge, { backgroundColor: getStatusBg(leave.status) }]}>
+                                        <Text style={[styles.statusBadgeText, { color: getStatusColor(leave.status) }]}>
+                                            {leave.status}
+                                        </Text>
+                                    </View>
+                                    <Text style={styles.leaveType}>{leave.leaveType}</Text>
+                                </View>
+                                <View style={styles.requestBody}>
+                                    <View style={styles.requestRow}>
+                                        <Calendar size={16} color="#666" />
+                                        <Text style={styles.requestDate}>
+                                            {new Date(leave.startDate).toLocaleDateString('en-IN')} - {new Date(leave.endDate).toLocaleDateString('en-IN')}
+                                        </Text>
+                                        <Text style={styles.requestDays}>({leave.totalDays} days)</Text>
+                                    </View>
+                                    <Text style={styles.requestReason} numberOfLines={2}>{leave.reason}</Text>
+                                    {leave.status === 'REJECTED' && leave.reviewRemarks && (
+                                        <View style={styles.remarksBox}>
+                                            <AlertTriangle size={14} color="#EF4444" />
+                                            <Text style={styles.remarksText}>{leave.reviewRemarks}</Text>
+                                        </View>
+                                    )}
+                                </View>
+                            </View>
+                        ))}
+                    </Animated.View>
+                )}
+
+                {/* Leave Request Modal */}
+                <Modal
+                    visible={showLeaveModal}
+                    transparent
+                    animationType="slide"
+                    onRequestClose={() => setShowLeaveModal(false)}
+                >
+                    <KeyboardAvoidingView
+                        style={{ flex: 1 }}
+                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+                    >
+                        <View style={styles.modalOverlay}>
+                            <View style={styles.modalContent}>
+                                <View style={styles.modalHeader}>
+                                    <Text style={styles.modalTitle}>Apply for Leave</Text>
+                                    <Pressable onPress={() => setShowLeaveModal(false)}>
+                                        <CloseIcon size={24} color="#666" />
+                                    </Pressable>
                                 </View>
 
-                                <Text style={styles.inputLabel}>Start Date *</Text>
-                                <Pressable
-                                    style={[styles.dateInput, errors.startDate && styles.inputError]}
-                                    onPress={() => setShowStartDatePicker(true)}
-                                >
-                                    <Calendar size={18} color="#666" />
-                                    <Text style={styles.dateText}>{formatDate(leaveForm.startDate)}</Text>
-                                    <ChevronRight size={18} color="#666" />
-                                </Pressable>
-                                {errors.startDate && <Text style={styles.errorText}>{errors.startDate}</Text>}
+                                <ScrollView style={styles.modalForm} contentContainerStyle={{
+                                    paddingBottom: 30,
+                                }}>
+                                    <Text style={styles.inputLabel}>Leave Type</Text>
+                                    <View style={styles.pickerContainer}>
+                                        {['CASUAL', 'SICK', 'EARNED', 'EMERGENCY'].map((type) => (
+                                            <Pressable
+                                                key={type}
+                                                style={[
+                                                    styles.pickerOption,
+                                                    leaveForm.leaveType === type && styles.pickerOptionActive
+                                                ]}
+                                                onPress={() => setLeaveForm({ ...leaveForm, leaveType: type })}
+                                            >
+                                                <Text style={[
+                                                    styles.pickerOptionText,
+                                                    leaveForm.leaveType === type && styles.pickerOptionTextActive
+                                                ]}>
+                                                    {type}
+                                                </Text>
+                                            </Pressable>
+                                        ))}
+                                    </View>
 
-                                {showStartDatePicker && (
-                                    <DateTimePicker
-                                        value={leaveForm.startDate ? new Date(leaveForm.startDate) : new Date()}
-                                        mode="date"
-                                        display="default"
-                                        onChange={(event, selectedDate) => {
-                                            setShowStartDatePicker(false);
-                                            if (selectedDate) {
-                                                setLeaveForm({ ...leaveForm, startDate: selectedDate.toISOString().split('T')[0] });
-                                            }
-                                        }}
-                                    />
-                                )}
+                                    <Text style={styles.inputLabel}>Start Date *</Text>
+                                    <Pressable
+                                        style={[styles.dateInput, errors.startDate && styles.inputError]}
+                                        onPress={() => setShowStartDatePicker(true)}
+                                    >
+                                        <Calendar size={18} color="#666" />
+                                        <Text style={styles.dateText}>{formatDate(leaveForm.startDate)}</Text>
+                                        <ChevronRight size={18} color="#666" />
+                                    </Pressable>
+                                    {errors.startDate && <Text style={styles.errorText}>{errors.startDate}</Text>}
 
-                                <Text style={styles.inputLabel}>End Date *</Text>
-                                <Pressable
-                                    style={[styles.dateInput, errors.endDate && styles.inputError]}
-                                    onPress={() => setShowEndDatePicker(true)}
-                                >
-                                    <Calendar size={18} color="#666" />
-                                    <Text style={styles.dateText}>{formatDate(leaveForm.endDate)}</Text>
-                                    <ChevronRight size={18} color="#666" />
-                                </Pressable>
-                                {errors.endDate && <Text style={styles.errorText}>{errors.endDate}</Text>}
-
-                                {showEndDatePicker && (
-                                    <DateTimePicker
-                                        value={leaveForm.endDate ? new Date(leaveForm.endDate) : new Date()}
-                                        mode="date"
-                                        display="default"
-                                        minimumDate={leaveForm.startDate ? new Date(leaveForm.startDate) : new Date()}
-                                        onChange={(event, selectedDate) => {
-                                            setShowEndDatePicker(false);
-                                            if (selectedDate) {
-                                                setLeaveForm({ ...leaveForm, endDate: selectedDate.toISOString().split('T')[0] });
-                                            }
-                                        }}
-                                    />
-                                )}
-
-                                <Text style={styles.inputLabel}>Reason *</Text>
-                                <TextInput
-                                    style={[styles.input, styles.textArea, errors.reason && styles.inputError]}
-                                    placeholder="Enter reason for leave (min 10 characters)"
-                                    value={leaveForm.reason}
-                                    onChangeText={(text) => setLeaveForm({ ...leaveForm, reason: text })}
-                                    multiline
-                                    numberOfLines={4}
-                                />
-                                {errors.reason && <Text style={styles.errorText}>{errors.reason}</Text>}
-
-                                <Text style={styles.inputLabel}>Emergency Contact (Optional)</Text>
-                                <TextInput
-                                    style={styles.input}
-                                    placeholder="Contact name"
-                                    value={leaveForm.emergencyContact}
-                                    onChangeText={(text) => setLeaveForm({ ...leaveForm, emergencyContact: text })}
-                                />
-
-                                <Text style={styles.inputLabel}>Emergency Phone (Optional)</Text>
-                                <TextInput
-                                    style={styles.input}
-                                    placeholder="Contact number"
-                                    value={leaveForm.emergencyContactPhone}
-                                    onChangeText={(text) => setLeaveForm({ ...leaveForm, emergencyContactPhone: text })}
-                                    keyboardType="phone-pad"
-                                />
-                            </ScrollView>
-
-                            <View style={styles.modalActions}>
-                                <Pressable
-                                    style={[styles.modalButton, styles.modalButtonSecondary]}
-                                    onPress={() => {
-                                        setShowLeaveModal(false);
-                                        setErrors({});
-                                    }}
-                                >
-                                    <Text style={styles.modalButtonTextSecondary}>Cancel</Text>
-                                </Pressable>
-                                <Pressable
-                                    style={[styles.modalButton, styles.modalButtonPrimary]}
-                                    onPress={handleLeaveSubmit}
-                                    disabled={leaveRequestMutation.isPending}
-                                >
-                                    {leaveRequestMutation.isPending ? (
-                                        <ActivityIndicator color="#fff" />
-                                    ) : (
-                                        <>
-                                            <Send size={18} color="#fff" />
-                                            <Text style={styles.modalButtonTextPrimary}>Submit</Text>
-                                        </>
+                                    {showStartDatePicker && (
+                                        <DateTimePicker
+                                            value={leaveForm.startDate ? new Date(leaveForm.startDate) : new Date()}
+                                            mode="date"
+                                            display="default"
+                                            onChange={(event, selectedDate) => {
+                                                setShowStartDatePicker(false);
+                                                if (selectedDate) {
+                                                    setLeaveForm({ ...leaveForm, startDate: selectedDate.toISOString().split('T')[0] });
+                                                }
+                                            }}
+                                        />
                                     )}
-                                </Pressable>
+
+                                    <Text style={styles.inputLabel}>End Date *</Text>
+                                    <Pressable
+                                        style={[styles.dateInput, errors.endDate && styles.inputError]}
+                                        onPress={() => setShowEndDatePicker(true)}
+                                    >
+                                        <Calendar size={18} color="#666" />
+                                        <Text style={styles.dateText}>{formatDate(leaveForm.endDate)}</Text>
+                                        <ChevronRight size={18} color="#666" />
+                                    </Pressable>
+                                    {errors.endDate && <Text style={styles.errorText}>{errors.endDate}</Text>}
+
+                                    {showEndDatePicker && (
+                                        <DateTimePicker
+                                            value={leaveForm.endDate ? new Date(leaveForm.endDate) : new Date()}
+                                            mode="date"
+                                            display="default"
+                                            minimumDate={leaveForm.startDate ? new Date(leaveForm.startDate) : new Date()}
+                                            onChange={(event, selectedDate) => {
+                                                setShowEndDatePicker(false);
+                                                if (selectedDate) {
+                                                    setLeaveForm({ ...leaveForm, endDate: selectedDate.toISOString().split('T')[0] });
+                                                }
+                                            }}
+                                        />
+                                    )}
+
+                                    <Text style={styles.inputLabel}>Reason *</Text>
+                                    <TextInput
+                                        style={[styles.input, styles.textArea, errors.reason && styles.inputError]}
+                                        placeholder="Enter reason for leave (min 10 characters)"
+                                        value={leaveForm.reason}
+                                        onChangeText={(text) => setLeaveForm({ ...leaveForm, reason: text })}
+                                        multiline
+                                        numberOfLines={4}
+                                    />
+                                    {errors.reason && <Text style={styles.errorText}>{errors.reason}</Text>}
+
+                                    <Text style={styles.inputLabel}>Emergency Contact (Optional)</Text>
+                                    <TextInput
+                                        style={styles.input}
+                                        placeholder="Contact name"
+                                        value={leaveForm.emergencyContact}
+                                        onChangeText={(text) => setLeaveForm({ ...leaveForm, emergencyContact: text })}
+                                    />
+
+                                    <Text style={styles.inputLabel}>Emergency Phone (Optional)</Text>
+                                    <TextInput
+                                        style={styles.input}
+                                        placeholder="Contact number"
+                                        value={leaveForm.emergencyContactPhone}
+                                        onChangeText={(text) => setLeaveForm({ ...leaveForm, emergencyContactPhone: text })}
+                                        keyboardType="phone-pad"
+                                    />
+                                </ScrollView>
+
+                                <View style={styles.modalActions}>
+                                    <Pressable
+                                        style={[styles.modalButton, styles.modalButtonSecondary]}
+                                        onPress={() => {
+                                            setShowLeaveModal(false);
+                                            setErrors({});
+                                        }}
+                                    >
+                                        <Text style={styles.modalButtonTextSecondary}>Cancel</Text>
+                                    </Pressable>
+                                    <Pressable
+                                        style={[styles.modalButton, styles.modalButtonPrimary]}
+                                        onPress={handleLeaveSubmit}
+                                        disabled={leaveRequestMutation.isPending}
+                                    >
+                                        {leaveRequestMutation.isPending ? (
+                                            <ActivityIndicator color="#fff" />
+                                        ) : (
+                                            <>
+                                                <Send size={18} color="#fff" />
+                                                <Text style={styles.modalButtonTextPrimary}>Submit</Text>
+                                            </>
+                                        )}
+                                    </Pressable>
+                                </View>
                             </View>
                         </View>
-                    </View>
-                </KeyboardAvoidingView>
-            </Modal>
+                    </KeyboardAvoidingView>
+                </Modal>
 
-            {/* Regularization Request Modal - with KeyboardAvoidingView and IST timezone fix */}
-            <Modal
-                visible={showRegularizationModal}
-                transparent
-                animationType="slide"
-                onRequestClose={() => setShowRegularizationModal(false)}
-            >
-                <KeyboardAvoidingView
-                    style={{ flex: 1 }}
-                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                    keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+                {/* Regularization Request Modal - with KeyboardAvoidingView and IST timezone fix */}
+                <Modal
+                    visible={showRegularizationModal}
+                    transparent
+                    animationType="slide"
+                    onRequestClose={() => setShowRegularizationModal(false)}
                 >
-                    <View style={styles.modalOverlay}>
-                        <View style={styles.modalContent}>
-                            <View style={styles.modalHeader}>
-                                <Text style={styles.modalTitle}>Request Regularization</Text>
-                                <Pressable onPress={() => setShowRegularizationModal(false)}>
-                                    <CloseIcon size={24} color="#666" />
-                                </Pressable>
-                            </View>
-
-                            <ScrollView style={styles.modalForm} contentContainerStyle={{ paddingBottom: 30 }}>
-                                <View style={styles.infoBox}>
-                                    <Info size={18} color="#1E40AF" />
-                                    <Text style={styles.infoBoxText}>
-                                        Submit a regularization request for days when you couldn't check in/out properly. Only past dates can be regularized.
-                                    </Text>
+                    <KeyboardAvoidingView
+                        style={{ flex: 1 }}
+                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+                    >
+                        <View style={styles.modalOverlay}>
+                            <View style={styles.modalContent}>
+                                <View style={styles.modalHeader}>
+                                    <Text style={styles.modalTitle}>Request Regularization</Text>
+                                    <Pressable onPress={() => setShowRegularizationModal(false)}>
+                                        <CloseIcon size={24} color="#666" />
+                                    </Pressable>
                                 </View>
 
-                                <Text style={styles.inputLabel}>Date to Regularize *</Text>
-                                <Pressable
-                                    style={[styles.dateInput, errors.date && styles.inputError]}
-                                    onPress={() => setShowRegDatePicker(true)}
-                                >
-                                    <Calendar size={18} color="#666" />
-                                    <Text style={styles.dateText}>
-                                        {regularizationForm.date ? new Date(regularizationForm.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Select date'}
-                                    </Text>
-                                    <ChevronRight size={18} color="#666" />
-                                </Pressable>
-                                {errors.date && <Text style={styles.errorText}>{errors.date}</Text>}
+                                <ScrollView style={styles.modalForm} contentContainerStyle={{ paddingBottom: 30 }}>
+                                    <View style={styles.infoBox}>
+                                        <Info size={18} color="#1E40AF" />
+                                        <Text style={styles.infoBoxText}>
+                                            Submit a regularization request for days when you couldn't check in/out properly. Only past dates can be regularized.
+                                        </Text>
+                                    </View>
 
-                                {showRegDatePicker && (
-                                    <DateTimePicker
-                                        value={regularizationForm.date ? new Date(regularizationForm.date) : new Date()}
-                                        mode="date"
-                                        display="default"
-                                        maximumDate={new Date(Date.now() - 24 * 60 * 60 * 1000)}
-                                        onChange={(event, selectedDate) => {
-                                            setShowRegDatePicker(false);
-                                            if (selectedDate) {
-                                                // Fix timezone: Use IST offset to ensure correct date
-                                                const istOffset = 5.5 * 60 * 60 * 1000; // IST is UTC+5:30
-                                                const localDate = new Date(selectedDate.getTime() + istOffset);
-                                                const dateStr = localDate.toISOString().split('T')[0];
-                                                setRegularizationForm({ ...regularizationForm, date: dateStr });
-                                            }
-                                        }}
-                                    />
-                                )}
+                                    <Text style={styles.inputLabel}>Date to Regularize *</Text>
+                                    <Pressable
+                                        style={[styles.dateInput, errors.date && styles.inputError]}
+                                        onPress={() => setShowRegDatePicker(true)}
+                                    >
+                                        <Calendar size={18} color="#666" />
+                                        <Text style={styles.dateText}>
+                                            {regularizationForm.date ? new Date(regularizationForm.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Select date'}
+                                        </Text>
+                                        <ChevronRight size={18} color="#666" />
+                                    </Pressable>
+                                    {errors.date && <Text style={styles.errorText}>{errors.date}</Text>}
 
-                                <Text style={styles.inputLabel}>Requested Status *</Text>
-                                <View style={styles.pickerContainer}>
-                                    {['PRESENT', 'HALF_DAY', 'ON_LEAVE'].map((status) => (
-                                        <Pressable
-                                            key={status}
-                                            style={[
-                                                styles.pickerOption,
-                                                regularizationForm.requestedStatus === status && styles.pickerOptionActive
-                                            ]}
-                                            onPress={() => setRegularizationForm({ ...regularizationForm, requestedStatus: status })}
-                                        >
-                                            <Text style={[
-                                                styles.pickerOptionText,
-                                                regularizationForm.requestedStatus === status && styles.pickerOptionTextActive
-                                            ]}>
-                                                {status.replace('_', ' ')}
-                                            </Text>
-                                        </Pressable>
-                                    ))}
-                                </View>
-
-                                <Text style={styles.inputLabel}>Reason *</Text>
-                                <TextInput
-                                    style={[styles.input, styles.textArea, errors.reason && styles.inputError]}
-                                    placeholder="Explain why regularization is needed (min 15 characters)"
-                                    value={regularizationForm.reason}
-                                    onChangeText={(text) => setRegularizationForm({ ...regularizationForm, reason: text })}
-                                    multiline
-                                    numberOfLines={4}
-                                />
-                                {errors.reason && <Text style={styles.errorText}>{errors.reason}</Text>}
-                            </ScrollView>
-
-                            <View style={styles.modalActions}>
-                                <Pressable
-                                    style={[styles.modalButton, styles.modalButtonSecondary]}
-                                    onPress={() => {
-                                        setShowRegularizationModal(false);
-                                        setErrors({});
-                                    }}
-                                >
-                                    <Text style={styles.modalButtonTextSecondary}>Cancel</Text>
-                                </Pressable>
-                                <Pressable
-                                    style={[styles.modalButton, styles.modalButtonPrimary]}
-                                    onPress={handleRegularizationSubmit}
-                                    disabled={regularizationMutation.isPending}
-                                >
-                                    {regularizationMutation.isPending ? (
-                                        <ActivityIndicator color="#fff" />
-                                    ) : (
-                                        <>
-                                            <Send size={18} color="#fff" />
-                                            <Text style={styles.modalButtonTextPrimary}>Submit</Text>
-                                        </>
+                                    {showRegDatePicker && (
+                                        <DateTimePicker
+                                            value={regularizationForm.date ? new Date(regularizationForm.date) : new Date()}
+                                            mode="date"
+                                            display="default"
+                                            maximumDate={new Date(Date.now() - 24 * 60 * 60 * 1000)}
+                                            onChange={(event, selectedDate) => {
+                                                setShowRegDatePicker(false);
+                                                if (selectedDate) {
+                                                    // Fix timezone: Use IST offset to ensure correct date
+                                                    const istOffset = 5.5 * 60 * 60 * 1000; // IST is UTC+5:30
+                                                    const localDate = new Date(selectedDate.getTime() + istOffset);
+                                                    const dateStr = localDate.toISOString().split('T')[0];
+                                                    setRegularizationForm({ ...regularizationForm, date: dateStr });
+                                                }
+                                            }}
+                                        />
                                     )}
-                                </Pressable>
+
+                                    <Text style={styles.inputLabel}>Requested Status *</Text>
+                                    <View style={styles.pickerContainer}>
+                                        {['PRESENT', 'HALF_DAY', 'ON_LEAVE'].map((status) => (
+                                            <Pressable
+                                                key={status}
+                                                style={[
+                                                    styles.pickerOption,
+                                                    regularizationForm.requestedStatus === status && styles.pickerOptionActive
+                                                ]}
+                                                onPress={() => setRegularizationForm({ ...regularizationForm, requestedStatus: status })}
+                                            >
+                                                <Text style={[
+                                                    styles.pickerOptionText,
+                                                    regularizationForm.requestedStatus === status && styles.pickerOptionTextActive
+                                                ]}>
+                                                    {status.replace('_', ' ')}
+                                                </Text>
+                                            </Pressable>
+                                        ))}
+                                    </View>
+
+                                    <Text style={styles.inputLabel}>Reason *</Text>
+                                    <TextInput
+                                        style={[styles.input, styles.textArea, errors.reason && styles.inputError]}
+                                        placeholder="Explain why regularization is needed (min 15 characters)"
+                                        value={regularizationForm.reason}
+                                        onChangeText={(text) => setRegularizationForm({ ...regularizationForm, reason: text })}
+                                        multiline
+                                        numberOfLines={4}
+                                    />
+                                    {errors.reason && <Text style={styles.errorText}>{errors.reason}</Text>}
+                                </ScrollView>
+
+                                <View style={styles.modalActions}>
+                                    <Pressable
+                                        style={[styles.modalButton, styles.modalButtonSecondary]}
+                                        onPress={() => {
+                                            setShowRegularizationModal(false);
+                                            setErrors({});
+                                        }}
+                                    >
+                                        <Text style={styles.modalButtonTextSecondary}>Cancel</Text>
+                                    </Pressable>
+                                    <Pressable
+                                        style={[styles.modalButton, styles.modalButtonPrimary]}
+                                        onPress={handleRegularizationSubmit}
+                                        disabled={regularizationMutation.isPending}
+                                    >
+                                        {regularizationMutation.isPending ? (
+                                            <ActivityIndicator color="#fff" />
+                                        ) : (
+                                            <>
+                                                <Send size={18} color="#fff" />
+                                                <Text style={styles.modalButtonTextPrimary}>Submit</Text>
+                                            </>
+                                        )}
+                                    </Pressable>
+                                </View>
                             </View>
                         </View>
-                    </View>
-                </KeyboardAvoidingView>
-            </Modal>
+                    </KeyboardAvoidingView>
+                </Modal>
 
-            <View style={{ height: 40 }} />
-        </ScrollView>
+                <View style={{ height: 40 }} />
+            </ScrollView>
+        </View>
     );
 }
 
@@ -1402,13 +1450,36 @@ const styles = StyleSheet.create({
     loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
     loaderText: { fontSize: 16, color: '#666', marginTop: 8 },
     errorText: { fontSize: 12, color: '#EF4444', marginTop: 4 },
-
-    header: { paddingHorizontal: 20, paddingTop: 60, paddingBottom: 20, backgroundColor: '#fff' },
-    headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-    headerTitle: { fontSize: 28, fontWeight: '700', color: '#111', marginBottom: 4 },
-    headerDate: { fontSize: 15, color: '#666' },
-    locationBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#DCFCE7', borderRadius: 12 },
-    locationText: { fontSize: 12, fontWeight: '600', color: '#10B981' },
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingTop: 50,
+        paddingBottom: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#f0f0f0',
+        backgroundColor: '#fff',
+    },
+    backButton: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: '#f5f5f5',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    headerTitle: { fontSize: 18, fontWeight: '700', color: '#111' },
+    dateHeader: {
+        paddingHorizontal: 20,
+        paddingVertical: 12,
+        backgroundColor: '#fff',
+        borderBottomWidth: 1,
+        borderBottomColor: '#f0f0f0',
+    },
+    headerDate: { fontSize: 14, color: '#666' },
+    locationBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: '#DCFCE7', borderRadius: 12 },
+    locationText: { fontSize: 11, fontWeight: '600', color: '#10B981' },
     locationBadgeError: { backgroundColor: '#FEE2E2' },
     locationTextError: { color: '#EF4444' },
 

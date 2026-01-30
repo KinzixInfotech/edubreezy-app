@@ -847,42 +847,25 @@ export default function HomeScreen() {
 
     // === STUDENT VIEW ===
     const StudentView = ({ refreshing, onRefresh, banner, paddingTop, refreshOffset, navigateOnce }) => {
-        // Fetch notices for student
-        const { data: recentNotices } = useQuery({
-            queryKey: ['student-notices', schoolId, userId],
-            queryFn: async () => {
-                if (!schoolId || !userId) return { notices: [] };
-                const res = await api.get(`/notices/${schoolId}?userId=${userId}&limit=4&page=1`);
-                return res.data;
-            },
-            enabled: !!schoolId && !!userId,
-            ...CACHE_CONFIG.MODERATE,
-        });
-
-        // Fetch student stats (attendance + exams + homework)
-        const { data: studentStats } = useQuery({
-            queryKey: ['student-home-stats', schoolId, userId],
+        // Consolidated dashboard API - single call for all student data
+        const { data: dashboardData, isLoading: isDashboardLoading } = useQuery({
+            queryKey: ['student-dashboard', schoolId, userId],
             queryFn: async () => {
                 if (!schoolId || !userId) return null;
-                const now = new Date();
-                const month = now.getMonth() + 1;
-                const year = now.getFullYear();
-
-                const [attendanceRes, examsRes, homeworkRes] = await Promise.all([
-                    api.get(`/schools/${schoolId}/attendance/stats?userId=${userId}&month=${month}&year=${year}`).catch(() => ({ data: null })),
-                    api.get(`/schools/${schoolId}/examination/student-results?studentId=${userId}`).catch(() => ({ data: null })),
-                    api.get(`/homework/user/${userId}`).catch(() => ({ data: [] }))
-                ]);
-
-                return {
-                    attendance: attendanceRes.data,
-                    exams: examsRes.data,
-                    homework: homeworkRes.data
-                };
+                const res = await api.get(`/mobile/dashboard/student?schoolId=${schoolId}&userId=${userId}`);
+                return res.data?.data || res.data;
             },
             enabled: !!schoolId && !!userId,
             ...CACHE_CONFIG.MODERATE,
         });
+
+        // Extract data from consolidated response
+        const recentNotices = { notices: dashboardData?.notices || [] };
+        const studentStats = {
+            attendance: dashboardData?.attendance || {},
+            exams: dashboardData?.exams || {},
+            homework: dashboardData?.homework || []
+        };
 
         // Helper function to get grade label
         const getGradeLabel = (percentage) => {
@@ -997,9 +980,7 @@ export default function HomeScreen() {
         const nextEvent = upcomingEvents?.[1] || null;
 
         // Wait for critical stats to load before rendering
-        const isStatsLoading = !studentStats;
-
-        if (isStatsLoading) {
+        if (isDashboardLoading) {
             return (
                 <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
                     <ActivityIndicator size="large" color="#0469ff" />
@@ -1408,98 +1389,74 @@ export default function HomeScreen() {
         );
 
         const queryClient = useQueryClient();
+
+        // Consolidated dashboard API - fetches base parent data (notices, events) in one call
+        // Child-specific stats are fetched separately when a child is selected
         const {
-            data: recentNotices,
+            data: dashboardData,
             isFetching,
             isLoading,
             refetch,
         } = useQuery({
-            queryKey: ['notices', schoolId, userId],
+            queryKey: ['parent-dashboard', schoolId, parentId, selectedChild?.studentId],
             queryFn: async () => {
-                if (!schoolId || !userId) return { notices: [], pagination: {} };
-
-                const cat = 'All';
-                const unread = '';
-
-                const res = await api.get(
-                    `/notices/${schoolId}?userId=${userId}&${cat}&${unread}&limit=4&page=1`
-                );
-                return res.data; // { notices: [], pagination: { totalPages, currentPage } }
+                if (!schoolId || !parentId) return null;
+                let url = `/mobile/dashboard/parent?schoolId=${schoolId}&parentId=${parentId}&userId=${userId}`;
+                if (selectedChild?.studentId) {
+                    url += `&childId=${selectedChild.studentId}`;
+                }
+                const res = await api.get(url);
+                return res.data?.data || res.data;
             },
-            enabled: !!schoolId && !!userId,
+            enabled: !!schoolId && !!parentId,
             keepPreviousData: true,
             ...CACHE_CONFIG.MODERATE,
         });
-        // console.log(recentNotices);
-        const notices = recentNotices?.notices?.map((n) => ({
+
+        // Extract notices from dashboard response
+        const notices = (dashboardData?.notices || []).map((n) => ({
             id: n.id,
             title: n.title,
-            time: new Date(n.createdAt).toLocaleString(), // or format like "2 hours ago"
-            unread: !n.read,
-        })) || [];
+            time: new Date(n.time || n.createdAt).toLocaleString(),
+            unread: n.unread ?? !n.read,
+        }));
 
+        // Extract child stats from dashboard response (when child is selected)
+        const childStats = dashboardData?.childStats;
+        const isChildStatsFetching = isFetching && !!selectedChild?.studentId;
 
-        // Batch child stats queries for faster loading
-        const { data: childStats, isFetching: isChildStatsFetching } = useQuery({
-            queryKey: ['parent-child-stats', schoolId, selectedChild?.studentId],
+        // Fetch last viewed timestamps for badge calculation
+        const { data: badgeTimestamps } = useQuery({
+            queryKey: ['parent-badge-timestamps', selectedChild?.studentId],
             queryFn: async () => {
-                if (!schoolId || !selectedChild?.studentId) return null;
-                const now = new Date();
-                const month = now.getMonth() + 1;
-                const year = now.getFullYear();
-
-                const [attendanceRes, homeworkRes, examRes] = await Promise.all([
-                    api.get(`/schools/${schoolId}/attendance/stats?userId=${selectedChild.studentId}&month=${month}&year=${year}`).catch(() => ({ data: null })),
-                    api.get(`/schools/homework?schoolId=${schoolId}&studentId=${selectedChild.studentId}`).catch(() => ({ data: { homework: [] } })),
-                    api.get(`/schools/${schoolId}/examination/student-results?studentId=${selectedChild.studentId}`).catch(() => ({ data: { stats: {}, results: [] } })),
-                ]);
-
-                // Get last viewed timestamps
-                const homeworkLastViewedKey = `homework_last_viewed_${selectedChild.studentId}`;
-                const examLastViewedKey = `exam_last_viewed_${selectedChild.studentId}`;
-
+                if (!selectedChild?.studentId) return { homework: null, exams: null };
                 const [homeworkLastViewed, examLastViewed] = await Promise.all([
-                    SecureStore.getItemAsync(homeworkLastViewedKey),
-                    SecureStore.getItemAsync(examLastViewedKey),
+                    SecureStore.getItemAsync(`homework_last_viewed_${selectedChild.studentId}`),
+                    SecureStore.getItemAsync(`exam_last_viewed_${selectedChild.studentId}`),
                 ]);
-
-                return {
-                    attendance: attendanceRes.data,
-                    homework: { ...homeworkRes.data, lastViewed: homeworkLastViewed },
-                    exams: { ...examRes.data, lastViewed: examLastViewed },
-                };
+                return { homework: homeworkLastViewed, exams: examLastViewed };
             },
-            enabled: !!schoolId && !!selectedChild?.studentId,
-            ...CACHE_CONFIG.MODERATE,
+            enabled: !!selectedChild?.studentId,
+            staleTime: 0,
         });
 
-        // Extract stats from batched query
+        // Extract stats from dashboard response
         const attendanceStats = childStats?.attendance;
-        const homeworkData = childStats?.homework;
-        const examBadgeData = childStats?.exams;
+        const homeworkData = {
+            homework: childStats?.homework?.homework || [],
+            lastViewed: badgeTimestamps?.homework
+        };
+        const examBadgeData = {
+            results: childStats?.exams?.results || [],
+            stats: childStats?.exams?.stats || {},
+            lastViewed: badgeTimestamps?.exams
+        };
 
-        // Fetch fee status for selected child (for dashboard card)
-        const { data: academicYearData } = useQuery({
-            queryKey: ['academic-years-parent', schoolId],
-            queryFn: async () => {
-                const res = await api.get(`/schools/academic-years?schoolId=${schoolId}`);
-                return res.data?.find(y => y.isActive);
-            },
-            enabled: !!schoolId,
-            staleTime: 1000 * 60 * 10,
-        });
+        // Academic year from dashboard response
+        const academicYearData = dashboardData?.academicYear;
 
-        const { data: feeData } = useQuery({
-            queryKey: ['parent-child-fee', selectedChild?.studentId, academicYearData?.id],
-            queryFn: async () => {
-                if (!selectedChild?.studentId || !academicYearData?.id) return null;
-                const params = new URLSearchParams({ academicYearId: academicYearData.id });
-                const res = await api.get(`/schools/fee/students/${selectedChild.studentId}?${params}`);
-                return res.data;
-            },
-            enabled: !!selectedChild?.studentId && !!academicYearData?.id,
-            staleTime: 1000 * 60 * 5,
-        });
+        // Fee data from dashboard response (childStats includes fees when child is selected)
+        const feeData = childStats?.fees;
 
         // Helper for abbreviated currency formatting (K, L, Cr) - clean whole numbers
         const formatAbbr = (amount) => {
@@ -1521,17 +1478,8 @@ export default function HomeScreen() {
 
         const feeStatusDisplay = `₹${formatAbbr(paidFee)}`;
 
-        // Fetch upcoming events for parent
-        const { data: upcomingEvents } = useQuery({
-            queryKey: ['parent-upcoming-events', schoolId],
-            queryFn: async () => {
-                if (!schoolId) return [];
-                const res = await api.get(`/schools/${schoolId}/calendar/upcoming?limit=3`);
-                return res.data?.events || res.data || [];
-            },
-            enabled: !!schoolId,
-            ...CACHE_CONFIG.STATIC,
-        });
+        // Events from dashboard response
+        const upcomingEvents = dashboardData?.events || [];
 
         // Get recent unread notice only (don't show if already read)
         const recentNotice = notices?.find(n => n.unread) || null;
@@ -1750,15 +1698,10 @@ export default function HomeScreen() {
                 ],
             },
         ];
-        const { data, isPending } = useQuery({
-            queryKey: QUERY_KEYS.parentChildren(schoolId, parentId),
-            queryFn: async () => {
-                const res = await api.get(`/schools/${schoolId}/parents/${parentId}/child`);
-                return res.data;
-            },
-            enabled: Boolean(schoolId && parentId),
-            ...CACHE_CONFIG.MODERATE,
-        });
+
+        // Use children from consolidated dashboard response
+        const data = dashboardData ? { children: dashboardData.children || [] } : null;
+        const isPending = isLoading;
 
         const uiChildren = useMemo(() =>
             data?.children?.map((child) => ({
@@ -4398,61 +4341,58 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
         }
     };
 
-    // --- BATCHED QUERY FOR TEACHER DASHBOARD ---
+    // --- CONSOLIDATED DASHBOARD API FOR TEACHER ---
     const { data: dashboardData, isLoading: isDashboardLoading, refetch: refetchDashboard } = useQuery({
-        queryKey: ['teacher-dashboard-combined', schoolId, userId],
+        queryKey: ['teacher-dashboard', schoolId, userId],
         queryFn: async () => {
             if (!schoolId || !userId) return null;
-
-            const now = new Date();
-            const month = now.getMonth() + 1;
-            const year = now.getFullYear();
-
-            const [delegationRes, noticesRes, attendanceRes, leavesRes] = await Promise.all([
-                api.get(`/schools/${schoolId}/attendance/delegations/check?teacherId=${userId}`),
-                api.get(`/notices/${schoolId}?userId=${userId}&limit=4&page=1`),
-                api.get(`/schools/${schoolId}/attendance/stats?userId=${userId}&month=${month}&year=${year}`),
-                api.get(`/schools/${schoolId}/attendance/leaves/balance?userId=${userId}`)
-            ]);
-
-            return {
-                delegations: delegationRes.data,
-                notices: noticesRes.data,
-                attendance: attendanceRes.data,
-                leaves: leavesRes.data
-            };
+            const res = await api.get(`/mobile/dashboard/teacher?schoolId=${schoolId}&userId=${userId}`);
+            return res.data?.data || res.data;
         },
         enabled: !!schoolId && !!userId,
         ...CACHE_CONFIG.MODERATE,
     });
 
-    // Extract data
-    const delegationCheck = dashboardData?.delegations;
-    // Get events and notices from dashboard data
-    // const upcomingEvents = dashboardData?.events || [];
-    const recentNotices = dashboardData?.notices || [];
+    // Extract data from consolidated response
+    const rawDelegations = dashboardData?.delegations;
+    const recentNotices = { notices: dashboardData?.notices || [] };
     const attendanceStats = dashboardData?.attendance;
     const leaveData = dashboardData?.leaves;
 
+    // Map notices using correct API field names: time (Date), unread (boolean)
     const notices = recentNotices?.notices?.map((n) => ({
         id: n.id,
         title: n.title,
-        time: new Date(n.createdAt).toLocaleString(),
-        unread: !n.read,
+        time: n.time ? new Date(n.time).toLocaleString() : 'Unknown',
+        unread: n.unread === true, // API returns unread boolean directly
     })) || [];
 
     const recentNotice = notices?.find(n => n.unread) || null;
     const nextEvent = upcomingEvents?.[0] || null;
 
-    // Calculate stats
-    const totalDaysWorked = attendanceStats?.monthlyStats?.presentDays || 0;
+    // Calculate stats - API returns breakdown: { casual: {used}, sick: {used}, earned: {used} }
+    const totalDaysWorked = attendanceStats?.monthlyStats?.totalPresent || attendanceStats?.monthlyStats?.presentDays || 0;
     const attendancePercent = attendanceStats?.monthlyStats?.attendancePercentage || 0;
-    const totalLeavesTaken = leaveData?.totalUsed || 0;
+    const totalLeavesTaken = (leaveData?.casual?.used || 0) + (leaveData?.sick?.used || 0) + (leaveData?.earned?.used || 0);
+
+    // Track delegation processing to prevent infinite loops
+    const delegationProcessedRef = useRef(false);
+    const lastDelegationCountRef = useRef(0);
 
     // Handle delegation modal logic
     useEffect(() => {
-        if (delegationCheck?.hasDelegations && delegationCheck.delegations.length > 0) {
-            const unacknowledgedDelegations = delegationCheck.delegations.filter(
+        const delegationCount = rawDelegations?.length || 0;
+
+        // Only process if count changed or not yet processed
+        if (delegationCount === lastDelegationCountRef.current && delegationProcessedRef.current) {
+            return;
+        }
+
+        lastDelegationCountRef.current = delegationCount;
+        delegationProcessedRef.current = true;
+
+        if (rawDelegations && rawDelegations.length > 0) {
+            const unacknowledgedDelegations = rawDelegations.filter(
                 delegation => !delegation.acknowledgedAt
             );
 
@@ -4460,14 +4400,10 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                 setActiveDelegations(unacknowledgedDelegations);
                 setShowDelegationModal(true);
             } else {
-                setActiveDelegations(delegationCheck.delegations);
-                setShowDelegationModal(false);
+                setActiveDelegations(rawDelegations);
             }
-        } else {
-            setActiveDelegations([]);
-            setShowDelegationModal(false);
         }
-    }, [delegationCheck]);
+    }, [rawDelegations?.length]); // Only depend on length
 
     const handleSelectDelegation = async (delegation) => {
         await saveDelegationAsShown(delegation.id, delegation.version);

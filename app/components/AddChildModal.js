@@ -28,6 +28,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { X, User, Calendar, Phone, Check, Plus, AlertCircle } from 'lucide-react-native';
 import api from '../../lib/api';
+import { BlurView } from 'expo-blur';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -161,6 +162,7 @@ const AddChildModal = ({ visible = false, onClose, parentId, schoolId, onSuccess
             >
                 <Animated.View entering={FadeIn.duration(200)} exiting={FadeOut.duration(200)} style={styles.overlay}>
                     <TouchableOpacity style={styles.overlayTouchable} activeOpacity={1} onPress={handleClose} />
+                    <BlurView intensity={20} style={StyleSheet.absoluteFill} tint="dark" />
 
                     <Animated.View
                         entering={SlideInDown.duration(400).easing(Easing.out(Easing.cubic))}

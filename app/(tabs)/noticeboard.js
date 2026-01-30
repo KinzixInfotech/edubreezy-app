@@ -23,6 +23,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNotification } from '../../contexts/NotificationContext';
 import { useMarkNoticeRead } from '../../hooks/useMarkNoticeRead';
 import { StatusBar } from 'expo-status-bar';
+import { BlurView } from 'expo-blur';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -378,6 +379,7 @@ const NoticeBoardScreen = () => {
       >
         {innerVisible && (
           <View style={styles.modalOverlay}>
+            <BlurView intensity={20} style={StyleSheet.absoluteFill} tint="dark" />
             <Animated.View
               style={StyleSheet.absoluteFill}
               entering={FadeIn.duration(200)}

@@ -141,6 +141,7 @@ export default function SelfAttendance() {
     };
 
     const userId = user?.id;
+    console.warn(user);
     const schoolId = user?.schoolId;
     const isTeacher = user?.role?.name === 'TEACHING_STAFF';
 
@@ -1429,7 +1430,7 @@ export default function SelfAttendance() {
                                         ) : (
                                             <>
                                                 <Send size={18} color="#fff" />
-                                                <Text style={styles.modalButtonTextPrimary}>Submit</Text>
+                                                ]                              <Text style={styles.modalButtonTextPrimary}>Submit</Text>
                                             </>
                                         )}
                                     </Pressable>

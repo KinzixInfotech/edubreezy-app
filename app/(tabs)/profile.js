@@ -681,22 +681,18 @@ export default function ProfileScreen() {
 
   if (loading || !storedUserId) {
     return (
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
-        <View style={styles.loaderContainer}>
-          <ActivityIndicator size="large" color="#0469ff" />
-          <Text style={{ marginTop: 12, color: '#666', fontSize: 14 }}>Loading profile...</Text>
-        </View>
-      </SafeAreaView>
+      <View style={styles.loaderContainer}>
+        <ActivityIndicator size="large" color="#0469ff" />
+        <Text style={{ marginTop: 12, color: '#666', fontSize: 14 }}>Loading profile...</Text>
+      </View>
     );
   }
 
   if (!user || !role) {
     return (
-      <SafeAreaView style={styles.safeArea} edges={['top']}>
-        <View style={styles.loaderContainer}>
-          <ActivityIndicator size="large" color="#0469ff" />
-        </View>
-      </SafeAreaView>
+      <View style={styles.loaderContainer}>
+        <ActivityIndicator size="large" color="#0469ff" />
+      </View>
     );
   }
 
@@ -1258,6 +1254,8 @@ const styles = StyleSheet.create({
   },
   loaderContainer: {
     flex: 1,
+    height: '100%',
+    width: '100%',
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#fff',

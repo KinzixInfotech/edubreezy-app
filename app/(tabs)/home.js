@@ -4353,8 +4353,8 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
         ...CACHE_CONFIG.MODERATE,
     });
 
-    // Extract data from consolidated response
-    const rawDelegations = dashboardData?.delegations;
+    // Extract data from consolidated response - memoize to prevent infinite renders
+    const delegations = dashboardData?.delegations || [];
     const recentNotices = { notices: dashboardData?.notices || [] };
     const attendanceStats = dashboardData?.attendance;
     const leaveData = dashboardData?.leaves;
@@ -4375,24 +4375,10 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
     const attendancePercent = attendanceStats?.monthlyStats?.attendancePercentage || 0;
     const totalLeavesTaken = (leaveData?.casual?.used || 0) + (leaveData?.sick?.used || 0) + (leaveData?.earned?.used || 0);
 
-    // Track delegation processing to prevent infinite loops
-    const delegationProcessedRef = useRef(false);
-    const lastDelegationCountRef = useRef(0);
-
-    // Handle delegation modal logic
+    // Handle delegation modal logic - use delegations array directly
     useEffect(() => {
-        const delegationCount = rawDelegations?.length || 0;
-
-        // Only process if count changed or not yet processed
-        if (delegationCount === lastDelegationCountRef.current && delegationProcessedRef.current) {
-            return;
-        }
-
-        lastDelegationCountRef.current = delegationCount;
-        delegationProcessedRef.current = true;
-
-        if (rawDelegations && rawDelegations.length > 0) {
-            const unacknowledgedDelegations = rawDelegations.filter(
+        if (delegations && delegations.length > 0) {
+            const unacknowledgedDelegations = delegations.filter(
                 delegation => !delegation.acknowledgedAt
             );
 
@@ -4400,10 +4386,14 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                 setActiveDelegations(unacknowledgedDelegations);
                 setShowDelegationModal(true);
             } else {
-                setActiveDelegations(rawDelegations);
+                setActiveDelegations(delegations);
+                setShowDelegationModal(false);
             }
+        } else {
+            setActiveDelegations([]);
+            setShowDelegationModal(false);
         }
-    }, [rawDelegations?.length]); // Only depend on length
+    }, [delegations.length]); // Only re-run when delegations count changes
 
     const handleSelectDelegation = async (delegation) => {
         await saveDelegationAsShown(delegation.id, delegation.version);

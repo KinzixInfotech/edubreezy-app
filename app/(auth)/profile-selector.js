@@ -35,96 +35,24 @@ const ROLE_COLORS = {
     CONDUCTOR: '#06B6D4',
 };
 
+import { useQueryClient } from '@tanstack/react-query';
+
+// ... (existing imports)
+
 export default function ProfileSelectorScreen() {
     const router = useRouter();
     const params = useLocalSearchParams();
+    const queryClient = useQueryClient();
 
-    // Initialize with params, will update with saved data if needed
-    const [schoolCode, setSchoolCode] = useState(params.schoolCode || null);
-    const [schoolData, setSchoolData] = useState(params.schoolData ? JSON.parse(params.schoolData) : null);
-    const [profiles, setProfiles] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [selectingProfile, setSelectingProfile] = useState(null);
-
-    // Keep token synced with Supabase session
-    useEffect(() => {
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-            console.log('🔑 Auth state changed:', event);
-            if (session?.access_token) {
-                SecureStore.setItemAsync('token', session.access_token);
-                console.log('✅ Token updated in SecureStore');
-            }
-        });
-
-        return () => {
-            subscription?.unsubscribe();
-        };
-    }, []);
-
-    useEffect(() => {
-        initializeScreen();
-    }, []);
-
-    // Initialize screen - load school data if not provided via params
-    const initializeScreen = async () => {
-        try {
-            let code = schoolCode;
-            let data = schoolData;
-
-            // If no school code in params, try to get from saved data
-            if (!code) {
-                const savedSchool = await getCurrentSchool();
-                if (savedSchool?.schoolCode) {
-                    code = savedSchool.schoolCode;
-                    data = savedSchool.schoolData;
-                    setSchoolCode(code);
-                    setSchoolData(data);
-                    console.log('📚 Loaded school from saved data:', code);
-                } else {
-                    // No school data found, redirect to schoolcode screen
-                    console.log('❌ No school data found, redirecting to schoolcode');
-                    router.replace('/(auth)/schoolcode');
-                    return;
-                }
-            }
-
-            // Now load profiles for this school
-            await loadProfilesForCode(code, data);
-        } catch (error) {
-            console.error('Error initializing screen:', error);
-            setLoading(false);
-        }
-    };
-
-    const loadProfilesForCode = async (code, schoolDataParam) => {
-        try {
-            const savedProfiles = await getProfilesForSchool(code);
-
-            // If no profiles exist, redirect to login directly
-            if (savedProfiles.length === 0) {
-                console.log('📭 No profiles found, redirecting to login');
-                router.replace({
-                    pathname: '/(auth)/login',
-                    params: {
-                        schoolConfig: JSON.stringify(schoolDataParam || schoolData),
-                    },
-                });
-                return;
-            }
-
-            // Sort by last used (most recent first)
-            savedProfiles.sort((a, b) => new Date(b.lastUsed) - new Date(a.lastUsed));
-            setProfiles(savedProfiles);
-        } catch (error) {
-            console.error('Error loading profiles:', error);
-        } finally {
-            setLoading(false);
-        }
-    };
+    // ... (rest of the component)
 
     const handleProfileSelect = async (profile) => {
         try {
             setSelectingProfile(profile.id);
+
+            // Clear any existing query cache to avoid data leaks between profiles
+            queryClient.clear();
+            console.log('🧹 Query cache cleared');
 
             // Debug: Check if profile has stored refresh token
             const hasRefreshToken = !!profile?.sessionTokens?.refresh_token;

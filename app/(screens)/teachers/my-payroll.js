@@ -70,17 +70,27 @@ export default function TeacherPayroll() {
     const [refreshing, setRefreshing] = useState(false);
     const [activeTab, setActiveTab] = useState('overview'); // overview, employment, salary, bank, tax, loans, payslips
 
-    const { data: userData } = useQuery({
-        queryKey: ['user-data'],
-        queryFn: async () => {
-            const stored = await SecureStore.getItemAsync('user');
-            return stored ? JSON.parse(stored) : null;
-        },
-        staleTime: Infinity,
-    });
+    // Read user data directly from SecureStore (not cached via React Query)
+    // This prevents data leaks when switching between profiles
+    const [userData, setUserData] = useState(null);
+
+    React.useEffect(() => {
+        const loadUser = async () => {
+            try {
+                const stored = await SecureStore.getItemAsync('user');
+                if (stored) {
+                    setUserData(JSON.parse(stored));
+                }
+            } catch (error) {
+                console.error('Failed to load user data:', error);
+            }
+        };
+        loadUser();
+    }, []);
 
     const schoolId = userData?.schoolId;
     const teacherId = userData?.id;
+    console.log('TeacherPayroll userData:', userData);
 
     // Fetch payroll data
     const { data: payrollData, isLoading, error } = useQuery({
@@ -127,6 +137,7 @@ export default function TeacherPayroll() {
     if (error || !payrollData) {
         return (
             <View style={styles.container}>
+                <StatusBar style="dark" />
                 <View style={styles.header}>
                     <HapticTouchable onPress={() => router.back()}>
                         <View style={styles.backButton}>
@@ -163,8 +174,9 @@ export default function TeacherPayroll() {
 
     return (
         <View style={styles.container}>
-            <StatusBar style="dark" />
             {/* Header */}
+            <StatusBar style="dark" />
+
             <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>
                     <View style={styles.backButton}>

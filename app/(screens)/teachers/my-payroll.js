@@ -356,17 +356,8 @@ export default function TeacherPayroll() {
                     </View>
                 )}
 
-                {/* Scrollable Tabs with Edge Fades */}
+                {/* Scrollable Tabs */}
                 <View style={styles.tabWrapper}>
-                    {/* Left Fade */}
-                    <LinearGradient
-                        colors={['#0469ff', 'transparent']}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                        style={styles.tabFadeLeft}
-                        pointerEvents="none"
-                    />
-
                     <ScrollView
                         horizontal
                         showsHorizontalScrollIndicator={false}
@@ -386,15 +377,6 @@ export default function TeacherPayroll() {
                             </HapticTouchable>
                         ))}
                     </ScrollView>
-
-                    {/* Right Fade */}
-                    <LinearGradient
-                        colors={['transparent', '#0355d4']}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                        style={styles.tabFadeRight}
-                        pointerEvents="none"
-                    />
                 </View>
             </LinearGradient>
 

@@ -37,14 +37,86 @@ const ROLE_COLORS = {
 
 import { useQueryClient } from '@tanstack/react-query';
 
-// ... (existing imports)
-
 export default function ProfileSelectorScreen() {
     const router = useRouter();
     const params = useLocalSearchParams();
     const queryClient = useQueryClient();
 
-    // ... (rest of the component)
+    // Initialize with params, will update with saved data if needed
+    const [schoolCode, setSchoolCode] = useState(params.schoolCode || null);
+    const [schoolData, setSchoolData] = useState(params.schoolData ? JSON.parse(params.schoolData) : null);
+    const [profiles, setProfiles] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [selectingProfile, setSelectingProfile] = useState(null);
+
+    // Keep token synced with Supabase session
+    useEffect(() => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+            console.log('🔑 Auth state changed:', event);
+            if (session?.access_token) {
+                SecureStore.setItemAsync('token', session.access_token);
+                console.log('✅ Token updated in SecureStore');
+            }
+        });
+
+        return () => {
+            subscription?.unsubscribe();
+        };
+    }, []);
+
+    useEffect(() => {
+        initializeScreen();
+    }, []);
+
+    // Initialize screen - load school data if not provided via params
+    const initializeScreen = async () => {
+        try {
+            let code = schoolCode;
+            let data = schoolData;
+
+            // If no school code in params, try to get from saved data
+            if (!code) {
+                const savedSchool = await getCurrentSchool();
+                if (savedSchool?.schoolCode) {
+                    code = savedSchool.schoolCode;
+                    data = savedSchool.schoolData;
+                    setSchoolCode(code);
+                    setSchoolData(data);
+                } else {
+                    // No saved school, go to school code entry
+                    router.replace('/(auth)/schoolcode');
+                    return;
+                }
+            }
+
+            // Load profiles
+            await loadProfilesForCode(code);
+        } catch (error) {
+            console.error('Error initializing profile selector:', error);
+            router.replace('/(auth)/schoolcode');
+        }
+    };
+
+    const loadProfilesForCode = async (code) => {
+        try {
+            setLoading(true);
+            const savedProfiles = await getProfilesForSchool(code);
+            setProfiles(savedProfiles || []);
+
+            // If no profiles saved, go to login
+            if (!savedProfiles || savedProfiles.length === 0) {
+                router.replace({
+                    pathname: '/(auth)/login',
+                    params: { schoolConfig: JSON.stringify(schoolData) },
+                });
+            }
+        } catch (error) {
+            console.error('Error loading profiles:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
 
     const handleProfileSelect = async (profile) => {
         try {

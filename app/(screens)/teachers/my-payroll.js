@@ -10,8 +10,14 @@ import {
     ActivityIndicator,
     TouchableOpacity,
     Dimensions,
+    Linking,
+    Alert,
+    Modal,
+    TextInput,
+    KeyboardAvoidingView,
+    Platform,
 } from 'react-native';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
@@ -33,10 +39,13 @@ import {
     User,
     Landmark,
     FileBadge,
-    Briefcase
+    Briefcase,
+    Download,
+    Edit3,
+    X
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
-import api from '../../../lib/api';
+import api, { API_BASE_URL } from '../../../lib/api';
 import HapticTouchable from '../../components/HapticTouch';
 import { StatusBar } from 'expo-status-bar';
 import { Image } from 'expo-image';
@@ -116,6 +125,95 @@ export default function TeacherPayroll() {
         staleTime: 1000 * 60 * 5,
     });
 
+    // Self-service update state
+    const [showUpdateModal, setShowUpdateModal] = useState(false);
+    const [updateType, setUpdateType] = useState('bank'); // 'bank' or 'tax'
+    const [formData, setFormData] = useState({
+        bankName: '',
+        accountNumber: '',
+        ifscCode: '',
+        accountHolder: '',
+        upiId: '',
+        panNumber: '',
+        aadharNumber: '',
+        uanNumber: '',
+        esiNumber: '',
+    });
+
+    // Mutation for submitting self-service updates
+    const updateProfileMutation = useMutation({
+        mutationFn: async (data) => {
+            const res = await api.patch(
+                `/schools/${schoolId}/teachers/${teacherId}/payroll/profile/self-service`,
+                data
+            );
+            return res.data;
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries(['teacher-payroll']);
+            setShowUpdateModal(false);
+            Alert.alert(
+                '✅ Update Submitted',
+                'Your details have been submitted for admin approval. You will be notified once approved.',
+                [{ text: 'OK' }]
+            );
+        },
+        onError: (error) => {
+            Alert.alert('Error', error.response?.data?.error || 'Failed to submit update');
+        },
+    });
+
+    const openUpdateModal = (type) => {
+        const profile = payrollData?.profile || {};
+        setUpdateType(type);
+        if (type === 'bank') {
+            setFormData({
+                ...formData,
+                bankName: profile.bankName || '',
+                accountNumber: profile.accountNumber || '',
+                ifscCode: profile.ifscCode || '',
+                accountHolder: profile.accountHolder || profile.name || '',
+                upiId: profile.upiId || '',
+            });
+        } else {
+            setFormData({
+                ...formData,
+                panNumber: profile.panNumber || '',
+                aadharNumber: profile.aadharNumber || '',
+                uanNumber: profile.uanNumber || '',
+                esiNumber: profile.esiNumber || '',
+            });
+        }
+        setShowUpdateModal(true);
+    };
+
+    const handleSubmitUpdate = () => {
+        if (updateType === 'bank') {
+            if (!formData.accountNumber || !formData.ifscCode) {
+                Alert.alert('Error', 'Account Number and IFSC Code are required');
+                return;
+            }
+            updateProfileMutation.mutate({
+                bankDetails: {
+                    bankName: formData.bankName,
+                    accountNumber: formData.accountNumber,
+                    ifscCode: formData.ifscCode,
+                    accountHolder: formData.accountHolder,
+                    upiId: formData.upiId,
+                },
+            });
+        } else {
+            updateProfileMutation.mutate({
+                idDetails: {
+                    panNumber: formData.panNumber,
+                    aadharNumber: formData.aadharNumber,
+                    uanNumber: formData.uanNumber,
+                    esiNumber: formData.esiNumber,
+                },
+            });
+        }
+    };
+
     const onRefresh = React.useCallback(async () => {
         setRefreshing(true);
         await Promise.all([
@@ -124,6 +222,25 @@ export default function TeacherPayroll() {
         ]);
         setRefreshing(false);
     }, [queryClient]);
+
+    // Download payslip PDF
+    const handleDownloadPayslip = async (payslipId, monthName, year) => {
+        try {
+            // Construct the PDF download URL
+            const pdfUrl = `${API_BASE_URL}/schools/${schoolId}/teachers/${teacherId}/payroll/payslips/${payslipId}/pdf`;
+
+            // Open URL in browser - this will trigger the PDF download
+            const supported = await Linking.canOpenURL(pdfUrl);
+            if (supported) {
+                await Linking.openURL(pdfUrl);
+            } else {
+                Alert.alert('Error', 'Unable to open PDF download link');
+            }
+        } catch (error) {
+            console.error('Download error:', error);
+            Alert.alert('Error', 'Failed to download payslip. Please try again.');
+        }
+    };
 
     if (isLoading) {
         return (
@@ -174,39 +291,112 @@ export default function TeacherPayroll() {
 
     return (
         <View style={styles.container}>
-            {/* Header */}
-            <StatusBar style="dark" />
+            <StatusBar style={showUpdateModal ? "dark" : "light"} />
 
-            <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
-                <HapticTouchable onPress={() => router.back()}>
-                    <View style={styles.backButton}>
-                        <ArrowLeft size={24} color="#111" />
+            {/* Gradient Header */}
+            <LinearGradient
+                colors={['#0469ff', '#0355d4']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.header}
+            >
+                {/* Background Patterns */}
+                <Text style={{ position: 'absolute', top: 20, right: 60, fontSize: 28, color: 'rgba(255,255,255,0.08)', fontWeight: 'bold' }}>₹</Text>
+                <Text style={{ position: 'absolute', top: 70, right: 25, fontSize: 18, color: 'rgba(255,255,255,0.06)', fontWeight: 'bold' }}>✦</Text>
+                <Text style={{ position: 'absolute', bottom: 60, right: 100, fontSize: 22, color: 'rgba(255,255,255,0.06)', fontWeight: 'bold' }}>★</Text>
+                <View style={{ position: 'absolute', top: -40, right: -40, width: 160, height: 160, borderRadius: 80, backgroundColor: 'rgba(255,255,255,0.04)' }} />
+                <View style={{ position: 'absolute', bottom: -50, left: -30, width: 140, height: 140, borderRadius: 70, backgroundColor: 'rgba(255,255,255,0.04)' }} />
+
+                <View style={styles.headerRow}>
+                    <HapticTouchable onPress={() => router.back()}>
+                        <View style={styles.backButton}>
+                            <ArrowLeft size={24} color="#fff" />
+                        </View>
+                    </HapticTouchable>
+                    <View style={styles.headerCenter}>
+                        <Text style={styles.headerTitle}>My Payroll</Text>
+                        <Text style={styles.headerSubtitle}>{profile?.name || 'Loading...'}</Text>
                     </View>
-                </HapticTouchable>
-                <Text style={styles.headerTitle}>My Payroll</Text>
-                <View style={{ width: 40 }} />
-            </Animated.View>
+                    <View style={{ width: 40 }} />
+                </View>
 
-            {/* Scrollable Tabs */}
-            <View style={styles.tabWrapper}>
-                <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={styles.tabContainer}
-                >
-                    {tabs.map((tab) => (
-                        <TouchableOpacity
-                            key={tab.id}
-                            style={[styles.tab, activeTab === tab.id && styles.tabActive]}
-                            onPress={() => setActiveTab(tab.id)}
-                        >
-                            <Text style={[styles.tabText, activeTab === tab.id && styles.tabTextActive]}>
-                                {tab.label}
-                            </Text>
-                        </TouchableOpacity>
-                    ))}
-                </ScrollView>
-            </View>
+                {/* Salary Summary in Header */}
+                {latestPayslip && (
+                    <View style={styles.salaryCard}>
+                        <View style={styles.salaryRow}>
+                            <View style={styles.salaryMain}>
+                                <Text style={styles.salaryLabel}>Net Salary</Text>
+                                <Text style={styles.salaryValue}>{formatCurrency(latestPayslip.netSalary)}</Text>
+                            </View>
+                            <View style={styles.salaryPeriod}>
+                                <Text style={styles.periodBadgeText}>
+                                    {getMonthName(latestPayslip.month)} {latestPayslip.year}
+                                </Text>
+                            </View>
+                        </View>
+                        <View style={styles.salaryStats}>
+                            <View style={styles.salaryStatItem}>
+                                <Plus size={14} color="#51CF66" />
+                                <Text style={styles.salaryStatValue}>{formatCurrency(latestPayslip.grossEarnings)}</Text>
+                                <Text style={styles.salaryStatLabel}>Gross</Text>
+                            </View>
+                            <View style={styles.salaryStatDivider} />
+                            <View style={styles.salaryStatItem}>
+                                <Minus size={14} color="#FF6B6B" />
+                                <Text style={styles.salaryStatValue}>{formatCurrency(latestPayslip.totalDeductions)}</Text>
+                                <Text style={styles.salaryStatLabel}>Deductions</Text>
+                            </View>
+                            <View style={styles.salaryStatDivider} />
+                            <View style={styles.salaryStatItem}>
+                                <Calendar size={14} color="#fff" />
+                                <Text style={styles.salaryStatValue}>{latestPayslip.daysWorked}</Text>
+                                <Text style={styles.salaryStatLabel}>Days</Text>
+                            </View>
+                        </View>
+                    </View>
+                )}
+
+                {/* Scrollable Tabs with Edge Fades */}
+                <View style={styles.tabWrapper}>
+                    {/* Left Fade */}
+                    <LinearGradient
+                        colors={['#0469ff', 'transparent']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                        style={styles.tabFadeLeft}
+                        pointerEvents="none"
+                    />
+
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.tabContainer}
+                        style={styles.tabScroll}
+                    >
+                        {tabs.map((tab) => (
+                            <HapticTouchable
+                                key={tab.id}
+                                onPress={() => setActiveTab(tab.id)}
+                            >
+                                <View style={[styles.tab, activeTab === tab.id && styles.tabActive]}>
+                                    <Text style={[styles.tabText, activeTab === tab.id && styles.tabTextActive]}>
+                                        {tab.label}
+                                    </Text>
+                                </View>
+                            </HapticTouchable>
+                        ))}
+                    </ScrollView>
+
+                    {/* Right Fade */}
+                    <LinearGradient
+                        colors={['transparent', '#0355d4']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                        style={styles.tabFadeRight}
+                        pointerEvents="none"
+                    />
+                </View>
+            </LinearGradient>
 
             <ScrollView
                 style={styles.content}
@@ -256,91 +446,126 @@ export default function TeacherPayroll() {
                             </View>
                         </Animated.View>
 
-                        {/* Salary Summary Card */}
-                        {latestPayslip && (
-                            <Animated.View entering={FadeInDown.delay(200).duration(500)}>
-                                <LinearGradient
-                                    colors={['#0469ff', '#0355d4']}
-                                    style={styles.mainCard}
-                                >
-                                    <View style={styles.mainCardHeader}>
-                                        <View>
-                                            <Text style={styles.mainCardLabel}>Net Salary</Text>
-                                            <Text style={styles.mainCardValue}>
-                                                {formatCurrency(latestPayslip.netSalary)}
-                                            </Text>
-                                        </View>
-                                        <View style={styles.periodBadge}>
-                                            <Text style={styles.periodText}>
-                                                {getMonthName(latestPayslip.month)} {latestPayslip.year}
-                                            </Text>
-                                        </View>
-                                    </View>
-                                    <View style={styles.mainCardStats}>
-                                        <View style={styles.statItem}>
-                                            <Plus size={16} color="#51CF66" />
-                                            <Text style={styles.statLabel}>Gross</Text>
-                                            <Text style={styles.statValue}>
-                                                {formatCurrency(latestPayslip.grossEarnings)}
-                                            </Text>
-                                        </View>
-                                        <View style={styles.statDivider} />
-                                        <View style={styles.statItem}>
-                                            <Minus size={16} color="#FF6B6B" />
-                                            <Text style={styles.statLabel}>Deductions</Text>
-                                            <Text style={styles.statValue}>
-                                                {formatCurrency(latestPayslip.totalDeductions)}
-                                            </Text>
-                                        </View>
-                                        <View style={styles.statDivider} />
-                                        <View style={styles.statItem}>
-                                            <Calendar size={16} color="#fff" />
-                                            <Text style={styles.statLabel}>Days</Text>
-                                            <Text style={styles.statValue}>
-                                                {latestPayslip.daysWorked}
-                                            </Text>
-                                        </View>
-                                    </View>
-                                </LinearGradient>
-                            </Animated.View>
-                        )}
-
                         {/* YTD Summary */}
-                        <Animated.View entering={FadeInDown.delay(300).duration(500)}>
+                        <Animated.View entering={FadeInDown.delay(200).duration(500)}>
                             <Text style={styles.sectionTitle}>Year-to-Date ({ytd.year})</Text>
                             <View style={styles.ytdGrid}>
-                                <View style={styles.ytdCard}>
-                                    <TrendingUp size={20} color="#51CF66" />
+                                <View style={[styles.ytdCard, { borderColor: '#dcfce7' }]}>
+                                    <View style={[styles.ytdIconBg, { backgroundColor: '#dcfce7' }]}>
+                                        <TrendingUp size={18} color="#22c55e" />
+                                    </View>
                                     <Text style={styles.ytdValue}>{formatCurrency(ytd.grossEarnings)}</Text>
                                     <Text style={styles.ytdLabel}>Total Earned</Text>
                                 </View>
-                                <View style={styles.ytdCard}>
-                                    <Wallet size={20} color="#0469ff" />
+                                <View style={[styles.ytdCard, { borderColor: '#dbeafe' }]}>
+                                    <View style={[styles.ytdIconBg, { backgroundColor: '#dbeafe' }]}>
+                                        <Wallet size={18} color="#3b82f6" />
+                                    </View>
                                     <Text style={styles.ytdValue}>{formatCurrency(ytd.netSalary)}</Text>
                                     <Text style={styles.ytdLabel}>Net Received</Text>
                                 </View>
-                                <View style={styles.ytdCard}>
-                                    <Building2 size={20} color="#FFB020" />
+                                <View style={[styles.ytdCard, { borderColor: '#fef3c7' }]}>
+                                    <View style={[styles.ytdIconBg, { backgroundColor: '#fef3c7' }]}>
+                                        <Building2 size={18} color="#f59e0b" />
+                                    </View>
                                     <Text style={styles.ytdValue}>{formatCurrency(ytd.pfContribution)}</Text>
                                     <Text style={styles.ytdLabel}>PF Contribution</Text>
                                 </View>
-                                <View style={styles.ytdCard}>
-                                    <CreditCard size={20} color="#FF6B6B" />
+                                <View style={[styles.ytdCard, { borderColor: '#fee2e2' }]}>
+                                    <View style={[styles.ytdIconBg, { backgroundColor: '#fee2e2' }]}>
+                                        <CreditCard size={18} color="#ef4444" />
+                                    </View>
                                     <Text style={styles.ytdValue}>{formatCurrency(ytd.tds)}</Text>
                                     <Text style={styles.ytdLabel}>Tax Deducted</Text>
                                 </View>
                             </View>
                         </Animated.View>
 
+                        {/* Quick Actions - Birthday Card Style */}
+                        <Animated.View entering={FadeInDown.delay(300).duration(500)}>
+                            <Text style={styles.sectionTitle}>Quick Access</Text>
+
+                            {/* Payslips Card */}
+                            <HapticTouchable onPress={() => setActiveTab('payslips')}>
+                                <View style={[styles.birthdayCard, { backgroundColor: '#eff6ff' }]}>
+                                    <View style={[styles.birthdayIconBg, { backgroundColor: '#3b82f6' }]}>
+                                        <FileText size={24} color="#fff" />
+                                    </View>
+                                    <View style={styles.birthdayContent}>
+                                        <Text style={styles.birthdayTitle}>View Payslips</Text>
+                                        <Text style={styles.birthdayDesc}>Download & view your monthly salary slips</Text>
+                                    </View>
+                                    <ChevronRight size={22} color="#3b82f6" />
+                                </View>
+                            </HapticTouchable>
+
+                            {/* Salary Structure Card */}
+                            <HapticTouchable onPress={() => setActiveTab('structure')}>
+                                <View style={[styles.birthdayCard, { backgroundColor: '#f0fdf4' }]}>
+                                    <View style={[styles.birthdayIconBg, { backgroundColor: '#22c55e' }]}>
+                                        <Wallet size={24} color="#fff" />
+                                    </View>
+                                    <View style={styles.birthdayContent}>
+                                        <Text style={styles.birthdayTitle}>Salary Structure</Text>
+                                        <Text style={styles.birthdayDesc}>See your earnings & deductions breakdown</Text>
+                                    </View>
+                                    <ChevronRight size={22} color="#22c55e" />
+                                </View>
+                            </HapticTouchable>
+
+                            {/* Bank Details Card */}
+                            <HapticTouchable onPress={() => setActiveTab('bank')}>
+                                <View style={[styles.birthdayCard, { backgroundColor: '#fefce8' }]}>
+                                    <View style={[styles.birthdayIconBg, { backgroundColor: '#eab308' }]}>
+                                        <Building2 size={24} color="#fff" />
+                                    </View>
+                                    <View style={styles.birthdayContent}>
+                                        <Text style={styles.birthdayTitle}>Bank Details</Text>
+                                        <Text style={styles.birthdayDesc}>Your account & payment information</Text>
+                                    </View>
+                                    <ChevronRight size={22} color="#eab308" />
+                                </View>
+                            </HapticTouchable>
+
+                            {/* Tax & PF Card */}
+                            <HapticTouchable onPress={() => setActiveTab('tax')}>
+                                <View style={[styles.birthdayCard, { backgroundColor: '#fef2f2' }]}>
+                                    <View style={[styles.birthdayIconBg, { backgroundColor: '#ef4444' }]}>
+                                        <CreditCard size={24} color="#fff" />
+                                    </View>
+                                    <View style={styles.birthdayContent}>
+                                        <Text style={styles.birthdayTitle}>Tax & PF Details</Text>
+                                        <Text style={styles.birthdayDesc}>PAN, Aadhar, UAN & statutory info</Text>
+                                    </View>
+                                    <ChevronRight size={22} color="#ef4444" />
+                                </View>
+                            </HapticTouchable>
+                        </Animated.View>
+
+                        {/* Payroll Info */}
+                        <Animated.View entering={FadeInDown.delay(400).duration(500)}>
+                            <View style={styles.infoCard}>
+                                <View style={[styles.infoIconBg, { backgroundColor: '#dbeafe' }]}>
+                                    <Calendar size={18} color="#3b82f6" />
+                                </View>
+                                <View style={styles.infoContent}>
+                                    <Text style={styles.infoTitle}>Salary Credit Date</Text>
+                                    <Text style={styles.infoValue}>Last working day of each month</Text>
+                                </View>
+                            </View>
+                        </Animated.View>
+
                         {/* Active Loans Summary Link */}
                         {loansEnabled && loans?.length > 0 && (
-                            <Animated.View entering={FadeInDown.delay(400).duration(500)}>
+                            <Animated.View entering={FadeInDown.delay(500).duration(500)}>
                                 <TouchableOpacity
                                     style={styles.loansSummaryCard}
                                     onPress={() => setActiveTab('loans')}
                                 >
                                     <View style={styles.loansSummaryLeft}>
-                                        <CreditCard size={24} color="#FF6B6B" />
+                                        <View style={[styles.birthdayIconBg, { backgroundColor: '#ef4444' }]}>
+                                            <CreditCard size={20} color="#fff" />
+                                        </View>
                                         <View style={styles.loansSummaryText}>
                                             <Text style={styles.loansSummaryTitle}>
                                                 {loans.length} Active Loan{loans.length > 1 ? 's' : ''}
@@ -350,7 +575,7 @@ export default function TeacherPayroll() {
                                             </Text>
                                         </View>
                                     </View>
-                                    <ChevronRight size={20} color="#999" />
+                                    <ChevronRight size={20} color="#ef4444" />
                                 </TouchableOpacity>
                             </Animated.View>
                         )}
@@ -490,6 +715,15 @@ export default function TeacherPayroll() {
                                     </View>
                                 </>
                             )}
+
+                            {/* Update Button */}
+                            <View style={styles.divider} />
+                            <HapticTouchable onPress={() => openUpdateModal('bank')}>
+                                <View style={styles.updateButton}>
+                                    <Edit3 size={16} color="#fff" />
+                                    <Text style={styles.updateButtonText}>Update Bank Details</Text>
+                                </View>
+                            </HapticTouchable>
                         </View>
                     </Animated.View>
                 )}
@@ -522,6 +756,15 @@ export default function TeacherPayroll() {
                                     <Text style={styles.badgeText}>{profile.taxRegime || 'NEW'}</Text>
                                 </View>
                             </View>
+
+                            {/* Update Button */}
+                            <View style={styles.divider} />
+                            <HapticTouchable onPress={() => openUpdateModal('tax')}>
+                                <View style={styles.updateButton}>
+                                    <Edit3 size={16} color="#fff" />
+                                    <Text style={styles.updateButtonText}>Update Tax & ID Details</Text>
+                                </View>
+                            </HapticTouchable>
                         </View>
                     </Animated.View>
                 )}
@@ -573,6 +816,14 @@ export default function TeacherPayroll() {
                                                 </Text>
                                             </View>
                                         </View>
+                                        {/* Download Button */}
+                                        <TouchableOpacity
+                                            style={styles.downloadButton}
+                                            onPress={() => handleDownloadPayslip(payslip.id, payslip.monthName, payslip.year)}
+                                        >
+                                            <Download size={16} color="#fff" />
+                                            <Text style={styles.downloadButtonText}>Download PDF</Text>
+                                        </TouchableOpacity>
                                     </TouchableOpacity>
                                 </Animated.View>
                             ))
@@ -677,6 +928,149 @@ export default function TeacherPayroll() {
 
                 <View style={{ height: 40 }} />
             </ScrollView>
+
+            {/* Self-Service Update Modal */}
+            <Modal
+                visible={showUpdateModal}
+                animationType="slide"
+                presentationStyle="pageSheet"
+                onRequestClose={() => setShowUpdateModal(false)}
+            >
+                <StatusBar style="dark" />
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    style={styles.modalContainer}
+                >
+                    <View style={styles.modalHeader}>
+                        <Text style={styles.modalTitle}>
+                            {updateType === 'bank' ? 'Update Bank Details' : 'Update Tax & ID Details'}
+                        </Text>
+                        <HapticTouchable onPress={() => setShowUpdateModal(false)}>
+                            <X size={24} color="#333" />
+                        </HapticTouchable>
+                    </View>
+
+                    <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+                        {updateType === 'bank' ? (
+                            <>
+                                <Text style={styles.inputLabel}>Bank Name</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    value={formData.bankName}
+                                    onChangeText={(text) => setFormData({ ...formData, bankName: text })}
+                                    placeholder="Enter bank name"
+                                    placeholderTextColor="#999"
+                                />
+
+                                <Text style={styles.inputLabel}>Account Number *</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    value={formData.accountNumber}
+                                    onChangeText={(text) => setFormData({ ...formData, accountNumber: text })}
+                                    placeholder="Enter account number"
+                                    placeholderTextColor="#999"
+                                    keyboardType="numeric"
+                                />
+
+                                <Text style={styles.inputLabel}>IFSC Code *</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    value={formData.ifscCode}
+                                    onChangeText={(text) => setFormData({ ...formData, ifscCode: text.toUpperCase() })}
+                                    placeholder="Enter IFSC code"
+                                    placeholderTextColor="#999"
+                                    autoCapitalize="characters"
+                                />
+
+                                <Text style={styles.inputLabel}>Account Holder Name</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    value={formData.accountHolder}
+                                    onChangeText={(text) => setFormData({ ...formData, accountHolder: text })}
+                                    placeholder="Enter account holder name"
+                                    placeholderTextColor="#999"
+                                />
+
+                                <Text style={styles.inputLabel}>UPI ID (Optional)</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    value={formData.upiId}
+                                    onChangeText={(text) => setFormData({ ...formData, upiId: text })}
+                                    placeholder="e.g. yourname@upi"
+                                    placeholderTextColor="#999"
+                                />
+                            </>
+                        ) : (
+                            <>
+                                <Text style={styles.inputLabel}>PAN Number</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    value={formData.panNumber}
+                                    onChangeText={(text) => setFormData({ ...formData, panNumber: text.toUpperCase() })}
+                                    placeholder="Enter PAN number"
+                                    placeholderTextColor="#999"
+                                    autoCapitalize="characters"
+                                    maxLength={10}
+                                />
+
+                                <Text style={styles.inputLabel}>Aadhar Number</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    value={formData.aadharNumber}
+                                    onChangeText={(text) => setFormData({ ...formData, aadharNumber: text.replace(/\D/g, '') })}
+                                    placeholder="Enter 12-digit Aadhar number"
+                                    placeholderTextColor="#999"
+                                    keyboardType="numeric"
+                                    maxLength={12}
+                                />
+
+                                <Text style={styles.inputLabel}>UAN Number (PF)</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    value={formData.uanNumber}
+                                    onChangeText={(text) => setFormData({ ...formData, uanNumber: text })}
+                                    placeholder="Enter UAN number"
+                                    placeholderTextColor="#999"
+                                />
+
+                                <Text style={styles.inputLabel}>ESI Number</Text>
+                                <TextInput
+                                    style={styles.input}
+                                    value={formData.esiNumber}
+                                    onChangeText={(text) => setFormData({ ...formData, esiNumber: text })}
+                                    placeholder="Enter ESI number"
+                                    placeholderTextColor="#999"
+                                />
+                            </>
+                        )}
+
+                        <View style={styles.infoBox}>
+                            <AlertCircle size={16} color="#F59E0B" />
+                            <Text style={styles.infoText}>
+                                Updates will be sent to admin for approval. You'll be notified once approved.
+                            </Text>
+                        </View>
+
+                        <HapticTouchable
+                            onPress={handleSubmitUpdate}
+                            disabled={updateProfileMutation.isPending}
+                        >
+                            <View style={[
+                                styles.submitButton,
+                                updateProfileMutation.isPending && styles.submitButtonDisabled
+                            ]}>
+                                {updateProfileMutation.isPending ? (
+                                    <ActivityIndicator color="#fff" />
+                                ) : (
+                                    <Text style={styles.submitButtonText}>Submit for Approval</Text>
+                                )}
+                            </View>
+                        </HapticTouchable>
+
+                        <View style={{ height: 40 }} />
+                    </ScrollView>
+                </KeyboardAvoidingView>
+            </Modal>
         </View>
     );
 }
@@ -684,70 +1078,163 @@ export default function TeacherPayroll() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#fff',
+        backgroundColor: '#f8f9fa',
     },
     loaderContainer: {
         flex: 1,
         justifyContent: 'center',
         alignItems: 'center',
         gap: 16,
+        backgroundColor: '#fff',
     },
     loaderText: {
-        fontSize: 16,
+        fontSize: 14,
         color: '#666',
     },
     header: {
+        paddingTop: 60,
+        paddingHorizontal: 16,
+        paddingBottom: 16,
+        borderBottomLeftRadius: 24,
+        borderBottomRightRadius: 24,
+    },
+    headerRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingTop: 50,
-        paddingBottom: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#f0f0f0',
-        backgroundColor: '#fff',
+        marginBottom: 16,
     },
     backButton: {
         width: 40,
         height: 40,
         borderRadius: 20,
-        backgroundColor: '#f5f5f5',
+        backgroundColor: 'rgba(255,255,255,0.2)',
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    headerCenter: {
+        flex: 1,
+        alignItems: 'center',
     },
     headerTitle: {
         fontSize: 18,
         fontWeight: '700',
-        color: '#111',
+        color: '#fff',
     },
-    tabWrapper: {
-        backgroundColor: '#fff',
-        borderBottomWidth: 1,
-        borderBottomColor: '#f0f0f0',
+    headerSubtitle: {
+        fontSize: 13,
+        color: 'rgba(255,255,255,0.8)',
+        marginTop: 2,
     },
-    tabContainer: {
-        flexGrow: 1,
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        gap: 8,
+    salaryCard: {
+        backgroundColor: 'rgba(255,255,255,0.15)',
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 16,
     },
-    tab: {
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 20,
-        backgroundColor: '#f5f5f5',
-        marginRight: 4,
+    salaryRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        marginBottom: 16,
     },
-    tabActive: {
-        backgroundColor: '#0469ff',
+    salaryMain: {},
+    salaryLabel: {
+        fontSize: 13,
+        color: 'rgba(255,255,255,0.8)',
     },
-    tabText: {
+    salaryValue: {
+        fontSize: 28,
+        fontWeight: '700',
+        color: '#fff',
+        marginTop: 2,
+    },
+    salaryPeriod: {
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 12,
+    },
+    periodBadgeText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#fff',
+    },
+    salaryStats: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    salaryStatItem: {
+        alignItems: 'center',
+        flex: 1,
+    },
+    salaryStatValue: {
         fontSize: 14,
         fontWeight: '600',
-        color: '#666',
+        color: '#fff',
+        marginTop: 4,
+    },
+    salaryStatLabel: {
+        fontSize: 11,
+        color: 'rgba(255,255,255,0.7)',
+        marginTop: 2,
+    },
+    salaryStatDivider: {
+        width: 1,
+        height: 36,
+        backgroundColor: 'rgba(255,255,255,0.2)',
+    },
+    tabWrapper: {
+        position: 'relative',
+        marginHorizontal: 0,
+    },
+    tabFadeLeft: {
+        position: 'absolute',
+        left: 0,
+        top: 0,
+        bottom: 0,
+        width: 16,
+        zIndex: 10,
+        borderTopLeftRadius: 0,
+        borderBottomLeftRadius: 0,
+    },
+    tabFadeRight: {
+        position: 'absolute',
+        right: 0,
+        top: 0,
+        bottom: 0,
+        width: 16,
+        zIndex: 10,
+        borderTopRightRadius: 0,
+        borderBottomRightRadius: 0,
+    },
+    tabScroll: {
+        flexGrow: 0,
+    },
+    tabContainer: {
+        paddingHorizontal: 0,
+        paddingVertical: 4,
+        gap: 8,
+        justifyContent: 'center',
+    },
+    tab: {
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: 20,
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        marginRight: 6,
+    },
+    tabActive: {
+        backgroundColor: '#fff',
+    },
+    tabText: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: 'rgba(255,255,255,0.9)',
     },
     tabTextActive: {
-        color: '#fff',
+        color: '#0469ff',
     },
     content: {
         flex: 1,
@@ -775,14 +1262,9 @@ const styles = StyleSheet.create({
         backgroundColor: '#fff',
         borderRadius: 16,
         padding: 16,
-        marginBottom: 20,
-        borderWidth: 1,
-        borderColor: '#f0f0f0',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-        elevation: 2,
+        marginBottom: 16,
+        borderWidth: 1.5,
+        borderColor: '#e5e7eb',
     },
     profileRow: {
         flexDirection: 'row',
@@ -917,11 +1399,13 @@ const styles = StyleSheet.create({
     },
     ytdCard: {
         width: (width - 44) / 2,
-        backgroundColor: '#f8f9fa',
+        backgroundColor: '#fff',
         borderRadius: 16,
         padding: 16,
         alignItems: 'flex-start',
         gap: 8,
+        borderWidth: 1.5,
+        borderColor: '#e5e7eb',
     },
     ytdValue: {
         fontSize: 18,
@@ -932,11 +1416,105 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#666',
     },
-    structureCard: {
-        backgroundColor: '#f8f9fa',
+    ytdIconBg: {
+        width: 36,
+        height: 36,
+        borderRadius: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 4,
+    },
+    birthdayCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
         borderRadius: 16,
         padding: 16,
+        marginBottom: 12,
+        gap: 14,
+    },
+    birthdayIconBg: {
+        width: 48,
+        height: 48,
+        borderRadius: 14,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    birthdayContent: {
+        flex: 1,
+        gap: 3,
+    },
+    birthdayTitle: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#111',
+    },
+    birthdayDesc: {
+        fontSize: 12,
+        color: '#666',
+    },
+    infoCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#fff',
+        borderRadius: 14,
+        padding: 14,
+        marginBottom: 16,
+        gap: 12,
+        borderWidth: 1.5,
+        borderColor: '#e5e7eb',
+    },
+    infoIconBg: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    infoContent: {
+        flex: 1,
+        gap: 2,
+    },
+    infoTitle: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#333',
+    },
+    infoValue: {
+        fontSize: 12,
+        color: '#666',
+    },
+    quickActionsRow: {
+        flexDirection: 'row',
+        gap: 12,
         marginBottom: 20,
+    },
+    quickActionCard: {
+        flex: 1,
+        borderRadius: 16,
+        padding: 14,
+        alignItems: 'center',
+        gap: 8,
+    },
+    quickActionIcon: {
+        width: 36,
+        height: 36,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    quickActionLabel: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: '#333',
+        textAlign: 'center',
+    },
+    structureCard: {
+        backgroundColor: '#fff',
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 16,
+        borderWidth: 1.5,
+        borderColor: '#e5e7eb',
     },
     structureHeader: {
         flexDirection: 'row',
@@ -1018,10 +1596,12 @@ const styles = StyleSheet.create({
         color: '#666',
     },
     payslipCard: {
-        backgroundColor: '#f8f9fa',
+        backgroundColor: '#fff',
         borderRadius: 16,
         padding: 16,
         marginBottom: 12,
+        borderWidth: 1.5,
+        borderColor: '#e5e7eb',
     },
     payslipHeader: {
         flexDirection: 'row',
@@ -1080,6 +1660,22 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '600',
     },
+    downloadButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#0469ff',
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        borderRadius: 8,
+        marginTop: 12,
+        gap: 8,
+    },
+    downloadButtonText: {
+        color: '#fff',
+        fontSize: 14,
+        fontWeight: '600',
+    },
     emptyState: {
         alignItems: 'center',
         paddingVertical: 60,
@@ -1091,10 +1687,12 @@ const styles = StyleSheet.create({
         marginTop: 16,
     },
     card: {
-        backgroundColor: '#f8f9fa',
+        backgroundColor: '#fff',
         borderRadius: 16,
         padding: 16,
-        marginBottom: 20,
+        marginBottom: 16,
+        borderWidth: 1.5,
+        borderColor: '#e5e7eb',
     },
     cardHeader: {
         flexDirection: 'row',
@@ -1216,5 +1814,100 @@ const styles = StyleSheet.create({
         fontSize: 13,
         fontWeight: '600',
         color: '#111',
+    },
+    // Self-service update styles
+    updateButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        backgroundColor: '#0469ff',
+        paddingVertical: 14,
+        borderRadius: 12,
+        marginTop: 16,
+    },
+    updateButtonText: {
+        color: '#fff',
+        fontSize: 15,
+        fontWeight: '600',
+    },
+    modalContainer: {
+        flex: 1,
+        backgroundColor: '#fff',
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 20,
+        paddingVertical: 16,
+        paddingTop: 50,
+        borderBottomWidth: 1,
+        borderBottomColor: '#e0e0e0',
+        backgroundColor: '#fff',
+    },
+    modalTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#111',
+    },
+    modalContent: {
+        flex: 1,
+        padding: 20,
+    },
+    inputLabel: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#333',
+        marginBottom: 8,
+        marginTop: 16,
+    },
+    input: {
+        backgroundColor: '#f8f9fa',
+        borderRadius: 12,
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        fontSize: 15,
+        color: '#111',
+        borderWidth: 1.5,
+        borderColor: '#dee2e6',
+    },
+    infoBox: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 10,
+        backgroundColor: '#FEF3CD',
+        padding: 14,
+        borderRadius: 12,
+        marginTop: 24,
+        borderWidth: 1,
+        borderColor: '#ffecb5',
+    },
+    infoText: {
+        flex: 1,
+        fontSize: 13,
+        color: '#856404',
+        lineHeight: 18,
+    },
+    submitButton: {
+        backgroundColor: '#10B981',
+        paddingVertical: 16,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginTop: 24,
+        shadowColor: '#10B981',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+        elevation: 4,
+    },
+    submitButtonDisabled: {
+        opacity: 0.6,
+    },
+    submitButtonText: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: '700',
     },
 });

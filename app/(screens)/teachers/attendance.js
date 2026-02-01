@@ -141,7 +141,6 @@ export default function SelfAttendance() {
     };
 
     const userId = user?.id;
-    console.warn(user);
     const schoolId = user?.schoolId;
     const isTeacher = user?.role?.name === 'TEACHING_STAFF';
 

@@ -25,7 +25,8 @@ import {
     Play,
     AlertTriangle,
     MessageSquare,
-    Pencil
+    Pencil,
+    ImageIcon
 } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
@@ -971,6 +972,7 @@ export default function HomeScreen() {
                     { icon: GraduationCap, label: 'Progress Card', color: '#8B5CF6', bgColor: '#F3E8FF', href: '/hpc/view' },
                     { icon: FileText, label: 'Certificates', color: '#06B6D4', bgColor: '#CFFAFE', href: '/student/certificates' },
                     { icon: ScrollText, label: 'Syllabus', color: '#9C27B0', bgColor: '#F3E5F5', href: '/syllabusview' },
+                    { icon: ImageIcon, label: 'Gallery', color: '#EC4899', bgColor: '#FCE7F3', href: '/(screens)/gallery' },
                 ],
             },
         ];
@@ -1617,6 +1619,13 @@ export default function HomeScreen() {
                         bgColor: '#F3E8FF',
                         href: '/hpc/parent-view',
                         params: { studentId: selectedChild?.studentId, studentName: selectedChild?.name },
+                    },
+                    {
+                        icon: ImageIcon,
+                        label: 'Gallery',
+                        color: '#EC4899',
+                        bgColor: '#FCE7F3',
+                        href: '/(screens)/gallery',
                     },
                 ],
             },
@@ -2696,6 +2705,7 @@ export default function HomeScreen() {
                                 bgColor: '#E8F5E9',   // light green background
                                 href: "/(screens)/calendarscreen"
                             },
+                            { icon: ImageIcon, label: 'Gallery', color: '#EC4899', bgColor: '#FCE7F3', href: '/(screens)/gallery' },
                         ].map((action, index) => (
                             <HapticTouchable key={action.label} onPress={() => action.href && navigateOnce(action.href)} disabled={!action.href}>
                                 <View style={[styles.actionButton3x3, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5 }]}>
@@ -3017,6 +3027,8 @@ export default function HomeScreen() {
                             { icon: Users, label: 'Staff', color: '#0EA5E9', bgColor: '#F0F9FF', href: '/(screens)/director/teachers' },
                             { icon: GraduationCap, label: 'Students', color: '#F59E0B', bgColor: '#FFFBEB', href: '/(screens)/director/students' },
                             { icon: Bell, label: 'Broadcast', color: '#EC4899', bgColor: '#FDF2F8', href: '/(screens)/director/broadcast' },
+                            { icon: Calendar, label: 'Calendar', color: '#4CAF50', bgColor: '#E8F5E9', href: '/(screens)/calendarscreen' },
+                            { icon: ImageIcon, label: 'Gallery', color: '#EC4899', bgColor: '#FCE7F3', href: '/(screens)/gallery' },
                         ].map((action, index) => (
                             <HapticTouchable key={action.label} onPress={() => action.href && navigateOnce(action.href)} disabled={!action.href}>
                                 <View style={[styles.actionButton3x3, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5 }]}>
@@ -4559,6 +4571,13 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                     color: '#10b981',
                     bgColor: '#dcfce7',
                     href: '/teachers/teacher-library',
+                },
+                {
+                    icon: ImageIcon,
+                    label: 'Gallery',
+                    color: '#EC4899',
+                    bgColor: '#FCE7F3',
+                    href: '/(screens)/gallery',
                 },
             ],
         },

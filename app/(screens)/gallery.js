@@ -139,6 +139,12 @@ export default function GalleryScreen() {
         return images;
     }, [imagesData, selectedCategory, selectedAlbum]);
 
+    // Helper to get actual image count per album (fixes "0 images" bug)
+    const getAlbumImageCount = useCallback((albumId) => {
+        const images = imagesData?.images || [];
+        return images.filter(img => img.albumId === albumId).length;
+    }, [imagesData]);
+
     // Split images into two columns for masonry effect
     const masonryColumns = useMemo(() => {
         const col1 = [];
@@ -471,7 +477,7 @@ export default function GalleryScreen() {
                                                     <Text style={styles.albumTitle} numberOfLines={2}>{album.title}</Text>
                                                     <View style={styles.albumMeta}>
                                                         <ImageIcon size={12} color="rgba(255,255,255,0.8)" />
-                                                        <Text style={styles.albumCount}>{album._count?.images || 0} Photos</Text>
+                                                        <Text style={styles.albumCount}>{getAlbumImageCount(album.id)} Photos</Text>
                                                     </View>
                                                 </View>
                                             </HapticTouchable>

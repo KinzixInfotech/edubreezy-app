@@ -114,7 +114,7 @@ export default function CalendarScreen() {
 
     // console.log(eventsData)
 
-    // Fetch upcoming events
+    // Fetch upcoming events (optimized with longer cache)
     const { data: upcomingData } = useQuery({
         queryKey: ['upcoming-events', schoolId],
         queryFn: async () => {
@@ -122,7 +122,10 @@ export default function CalendarScreen() {
             return res.data;
         },
         enabled: !!schoolId,
-        staleTime: 1000 * 60 * 5,
+        staleTime: 1000 * 60 * 10,    // 10 minutes
+        gcTime: 1000 * 60 * 30,        // Keep in cache for 30 minutes  
+        refetchOnMount: false,         // Don't refetch when component mounts if data exists
+        refetchOnWindowFocus: false,   // Don't refetch on app focus
     });
 
 

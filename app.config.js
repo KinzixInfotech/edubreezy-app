@@ -41,7 +41,7 @@ export default {
 
         android: {
             package: "com.kinzix.edubreezy",
-            googleServicesFile: "./google-services.json",
+            googleServicesFile: process.env.GOOGLE_SERVICES_JSON || "./google-services.json",
             edgeToEdgeEnabled: true,
             adaptiveIcon: {
                 foregroundImage: "./assets/adaptive-icon.png",

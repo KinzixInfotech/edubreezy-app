@@ -18,7 +18,6 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 edubreezy-24c9b-firebase-adminsdk-fbsvc-5844a48d1d.json
-google-services.json
 # Metro
 .metro-health-check*
 

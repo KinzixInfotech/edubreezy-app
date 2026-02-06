@@ -21,6 +21,9 @@ const PROGUARD_RULES = `
 # React Native Screens
 -keep class com.swmansion.rnscreens.** { *; }
 
+# React Native Safe Area Context
+-keep class com.th3rdwave.safeareacontext.** { *; }
+
 # ============================================
 # Firebase
 # ============================================
@@ -35,7 +38,9 @@ const PROGUARD_RULES = `
 # Expo
 # ============================================
 -keep class expo.modules.** { *; }
+-keep class host.exp.exponent.** { *; }
 -dontwarn expo.modules.**
+-dontwarn host.exp.exponent.**
 
 # ============================================
 # Razorpay (critical)
@@ -45,6 +50,25 @@ const PROGUARD_RULES = `
 -keepclassmembers class * {
     @android.webkit.JavascriptInterface <methods>;
 }
+
+# ============================================
+# React Native UI Libraries
+# ============================================
+# React Native Elements (@rneui)
+-keep class com.reactnativeelements.** { *; }
+
+# React Navigation
+-keep class com.reactnavigation.** { *; }
+-keep class androidx.fragment.app.** { *; }
+
+# React Native Picker
+-keep class com.reactnativecommunity.picker.** { *; }
+
+# React Native DateTimePicker
+-keep class com.reactcommunity.rndatetimepicker.** { *; }
+
+# React Native NetInfo
+-keep class com.reactnativecommunity.netinfo.** { *; }
 
 # ============================================
 # Other Libraries
@@ -58,6 +82,13 @@ const PROGUARD_RULES = `
 -keep class com.oblador.vectoricons.** { *; }
 -keep class com.reactnativecommunity.asyncstorage.** { *; }
 
+# Supabase / Networking
+-keep class io.supabase.** { *; }
+-dontwarn io.supabase.**
+
+# TanStack Query
+-keep class com.tanstack.** { *; }
+
 # ============================================
 # General
 # ============================================
@@ -65,9 +96,39 @@ const PROGUARD_RULES = `
 -keepattributes SourceFile,LineNumberTable
 -keepattributes Signature
 -keepattributes Exceptions
+-keepattributes InnerClasses
+-keepattributes EnclosingMethod
+
 -keepclassmembers class * { native <methods>; }
+
+# Keep enums
+-keepclassmembers enum * {
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+}
+
+# Keep Parcelables
+-keepclassmembers class * implements android.os.Parcelable {
+    public static final ** CREATOR;
+}
+
+# Keep Serializable
+-keepclassmembers class * implements java.io.Serializable {
+    static final long serialVersionUID;
+    private static final java.io.ObjectStreamField[] serialPersistentFields;
+    private void writeObject(java.io.ObjectOutputStream);
+    private void readObject(java.io.ObjectInputStream);
+    java.lang.Object writeReplace();
+    java.lang.Object readResolve();
+}
+
+# Suppress warnings
 -dontwarn javax.annotation.**
 -dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**
+-dontwarn sun.misc.**
+-dontwarn java.lang.invoke.**
 `;
 
 function withProguardRules(config) {

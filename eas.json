@@ -12,6 +12,7 @@
       "node": "18.18.0",
       "distribution": "internal",
       "env": {
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true",
         "NPM_CONFIG_FORCE": "true"
       }
     },
@@ -19,6 +20,7 @@
       "node": "18.18.0",
       "autoIncrement": true,
       "env": {
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true",
         "NPM_CONFIG_FORCE": "true"
       }
     }

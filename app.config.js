@@ -98,7 +98,8 @@ export default {
             "expo-web-browser",
             "expo-router",
             "expo-secure-store",
-            "expo-task-manager"
+            "expo-task-manager",
+            "./plugins/withProguardRules"
         ],
 
         extra: {

@@ -16,11 +16,14 @@ export default {
             resizeMode: "contain",
             backgroundColor: "#ffffff"
         },
+
         ios: {
+            supportsTablet: true,
+            bundleIdentifier: "com.kinzix.edubreezy",
+            googleServicesFile: "./GoogleService-Info.plist",
             config: {
                 googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY
             },
-            supportsTablet: true,
             infoPlist: {
                 UIBackgroundModes: [
                     "fetch",
@@ -33,9 +36,13 @@ export default {
                     "EduBreezy needs access to your location to show your position on the map.",
                 NSLocationAlwaysUsageDescription:
                     "EduBreezy needs background location access to track bus routes even when the app is closed."
-            },
-            bundleIdentifier: "com.kinzix.edubreezy",
+            }
+        },
+
+        android: {
             package: "com.kinzix.edubreezy",
+            googleServicesFile: "./google-services.json",
+            edgeToEdgeEnabled: true,
             adaptiveIcon: {
                 foregroundImage: "./assets/adaptive-icon.png",
                 backgroundColor: "#ffffff"
@@ -49,8 +56,6 @@ export default {
                     apiKey: process.env.GOOGLE_MAPS_API_KEY
                 }
             },
-            googleServicesFile: "./google-services.json",
-            edgeToEdgeEnabled: true,
             permissions: [
                 "RECEIVE_BOOT_COMPLETED",
                 "WAKE_LOCK",
@@ -62,11 +67,11 @@ export default {
                 "android.permission.VIBRATE"
             ]
         },
+
         web: {
             favicon: "./assets/favicon.png"
-        }, googleServicesFile: "./GoogleService-Info.plist"
-    },
-    android: {
+        },
+
         plugins: [
             "@react-native-firebase/app",
             "@react-native-firebase/messaging",
@@ -95,10 +100,11 @@ export default {
             "expo-secure-store",
             "expo-task-manager"
         ],
+
         extra: {
             router: {},
             eas: {
-                projectId: "bed9e655-de7a-49f6-b80c-423a0493c946"
+                projectId: "705e829d-f67a-48d6-b0aa-654cb5ae901d"
             }
         }
     }

@@ -19,6 +19,7 @@ import { supabase } from '../lib/supabase';
 import NetInfo from '@react-native-community/netinfo';
 import NoInternetScreen from './components/NoInternetScreen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import VideoSplash from './components/VideoSplash';
 
 const BADGE_KEY = 'noticeBadgeCount';
 
@@ -63,6 +64,9 @@ function RootLayoutContent() {
     const appState = useRef(AppState.currentState);
     const [isAppActive, setIsAppActive] = useState(true);
     const isAppActiveRef = useRef(isAppActive);
+
+    // Video splash state
+    const [showVideoSplash, setShowVideoSplash] = useState(true);
 
     // Network connectivity state
     const [isConnected, setIsConnected] = useState(true);
@@ -291,6 +295,12 @@ function RootLayoutContent() {
         }
     }, [fontsLoaded]);
 
+    // Handle video splash completion
+    const handleVideoSplashComplete = useCallback(() => {
+        console.log('🎬 Video splash completed');
+        setShowVideoSplash(false);
+    }, []);
+
     // ========================================================================
     // NETWORK CONNECTIVITY MONITORING
     // Shows NoInternet screen when offline (only if logged in & not on excluded routes)
@@ -365,6 +375,10 @@ function RootLayoutContent() {
                     <Stack.Screen name="(screens)" options={{ headerShown: false }} />
                     <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
                 </Stack>
+                {/* Video Splash Overlay */}
+                {showVideoSplash && (
+                    <VideoSplash onComplete={handleVideoSplashComplete} />
+                )}
             </View>
         </>
     );

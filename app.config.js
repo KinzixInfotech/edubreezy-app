@@ -10,13 +10,11 @@ export default {
         icon: "./assets/icon.png",
         userInterfaceStyle: "light",
         newArchEnabled: true,
-
         splash: {
             image: "./assets/splash.png",
             resizeMode: "contain",
             backgroundColor: "#ffffff"
         },
-
         ios: {
             supportsTablet: true,
             bundleIdentifier: "com.kinzix.edubreezy",
@@ -40,12 +38,18 @@ export default {
         },
 
         android: {
+            splash: {
+                image: "./assets/splash.png",
+                resizeMode: "contain",
+                backgroundColor: "#ffffff"
+            },
+
             package: "com.kinzix.edubreezy",
             googleServicesFile: process.env.GOOGLE_SERVICES_JSON || "./google-services.json",
             edgeToEdgeEnabled: true,
             adaptiveIcon: {
-                foregroundImage: "./assets/adaptive-icon.png",
-                backgroundColor: "#ffffff"
+                foregroundImage: "./assets/Android-Foreground-App-Icon.png",
+                backgroundImage: "./assets/Android-background-App-Icon.png"
             },
             notification: {
                 icon: "./assets/notification-icon.png",

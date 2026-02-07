@@ -33,7 +33,7 @@ import * as SecureStore from 'expo-secure-store';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('screen');
 
 // Responsive scaling utilities
 const guidelineBaseWidth = 375;
@@ -269,9 +269,9 @@ export default function SchoolCodePage() {
   }));
 
   return (
-    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom', 'left', 'right']}>
-      {/* StatusBar removed - using global */}
-      <View style={styles.container}>
+    <View style={styles.fullScreenContainer}>
+      <StatusBar style="dark" translucent backgroundColor="transparent" />
+      <View style={[styles.container, { paddingTop: insets.top }]}>
         <FloatingOrbs />
         <KeyboardAvoidingView
           style={styles.keyboardView}
@@ -335,12 +335,12 @@ export default function SchoolCodePage() {
 
                       <TextInput
                         style={styles.input}
-                        placeholder="0000"
+                        placeholder="00000"
                         placeholderTextColor="#94A3B8"
                         value={code}
                         onChangeText={handleCodeChange}
                         keyboardType="number-pad"
-                        // maxLength={10}
+                        maxLength={5}
                         autoCorrect={false}
                       />
                     </View>
@@ -398,11 +398,15 @@ export default function SchoolCodePage() {
           </ScrollView>
         </KeyboardAvoidingView>
       </View>
-    </SafeAreaView>
+    </View >
   );
 }
 
 const styles = StyleSheet.create({
+  fullScreenContainer: {
+    flex: 1,
+    backgroundColor: '#EFF6FF',
+  },
   safeArea: {
     flex: 1,
     backgroundColor: '#EFF6FF',

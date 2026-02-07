@@ -34,8 +34,9 @@ import { saveProfile, saveCurrentSchool, clearCurrentSchool } from '../../lib/pr
 import * as WebBrowser from 'expo-web-browser';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../../lib/api';
+import { LinearGradient } from 'expo-linear-gradient';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('screen');
 export const PRIMARY_COLOR = '#0b5cde';
 
 // Responsive scaling utilities
@@ -73,105 +74,322 @@ const LoginSchema = z.object({
         .max(50, 'Password is too long'),
 });
 
-// School info card component - Professional Design with Switch option
+// School info card component - Enhanced Professional Design with collapse functionality
 const SchoolInfoCard = ({ schoolData, onSwitchSchool }) => {
+    const [isExpanded, setIsExpanded] = useState(true);
+
     if (!schoolData) return null;
+
+    const publicProfile = schoolData.publicProfile;
+    const establishedYear = publicProfile?.establishedYear;
+    const totalStudents = publicProfile?.totalStudents;
+    const totalTeachers = publicProfile?.totalTeachers;
+    const tagline = publicProfile?.tagline;
+    const coverImage = publicProfile?.coverImage;
+
+    // Minimized view
+    if (!isExpanded) {
+        return (
+            <Animated.View
+                entering={FadeInDown.delay(200).duration(600).springify()}
+                style={styles.schoolCardMinimized}
+            >
+                {/* Banner in minimized state */}
+                {coverImage && (
+                    <View style={styles.minimizedBannerContainer}>
+                        <Image
+                            source={{ uri: coverImage }}
+                            style={styles.minimizedBannerImage}
+                            resizeMode="cover"
+                        />
+                        <View style={styles.minimizedBannerOverlay} />
+                    </View>
+                )}
+                <TouchableOpacity
+                    style={[styles.minimizedContent, coverImage && styles.minimizedContentWithBanner]}
+                    onPress={() => setIsExpanded(true)}
+                    activeOpacity={0.8}
+                >
+                    <View style={styles.minimizedLogoContainer}>
+                        <Image
+                            source={{ uri: schoolData.profilePicture }}
+                            style={styles.minimizedLogo}
+                            resizeMode="cover"
+                        />
+                    </View>
+                    <View style={styles.minimizedInfo}>
+                        <Text style={[styles.minimizedName, coverImage && styles.minimizedNameOnBanner]} numberOfLines={1}>
+                            {schoolData.name}
+                        </Text>
+                        <Text style={[styles.minimizedCode, coverImage && styles.minimizedCodeOnBanner]}>{schoolData.schoolCode}</Text>
+                    </View>
+                    <View style={[styles.expandButton, coverImage && styles.expandButtonOnBanner]}>
+                        <Ionicons name="chevron-down" size={20} color={coverImage ? '#FFFFFF' : PRIMARY_COLOR} />
+                    </View>
+                </TouchableOpacity>
+            </Animated.View>
+        );
+    }
+
     return (
         <Animated.View
             entering={FadeInDown.delay(200).duration(600).springify()}
             style={styles.schoolCard}
         >
-            {/* Gradient accent strip */}
-            <View style={styles.schoolCardAccent} />
-
-            <TouchableOpacity
-                style={styles.schoolCardContent}
-                onPress={onSwitchSchool}
-                activeOpacity={0.7}
-            >
-                <View style={styles.schoolLogoWrapper}>
-                    <View style={styles.schoolLogoContainer}>
-                        <Image
-                            source={{ uri: schoolData.profilePicture }}
-                            style={styles.schoolLogo}
-                            resizeMode="cover"
-                        />
-                    </View>
-                    {/* Verified badge */}
-                    <View style={styles.verifiedBadge}>
-                        <Ionicons name="checkmark-circle" size={16} color="#22C55E" />
-                    </View>
+            {/* Banner Image if exists */}
+            {coverImage && (
+                <View style={styles.bannerContainer}>
+                    <Image
+                        source={{ uri: coverImage }}
+                        style={styles.bannerImage}
+                        resizeMode="cover"
+                    />
+                    <LinearGradient
+                        colors={['transparent', 'rgba(0,0,0,0.7)']}
+                        style={styles.bannerOverlay}
+                    />
                 </View>
+            )}
 
-                <View style={styles.schoolInfo}>
-                    <Text style={styles.schoolName} numberOfLines={2}>
-                        {schoolData.name}
-                    </Text>
-                    <View style={styles.schoolMeta}>
-                        <View style={styles.schoolCodeBadge}>
-                            <Ionicons name="school-outline" size={12} color={PRIMARY_COLOR} />
-                            <Text style={styles.schoolCode}>{schoolData.schoolCode}</Text>
+            {/* Header - Translucent overlay when banner exists, gradient when no banner */}
+            {coverImage ? (
+                // Translucent smoky overlay when banner exists
+                <View style={[styles.schoolCardHeader, styles.schoolCardHeaderWithBanner]}>
+                    <View style={styles.smokyOverlay} />
+
+                    {/* Minimize Button */}
+                    <TouchableOpacity
+                        style={styles.minimizeButton}
+                        onPress={() => setIsExpanded(false)}
+                        activeOpacity={0.7}
+                    >
+                        <Ionicons name="chevron-up" size={18} color="#FFFFFF" />
+                    </TouchableOpacity>
+
+                    <View style={styles.schoolHeaderContent}>
+                        <View style={styles.schoolLogoWrapper}>
+                            <View style={styles.schoolLogoContainer}>
+                                <Image
+                                    source={{ uri: schoolData.profilePicture }}
+                                    style={styles.schoolLogo}
+                                    resizeMode="cover"
+                                />
+                            </View>
+                            <View style={styles.verifiedBadge}>
+                                <Ionicons name="checkmark-circle" size={18} color="#22C55E" />
+                            </View>
+                        </View>
+
+                        <View style={styles.schoolHeaderInfo}>
+                            <Text style={styles.schoolNameHeader} numberOfLines={2}>
+                                {schoolData.name}
+                            </Text>
+                            {tagline && (
+                                <Text style={styles.schoolTagline} numberOfLines={1}>
+                                    {tagline}
+                                </Text>
+                            )}
+                            <View style={styles.schoolCodeBadgeHeader}>
+                                <Ionicons name="qr-code-outline" size={12} color="#FFFFFF" />
+                                <Text style={styles.schoolCodeHeader}>{schoolData.schoolCode}</Text>
+                            </View>
                         </View>
                     </View>
                 </View>
+            ) : (
+                // Blue gradient when no banner
+                <LinearGradient
+                    colors={[PRIMARY_COLOR, '#0847b3', '#063d99']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.schoolCardHeader}
+                >
+                    <View style={styles.headerCircle1} />
+                    <View style={styles.headerCircle2} />
 
-                <View style={styles.switchSchoolButton}>
-                    <Ionicons name="swap-horizontal" size={16} color={PRIMARY_COLOR} />
-                    <Text style={styles.switchSchoolText}>Switch</Text>
+                    <TouchableOpacity
+                        style={styles.minimizeButton}
+                        onPress={() => setIsExpanded(false)}
+                        activeOpacity={0.7}
+                    >
+                        <Ionicons name="chevron-up" size={18} color="#FFFFFF" />
+                    </TouchableOpacity>
+
+                    <View style={styles.schoolHeaderContent}>
+                        <View style={styles.schoolLogoWrapper}>
+                            <View style={styles.schoolLogoContainer}>
+                                <Image
+                                    source={{ uri: schoolData.profilePicture }}
+                                    style={styles.schoolLogo}
+                                    resizeMode="cover"
+                                />
+                            </View>
+                            <View style={styles.verifiedBadge}>
+                                <Ionicons name="checkmark-circle" size={18} color="#22C55E" />
+                            </View>
+                        </View>
+
+                        <View style={styles.schoolHeaderInfo}>
+                            <Text style={styles.schoolNameHeader} numberOfLines={2}>
+                                {schoolData.name}
+                            </Text>
+                            {tagline && (
+                                <Text style={styles.schoolTagline} numberOfLines={1}>
+                                    {tagline}
+                                </Text>
+                            )}
+                            <View style={styles.schoolCodeBadgeHeader}>
+                                <Ionicons name="qr-code-outline" size={12} color="#FFFFFF" />
+                                <Text style={styles.schoolCodeHeader}>{schoolData.schoolCode}</Text>
+                            </View>
+                        </View>
+                    </View>
+                </LinearGradient>
+            )}
+
+            <View style={styles.schoolDetailsSection}>
+                {/* Location & Contact Row */}
+                <View style={styles.detailsRow}>
+                    {schoolData.location && (
+                        <View style={styles.detailItem}>
+                            <View style={styles.detailIconContainer}>
+                                <Ionicons name="location-outline" size={16} color={PRIMARY_COLOR} />
+                            </View>
+                            <Text style={styles.detailText} numberOfLines={1}>
+                                {schoolData.location}
+                            </Text>
+                        </View>
+                    )}
+                    {schoolData.contactNumber && (
+                        <View style={styles.detailItem}>
+                            <View style={styles.detailIconContainer}>
+                                <Ionicons name="call-outline" size={16} color={PRIMARY_COLOR} />
+                            </View>
+                            <Text style={styles.detailText} numberOfLines={1}>
+                                {schoolData.contactNumber}
+                            </Text>
+                        </View>
+                    )}
                 </View>
-            </TouchableOpacity>
+
+                {/* Stats Row */}
+                <View style={styles.statsRow}>
+                    {establishedYear && (
+                        <View style={styles.statItem}>
+                            <View style={styles.statIconBg}>
+                                <Ionicons name="calendar-outline" size={14} color={PRIMARY_COLOR} />
+                            </View>
+                            <View style={styles.statContent}>
+                                <Text style={styles.statValue}>Est. {establishedYear}</Text>
+                                <Text style={styles.statLabel}>Founded</Text>
+                            </View>
+                        </View>
+                    )}
+                    {totalStudents > 0 && (
+                        <View style={styles.statItem}>
+                            <View style={styles.statIconBg}>
+                                <Ionicons name="people-outline" size={14} color={PRIMARY_COLOR} />
+                            </View>
+                            <View style={styles.statContent}>
+                                <Text style={styles.statValue}>{totalStudents.toLocaleString()}+</Text>
+                                <Text style={styles.statLabel}>Students</Text>
+                            </View>
+                        </View>
+                    )}
+                    {totalTeachers > 0 && (
+                        <View style={styles.statItem}>
+                            <View style={styles.statIconBg}>
+                                <Ionicons name="person-outline" size={14} color={PRIMARY_COLOR} />
+                            </View>
+                            <View style={styles.statContent}>
+                                <Text style={styles.statValue}>{totalTeachers}+</Text>
+                                <Text style={styles.statLabel}>Teachers</Text>
+                            </View>
+                        </View>
+                    )}
+                    {!establishedYear && !totalStudents && !totalTeachers && schoolData.Language && (
+                        <View style={styles.statItem}>
+                            <View style={styles.statIconBg}>
+                                <Ionicons name="language-outline" size={14} color={PRIMARY_COLOR} />
+                            </View>
+                            <View style={styles.statContent}>
+                                <Text style={styles.statValue}>{schoolData.Language}</Text>
+                                <Text style={styles.statLabel}>Medium</Text>
+                            </View>
+                        </View>
+                    )}
+                </View>
+
+                {/* Switch School Button */}
+                <TouchableOpacity
+                    style={styles.switchSchoolButtonEnhanced}
+                    onPress={onSwitchSchool}
+                    activeOpacity={0.7}
+                >
+                    <Ionicons name="swap-horizontal" size={18} color={PRIMARY_COLOR} />
+                    <Text style={styles.switchSchoolTextEnhanced}>Switch to Different School</Text>
+                    <Ionicons name="chevron-forward" size={16} color="#94A3B8" />
+                </TouchableOpacity>
+            </View>
         </Animated.View>
     );
 };
 
 
-// Grid Pattern Background Component
-const GridPattern = () => {
-    const gridLines = [];
-    const gridSize = responsive(25, 30, 40);
-    const verticalLines = Math.ceil(SCREEN_WIDTH / gridSize);
-    const horizontalLines = responsive(6, 8, 10);
 
-    // Vertical lines
-    for (let i = 0; i <= verticalLines; i++) {
-        gridLines.push(
-            <View
-                key={`v-${i}`}
-                style={{
-                    position: 'absolute',
-                    left: i * gridSize,
-                    top: 0,
-                    bottom: 0,
-                    width: 1,
-                    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-                }}
-            />
-        );
-    }
-
-    // Horizontal lines
-    for (let i = 0; i <= horizontalLines; i++) {
-        gridLines.push(
-            <View
-                key={`h-${i}`}
-                style={{
-                    position: 'absolute',
-                    left: 0,
-                    right: 0,
-                    top: i * gridSize,
-                    height: 1,
-                    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-                }}
-            />
-        );
-    }
-
+// Theme Pattern Background Component with Decorative Elements
+const ThemePatternBackground = () => {
     return (
-        <View style={styles.gridPattern}>
-            {gridLines}
-            {/* Gradient overlay for depth */}
-            <View style={styles.gridGradientTop} />
-            <View style={styles.gridGradientBottom} />
+        <View style={styles.patternContainer}>
+            {/* Gradient Background */}
+            <LinearGradient
+                colors={[
+                    PRIMARY_COLOR,
+                    '#0847b3',
+                    '#063d99',
+                ]}
+                locations={[0, 0.5, 1]}
+                style={styles.gradientBackground}
+            />
+
+            {/* Decorative floating circles */}
+            <View style={[styles.floatingCircle, styles.circle1]} />
+            <View style={[styles.floatingCircle, styles.circle2]} />
+            <View style={[styles.floatingCircle, styles.circle3]} />
+            <View style={[styles.floatingCircle, styles.circle4]} />
+
+            {/* Small decorative dots */}
+            <View style={[styles.decorativeDot, styles.dot1]} />
+            <View style={[styles.decorativeDot, styles.dot2]} />
+            <View style={[styles.decorativeDot, styles.dot3]} />
+            <View style={[styles.decorativeDot, styles.dot4]} />
+            <View style={[styles.decorativeDot, styles.dot5]} />
+
+            {/* Wave pattern overlay */}
+            <View style={styles.wavePattern}>
+                <View style={styles.wave1} />
+                <View style={styles.wave2} />
+            </View>
+
+            {/* Grid lines for subtle texture */}
+            <View style={styles.gridOverlay}>
+                {[...Array(8)].map((_, i) => (
+                    <View
+                        key={`h-${i}`}
+                        style={[
+                            styles.gridLine,
+                            { top: i * responsive(25, 30, 40) },
+                        ]}
+                    />
+                ))}
+            </View>
+
+            {/* Bottom fade for smooth transition */}
+            <LinearGradient
+                colors={['transparent', 'rgba(11, 92, 222, 0.5)', PRIMARY_COLOR]}
+                locations={[0, 0.5, 1]}
+                style={styles.bottomFade}
+            />
         </View>
     );
 };
@@ -451,8 +669,8 @@ export default function LoginScreen() {
             >
                 {/* Blue Header Background - Extends to safe area */}
                 <View style={[styles.headerBackground, { paddingTop: insets.top + 24 }]}>
-                    {/* Grid Pattern */}
-                    <GridPattern />
+                    {/* Theme Pattern Background */}
+                    <ThemePatternBackground />
 
                     {/* Shield Icon */}
                     <Animated.View s
@@ -641,7 +859,8 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#FFFFFF',
+        backgroundColor: PRIMARY_COLOR,
+        minHeight: SCREEN_HEIGHT,
     },
     headerBackground: {
         backgroundColor: PRIMARY_COLOR,
@@ -650,26 +869,124 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         overflow: 'hidden',
     },
-    gridPattern: {
+    patternContainer: {
         ...StyleSheet.absoluteFillObject,
         zIndex: 0,
+        overflow: 'hidden',
     },
-    gridGradientTop: {
+    gradientBackground: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    floatingCircle: {
         position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        height: verticalScale(60),
-        backgroundColor: 'transparent',
+        borderRadius: 1000,
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
     },
-    gridGradientBottom: {
+    circle1: {
+        width: responsive(180, 220, 280),
+        height: responsive(180, 220, 280),
+        top: -responsive(60, 80, 100),
+        right: -responsive(40, 60, 80),
+    },
+    circle2: {
+        width: responsive(120, 150, 180),
+        height: responsive(120, 150, 180),
+        bottom: responsive(20, 30, 40),
+        left: -responsive(50, 70, 90),
+    },
+    circle3: {
+        width: responsive(80, 100, 120),
+        height: responsive(80, 100, 120),
+        top: responsive(60, 80, 100),
+        left: responsive(40, 60, 80),
+        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    },
+    circle4: {
+        width: responsive(60, 80, 100),
+        height: responsive(60, 80, 100),
+        bottom: responsive(60, 80, 100),
+        right: responsive(30, 50, 70),
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    },
+    decorativeDot: {
+        position: 'absolute',
+        borderRadius: 50,
+        backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    },
+    dot1: {
+        width: 8,
+        height: 8,
+        top: responsive(40, 50, 60),
+        right: responsive(60, 80, 100),
+    },
+    dot2: {
+        width: 6,
+        height: 6,
+        top: responsive(90, 110, 130),
+        left: responsive(80, 100, 120),
+    },
+    dot3: {
+        width: 10,
+        height: 10,
+        bottom: responsive(80, 100, 120),
+        right: responsive(100, 130, 160),
+    },
+    dot4: {
+        width: 5,
+        height: 5,
+        bottom: responsive(50, 60, 70),
+        left: responsive(120, 150, 180),
+    },
+    dot5: {
+        width: 7,
+        height: 7,
+        top: responsive(130, 160, 190),
+        right: responsive(40, 50, 60),
+    },
+    wavePattern: {
         position: 'absolute',
         bottom: 0,
         left: 0,
         right: 0,
-        height: verticalScale(80),
-        backgroundColor: PRIMARY_COLOR,
-        opacity: 0.5,
+        height: responsive(60, 80, 100),
+        overflow: 'hidden',
+    },
+    wave1: {
+        position: 'absolute',
+        bottom: responsive(15, 20, 25),
+        left: -20,
+        right: -20,
+        height: responsive(40, 50, 60),
+        borderTopLeftRadius: responsive(200, 300, 400),
+        borderTopRightRadius: responsive(200, 300, 400),
+        backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    },
+    wave2: {
+        position: 'absolute',
+        bottom: 0,
+        left: -10,
+        right: -10,
+        height: responsive(30, 40, 50),
+        borderTopLeftRadius: responsive(150, 200, 250),
+        borderTopRightRadius: responsive(150, 200, 250),
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    },
+    gridOverlay: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    gridLine: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        height: 1,
+        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    },
+    bottomFade: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: verticalScale(60),
     },
     shieldContainer: {
         marginBottom: verticalScale(16),
@@ -714,7 +1031,6 @@ const styles = StyleSheet.create({
         borderTopRightRadius: responsive(24, 32, 40),
         marginTop: -verticalScale(20),
         overflow: 'hidden',
-        minHeight: '100%',
     },
     keyboardAvoidingView: {
         flex: 1,
@@ -735,32 +1051,164 @@ const styles = StyleSheet.create({
     },
     schoolCard: {
         backgroundColor: '#FFFFFF',
-        borderRadius: moderateScale(18),
+        borderRadius: moderateScale(20),
         marginBottom: verticalScale(20),
         overflow: 'hidden',
         borderWidth: 1,
         borderColor: '#E2E8F0',
     },
-    schoolCardAccent: {
-        height: 4,
-        backgroundColor: PRIMARY_COLOR,
+    schoolCardMinimized: {
+        backgroundColor: '#FFFFFF',
+        borderRadius: moderateScale(14),
+        marginBottom: verticalScale(20),
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
     },
-    schoolCardContent: {
+    minimizedContent: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: moderateScale(14),
+        padding: moderateScale(12),
+    },
+    minimizedLogoContainer: {
+        width: responsive(40, 44, 50),
+        height: responsive(40, 44, 50),
+        borderRadius: moderateScale(10),
+        overflow: 'hidden',
+        backgroundColor: '#F1F5F9',
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+    },
+    minimizedLogo: {
+        width: '100%',
+        height: '100%',
+    },
+    minimizedInfo: {
+        flex: 1,
+        marginLeft: moderateScale(12),
+    },
+    minimizedName: {
+        fontSize: moderateScale(14, 0.3),
+        fontWeight: '700',
+        color: '#1E293B',
+    },
+    minimizedCode: {
+        fontSize: moderateScale(11, 0.3),
+        fontWeight: '600',
+        color: PRIMARY_COLOR,
+        marginTop: 2,
+    },
+    expandButton: {
+        width: responsive(32, 36, 40),
+        height: responsive(32, 36, 40),
+        borderRadius: responsive(16, 18, 20),
+        backgroundColor: '#EFF6FF',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    expandButtonOnBanner: {
+        backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    },
+    minimizedBannerContainer: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+    },
+    minimizedBannerImage: {
+        width: '100%',
+        height: '100%',
+    },
+    minimizedBannerOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    },
+    minimizedContentWithBanner: {
+        position: 'relative',
+        zIndex: 1,
+    },
+    minimizedNameOnBanner: {
+        color: '#FFFFFF',
+    },
+    minimizedCodeOnBanner: {
+        color: 'rgba(255, 255, 255, 0.9)',
+    },
+    bannerContainer: {
+        width: '100%',
+        height: responsive(100, 120, 140),
+        position: 'relative',
+    },
+    bannerImage: {
+        width: '100%',
+        height: '100%',
+    },
+    bannerOverlay: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    schoolCardHeader: {
+        paddingVertical: verticalScale(18),
+        paddingHorizontal: moderateScale(16),
+        position: 'relative',
+        overflow: 'hidden',
+    },
+    schoolCardHeaderWithBanner: {
+        marginTop: -verticalScale(30),
+        paddingTop: verticalScale(10),
+        borderTopLeftRadius: moderateScale(20),
+        borderTopRightRadius: moderateScale(20),
+        backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    },
+    smokyOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0, 0, 0, 0.1)',
+    },
+    minimizeButton: {
+        position: 'absolute',
+        top: moderateScale(10),
+        right: moderateScale(10),
+        width: responsive(28, 32, 36),
+        height: responsive(28, 32, 36),
+        borderRadius: responsive(14, 16, 18),
+        backgroundColor: 'rgba(255, 255, 255, 0.2)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 10,
+    },
+    headerCircle1: {
+        position: 'absolute',
+        width: responsive(100, 120, 140),
+        height: responsive(100, 120, 140),
+        borderRadius: 100,
+        backgroundColor: 'rgba(255, 255, 255, 0.08)',
+        top: -responsive(40, 50, 60),
+        right: -responsive(20, 30, 40),
+    },
+    headerCircle2: {
+        position: 'absolute',
+        width: responsive(60, 80, 100),
+        height: responsive(60, 80, 100),
+        borderRadius: 100,
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+        bottom: -responsive(20, 30, 40),
+        left: responsive(40, 60, 80),
+    },
+    schoolHeaderContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        zIndex: 1,
     },
     schoolLogoWrapper: {
         position: 'relative',
     },
     schoolLogoContainer: {
-        width: responsive(50, 60, 70),
-        height: responsive(50, 60, 70),
-        borderRadius: moderateScale(12),
+        width: responsive(60, 70, 85),
+        height: responsive(60, 70, 85),
+        borderRadius: moderateScale(14),
         overflow: 'hidden',
         backgroundColor: '#FFFFFF',
-        borderWidth: 2,
-        borderColor: '#E2E8F0',
+        borderWidth: 3,
+        borderColor: 'rgba(255, 255, 255, 0.3)',
     },
     schoolLogo: {
         width: '100%',
@@ -771,58 +1219,124 @@ const styles = StyleSheet.create({
         bottom: -4,
         right: -4,
         backgroundColor: '#FFFFFF',
-        borderRadius: 10,
+        borderRadius: 12,
         padding: 2,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
     },
-    schoolInfo: {
+    schoolHeaderInfo: {
         flex: 1,
-        marginLeft: moderateScale(12),
+        marginLeft: moderateScale(14),
     },
-    schoolName: {
-        fontSize: moderateScale(15, 0.3),
-        fontWeight: '700',
-        color: '#1E293B',
-        marginBottom: verticalScale(4),
-        lineHeight: moderateScale(20, 0.3),
+    schoolNameHeader: {
+        fontSize: moderateScale(17, 0.3),
+        fontWeight: '800',
+        color: '#FFFFFF',
+        marginBottom: verticalScale(2),
+        lineHeight: moderateScale(22, 0.3),
     },
-    schoolMeta: {
+    schoolTagline: {
+        fontSize: moderateScale(12, 0.3),
+        fontWeight: '500',
+        color: 'rgba(255, 255, 255, 0.8)',
+        marginBottom: verticalScale(6),
+    },
+    schoolCodeBadgeHeader: {
         flexDirection: 'row',
         alignItems: 'center',
-    },
-    schoolCodeBadge: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#EFF6FF',
-        paddingHorizontal: moderateScale(8),
+        backgroundColor: 'rgba(255, 255, 255, 0.2)',
+        paddingHorizontal: moderateScale(10),
         paddingVertical: moderateScale(4),
         borderRadius: 8,
-        gap: 4,
+        gap: 6,
+        alignSelf: 'flex-start',
     },
-    schoolCode: {
+    schoolCodeHeader: {
         fontSize: moderateScale(11, 0.3),
         fontWeight: '700',
-        color: PRIMARY_COLOR,
-        letterSpacing: 0.3,
+        color: '#FFFFFF',
+        letterSpacing: 0.5,
     },
-    switchSchoolButton: {
+    schoolDetailsSection: {
+        padding: moderateScale(16),
+        backgroundColor: '#FFFFFF',
+    },
+    detailsRow: {
+        flexDirection: 'column',
+        gap: verticalScale(8),
+        marginBottom: verticalScale(14),
+    },
+    detailItem: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#EFF6FF',
-        paddingHorizontal: moderateScale(10),
-        paddingVertical: moderateScale(6),
-        borderRadius: moderateScale(8),
-        gap: 4,
-        borderWidth: 1,
-        borderColor: '#DBEAFE',
     },
-    switchSchoolText: {
-        fontSize: moderateScale(11, 0.3),
+    detailIconContainer: {
+        width: responsive(28, 32, 36),
+        height: responsive(28, 32, 36),
+        borderRadius: responsive(14, 16, 18),
+        backgroundColor: '#EFF6FF',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: moderateScale(10),
+    },
+    detailText: {
+        flex: 1,
+        fontSize: moderateScale(13, 0.3),
+        fontWeight: '600',
+        color: '#475569',
+    },
+    statsRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-around',
+        paddingVertical: verticalScale(12),
+        borderTopWidth: 1,
+        borderTopColor: '#F1F5F9',
+        borderBottomWidth: 1,
+        borderBottomColor: '#F1F5F9',
+        marginBottom: verticalScale(14),
+    },
+    statItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: moderateScale(8),
+    },
+    statIconBg: {
+        width: responsive(28, 32, 36),
+        height: responsive(28, 32, 36),
+        borderRadius: responsive(14, 16, 18),
+        backgroundColor: '#EFF6FF',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    statContent: {
+        alignItems: 'flex-start',
+    },
+    statValue: {
+        fontSize: moderateScale(13, 0.3),
         fontWeight: '700',
+        color: '#1E293B',
+    },
+    statLabel: {
+        fontSize: moderateScale(10, 0.3),
+        fontWeight: '500',
+        color: '#94A3B8',
+    },
+    switchSchoolButtonEnhanced: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: '#F8FAFC',
+        paddingVertical: moderateScale(12),
+        paddingHorizontal: moderateScale(16),
+        borderRadius: moderateScale(12),
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+        gap: moderateScale(8),
+    },
+    switchSchoolTextEnhanced: {
+        flex: 1,
+        fontSize: moderateScale(13, 0.3),
+        fontWeight: '600',
         color: PRIMARY_COLOR,
     },
     generalError: {

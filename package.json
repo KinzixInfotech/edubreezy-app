@@ -30,6 +30,7 @@
     "date-fns": "^4.1.0",
     "expo": "~54.0.27",
     "expo-application": "~7.0.8",
+    "expo-av": "~16.0.8",
     "expo-background-fetch": "~14.0.9",
     "expo-blur": "~15.0.8",
     "expo-constants": "~18.0.10",

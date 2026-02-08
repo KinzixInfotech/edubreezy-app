@@ -747,8 +747,8 @@ export default function ProfileScreen() {
               style={[styles.profileHeader, isTablet && styles.profileHeaderTablet, {
                 borderBottomLeftRadius: 32,
                 borderBottomRightRadius: 32,
-                marginHorizontal: -16,
-                paddingHorizontal: 16,
+                marginHorizontal: isTablet ? -32 : -16,
+                paddingHorizontal: isTablet ? 32 : 16,
                 marginTop: -16,
                 paddingTop: insets.top + 16,
                 overflow: 'hidden',
@@ -1100,10 +1100,10 @@ export default function ProfileScreen() {
           </Animated.View>
           {/* Footer Info */}
           <View style={styles.footer}>
-            <Text style={[styles.footerText, { marginBottom: 8 }]}>Developed by</Text>
+            <Text style={styles.footerText}>Developed by</Text>
             <Image
               source={require('../../assets/kinzix.png')}
-              style={{ width: 120, height: 30, resizeMode: 'contain', marginBottom: 4 }}
+              style={styles.kinzixLogo}
             />
             <Text style={styles.footerVersion}>
               v{Constants.expoConfig?.version || Constants.manifest?.version || '1.0.0'}
@@ -1632,9 +1632,7 @@ const styles = StyleSheet.create({
   },
   // Responsive styles
   contentTablet: {
-    paddingHorizontal: 40,
-    maxWidth: 600,
-    alignSelf: 'center',
+    paddingHorizontal: 32,
     width: '100%',
   },
   profileHeaderTablet: {
@@ -1756,18 +1754,23 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   footer: {
-    paddingVertical: 32,
+    paddingVertical: 40,
     alignItems: 'center',
-    opacity: 0.6,
   },
   footerText: {
-    fontSize: 13,
+    fontSize: 14,
     color: '#64748b',
     fontWeight: '500',
-    marginBottom: 2,
+    marginBottom: 12,
+  },
+  kinzixLogo: {
+    width: 160,
+    height: 45,
+    resizeMode: 'contain',
+    marginBottom: 8,
   },
   footerVersion: {
-    fontSize: 12,
+    fontSize: 13,
     color: '#94a3b8',
     marginTop: 4,
   },

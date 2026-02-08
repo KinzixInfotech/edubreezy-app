@@ -653,7 +653,7 @@ export default function LoginScreen() {
     return (
         <KeyboardAvoidingView
             style={styles.container}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
             {/* <StatusBar style="light" /> */}
@@ -665,7 +665,8 @@ export default function LoginScreen() {
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode="interactive"
                 bounces={false}
-                style={{ backgroundColor: '#FFFFFF' }}
+                style={{ flex: 1, backgroundColor: '#FFFFFF' }}
+                automaticallyAdjustKeyboardInsets={true}
             >
                 {/* Blue Header Background - Extends to safe area */}
                 <View style={[styles.headerBackground, { paddingTop: insets.top + 24 }]}>
@@ -673,7 +674,7 @@ export default function LoginScreen() {
                     <ThemePatternBackground />
 
                     {/* Shield Icon */}
-                    <Animated.View s
+                    <Animated.View
                         entering={FadeIn.delay(100).duration(500)}
                         style={styles.shieldContainer}
                     >
@@ -860,7 +861,6 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: PRIMARY_COLOR,
-        minHeight: SCREEN_HEIGHT,
     },
     headerBackground: {
         backgroundColor: PRIMARY_COLOR,
@@ -1043,10 +1043,8 @@ const styles = StyleSheet.create({
         backgroundColor: '#FFFFFF',
         borderTopLeftRadius: responsive(24, 32, 40),
         borderTopRightRadius: responsive(24, 32, 40),
-        paddingHorizontal: moderateScale(isTablet ? 48 : 24),
+        paddingHorizontal: moderateScale(24),
         paddingTop: verticalScale(24),
-        maxWidth: isTablet ? 600 : '100%',
-        alignSelf: 'center',
         width: '100%',
     },
     schoolCard: {

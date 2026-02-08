@@ -459,11 +459,9 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    paddingHorizontal: moderateScale(isTablet ? 48 : 24),
+    paddingHorizontal: moderateScale(24),
     paddingTop: verticalScale(20),
     justifyContent: 'center',
-    maxWidth: isTablet ? 600 : '100%',
-    alignSelf: 'center',
     width: '100%',
   },
   logoSection: {

@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Dimensions, RefreshControl, Alert, AppState, FlatList } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Dimensions, RefreshControl, Alert, AppState, FlatList, Platform } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Link, router, useFocusEffect } from 'expo-router';
 import {
@@ -38,6 +38,7 @@ import Animated, { FadeInDown, FadeInRight, FadeInUp, useSharedValue, useAnimate
 import { dataUi } from '../data/_uidata';
 
 import { StatusBar } from 'expo-status-bar';
+import * as NavigationBar from 'expo-navigation-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../../lib/api';
@@ -54,6 +55,7 @@ import ProfileAvatar from '../components/ProfileAvatar';
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const isSmallDevice = SCREEN_WIDTH < 375;
 const isShortDevice = SCREEN_HEIGHT < 700;
+const isTablet = SCREEN_WIDTH >= 768;
 
 // Dynamic refresh offset calculation - accounts for safe area and header height
 const getRefreshOffset = (insetTop, headerHeight) => {
@@ -343,6 +345,14 @@ export default function HomeScreen() {
         checkNotificationPermission();
         // router.replace('/(screens)/wish')
     }, [checkNotificationPermission]);
+
+    // Configure Android navigation bar color to match theme
+    useEffect(() => {
+        if (Platform.OS === 'android') {
+            NavigationBar.setBackgroundColorAsync('#ffffff');
+            NavigationBar.setButtonStyleAsync('dark');
+        }
+    }, []);
 
     // Listen for auth changes to keep stored profile session fresh
     useEffect(() => {
@@ -2299,16 +2309,18 @@ export default function HomeScreen() {
                             <View style={styles.actionsGrid}>
                                 {group.actions.map((action, index) => {
                                     const totalItems = group.actions.length;
-                                    // Full width for: single item OR last item when odd count
-                                    const isFullWidth = totalItems === 1 || (totalItems % 2 === 1 && index === totalItems - 1);
-                                    const itemWidth = isFullWidth
-                                        ? SCREEN_WIDTH - (isSmallDevice ? 24 : 32)
-                                        : (SCREEN_WIDTH - (isSmallDevice ? 24 : 32) - 12) / 2;
+                                    // Tablet: 3 columns, Mobile: 2 columns
+                                    const columns = isTablet ? 3 : 2;
+                                    // Full width only for single item
+                                    const isFullWidth = totalItems === 1;
+                                    // Calculate width based on columns
+                                    const itemWidth = isTablet ? '31.5%' : '48%';
 
                                     return (
                                         <Animated.View
                                             key={action.label}
                                             entering={FadeInDown.delay(500 + index * 50).duration(400)}
+                                            style={{ width: isFullWidth ? '100%' : itemWidth }}
                                         >
                                             <HapticTouchable
                                                 onPress={() => {
@@ -2321,7 +2333,7 @@ export default function HomeScreen() {
                                             >
                                                 <View style={[
                                                     styles.actionButton,
-                                                    { backgroundColor: action.bgColor, width: itemWidth }
+                                                    { backgroundColor: action.bgColor, width: '100%' }
                                                 ]}>
                                                     {/* Decorative Graphics */}
                                                     <View style={{ position: 'absolute', top: -15, right: -15, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.2)' }} />
@@ -2350,7 +2362,7 @@ export default function HomeScreen() {
                 <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
                     <View style={styles.sectionHeader}>
                         <Text style={styles.sectionTitle}>Upcoming Events</Text>
-                        <HapticTouchable>
+                        <HapticTouchable onPress={() => navigateOnce('/(screens)/calendarscreen')}>
                             <Text style={styles.seeAll}>See All</Text>
                         </HapticTouchable>
                     </View>
@@ -2376,10 +2388,19 @@ export default function HomeScreen() {
                                 </Animated.View>
                             ))
                         ) : (
-                            <View style={{ alignItems: 'center', padding: 20, backgroundColor: '#f9f9f9', borderRadius: 12 }}>
-                                <PartyPopperIcon size={40} color="#10b981" style={{ marginBottom: 8 }} />
-                                <Text style={{ color: '#666', fontSize: 14, fontWeight: '500' }}>You are all caught up!</Text>
-                                <Text style={{ color: '#999', fontSize: 12 }}>No upcoming events.</Text>
+                            <View style={styles.emptyStateCard}>
+                                <View style={styles.emptyStateIconContainer}>
+                                    <Calendar size={28} color="#10b981" />
+                                </View>
+                                <Text style={styles.emptyStateTitle}>You're all caught up!</Text>
+                                <Text style={styles.emptyStateSubtitle}>No upcoming events scheduled</Text>
+                                <HapticTouchable
+                                    onPress={() => navigateOnce('/(screens)/calendarscreen')}
+                                    style={styles.emptyStateButton}
+                                >
+                                    <Text style={styles.emptyStateButtonText}>View Calendar</Text>
+                                    <ChevronRight size={16} color="#0469ff" />
+                                </HapticTouchable>
                             </View>
                         )}
                     </View>
@@ -2419,10 +2440,19 @@ export default function HomeScreen() {
                                 </Animated.View>
                             ))
                         ) : (
-                            <View style={{ alignItems: 'center', padding: 20, backgroundColor: '#f9f9f9', borderRadius: 12 }}>
-                                <PartyPopperIcon size={40} color="#10b981" style={{ marginBottom: 8 }} />
-                                <Text style={{ color: '#666', fontSize: 14, fontWeight: '500' }}>You are all caught up!</Text>
-                                <Text style={{ color: '#999', fontSize: 12 }}>No recent notices.</Text>
+                            <View style={styles.emptyStateCard}>
+                                <View style={[styles.emptyStateIconContainer, { backgroundColor: '#FEF3C7' }]}>
+                                    <Bell size={28} color="#F59E0B" />
+                                </View>
+                                <Text style={styles.emptyStateTitle}>No new notices</Text>
+                                <Text style={styles.emptyStateSubtitle}>You're up to date with all announcements</Text>
+                                <HapticTouchable
+                                    onPress={() => navigateOnce('/(tabs)/noticeboard')}
+                                    style={styles.emptyStateButton}
+                                >
+                                    <Text style={styles.emptyStateButtonText}>View Noticeboard</Text>
+                                    <ChevronRight size={16} color="#0469ff" />
+                                </HapticTouchable>
                             </View>
                         )}
                     </View>
@@ -3958,23 +3988,25 @@ const styles = StyleSheet.create({
         letterSpacing: 0.3,
         marginTop: 2,
     },
-    // Default 2x2 grid for most roles
+    // Default grid - 3 columns on tablet, 2 columns on mobile
     actionsGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: 12,
-        marginTop: 12,
+        justifyContent: 'flex-start',
+        gap: isTablet ? 10 : 8,
+        marginTop: 8,
     },
     actionButton: {
-        // 2 columns
-        width: (SCREEN_WIDTH - (isSmallDevice ? 24 : 32) - 12) / 2,
-        padding: 16,
-        borderRadius: 20,
+        // 3 columns on tablet, 2 columns on mobile
+        width: isTablet ? '31.5%' : '48%',
+        padding: isTablet ? 16 : 14,
+        borderRadius: 16,
         alignItems: 'center',
         justifyContent: 'center',
-        minHeight: 120, // Taller for better proportions
+        minHeight: isTablet ? 110 : 100,
         overflow: 'hidden',
         position: 'relative',
+        marginBottom: isTablet ? 4 : 0,
     },
     // 3x3 grid for Director/Principal
     actionsGrid3x3: {
@@ -4048,6 +4080,52 @@ const styles = StyleSheet.create({
     },
     noticesContainer: {
         gap: 10,
+    },
+    // Enhanced empty state styles
+    emptyStateCard: {
+        alignItems: 'center',
+        paddingVertical: 28,
+        paddingHorizontal: 20,
+        backgroundColor: '#FAFBFC',
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: '#E8ECF0',
+        borderStyle: 'dashed',
+    },
+    emptyStateIconContainer: {
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        backgroundColor: '#ECFDF5',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginBottom: 12,
+    },
+    emptyStateTitle: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#1F2937',
+        marginBottom: 4,
+    },
+    emptyStateSubtitle: {
+        fontSize: 13,
+        color: '#6B7280',
+        textAlign: 'center',
+        marginBottom: 16,
+    },
+    emptyStateButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        backgroundColor: '#EFF6FF',
+        borderRadius: 10,
+        gap: 4,
+    },
+    emptyStateButtonText: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#0469ff',
     },
     badgeContainer: {
         position: 'absolute',

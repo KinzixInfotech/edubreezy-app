@@ -28,6 +28,9 @@ export default {
                     "location",
                     "remote-notification"
                 ],
+                LSApplicationQueriesSchemes: [
+                    "itms-apps"
+                ],
                 NSLocationAlwaysAndWhenInUseUsageDescription:
                     "EduBreezy needs access to your location to track bus routes and provide real-time updates to parents.",
                 NSLocationWhenInUseUsageDescription:

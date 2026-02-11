@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { getProfilesForSchool } from '../../lib/profileManager';
 import {
   View,
@@ -13,6 +13,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  FlatList,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
@@ -24,6 +25,8 @@ import Animated, {
   Extrapolate,
   withSequence,
   withSpring,
+  FadeIn,
+  FadeOut,
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
@@ -32,6 +35,7 @@ import api from '../../lib/api';
 import * as SecureStore from 'expo-secure-store';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import * as Location from 'expo-location';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('screen');
 
@@ -123,6 +127,44 @@ const FloatingOrbs = () => {
   );
 };
 
+// ─── School Search Result Item ───
+const SchoolSearchItem = ({ school, onPress }) => (
+  <TouchableOpacity
+    style={styles.searchResultItem}
+    onPress={() => onPress(school)}
+    activeOpacity={0.7}
+  >
+    <View style={styles.searchResultIcon}>
+      {school.profilePicture ? (
+        <Image source={{ uri: school.profilePicture }} style={styles.schoolThumb} />
+      ) : (
+        <LinearGradient
+          colors={['#3b82f6', '#2563eb']}
+          style={styles.schoolThumbPlaceholder}
+        >
+          <Text style={styles.schoolThumbText}>
+            {school.name?.charAt(0)?.toUpperCase() || 'S'}
+          </Text>
+        </LinearGradient>
+      )}
+    </View>
+    <View style={styles.searchResultInfo}>
+      <Text style={styles.searchResultName} numberOfLines={1}>
+        {school.name}
+      </Text>
+      <Text style={styles.searchResultLocation} numberOfLines={1}>
+        📍 {school.location || 'Location not available'}
+      </Text>
+      <Text style={styles.searchResultCode} numberOfLines={1}>
+        Code: {school.schoolCode}
+      </Text>
+    </View>
+    <View style={styles.searchResultArrow}>
+      <Text style={styles.arrowText}>→</Text>
+    </View>
+  </TouchableOpacity>
+);
+
 export default function SchoolCodePage() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -130,7 +172,20 @@ export default function SchoolCodePage() {
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [savedCode, setSavedCode] = useState(null); // Store last saved code
+  const [savedCode, setSavedCode] = useState(null);
+
+  // ─── School Finder state ───
+  const [activeTab, setActiveTab] = useState('find'); // 'find' | 'code'
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
+  const searchTimeout = useRef(null);
+
+  // ─── Geolocation state ───
+  const [nearbySchools, setNearbySchools] = useState([]);
+  const [userCity, setUserCity] = useState('');
+  const [locationLoading, setLocationLoading] = useState(true);
 
   const fadeIn = useSharedValue(0);
   const cardScale = useSharedValue(0.95);
@@ -144,14 +199,75 @@ export default function SchoolCodePage() {
         if (saved) {
           const parsed = JSON.parse(saved);
           setSavedCode(parsed);
-          // Optionally pre-fill the code
-          // setCode(parsed.code);
         }
       } catch (error) {
         console.log('No saved code found');
       }
     };
     loadSavedCode();
+  }, []);
+
+  // ─── Fetch nearby schools via geolocation on mount ───
+  useEffect(() => {
+    const fetchNearbySchools = async () => {
+      try {
+        setLocationLoading(true);
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          console.log('📍 Location permission denied');
+          setLocationLoading(false);
+          return;
+        }
+
+        const loc = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Low,
+        });
+
+        const [place] = await Location.reverseGeocodeAsync({
+          latitude: loc.coords.latitude,
+          longitude: loc.coords.longitude,
+        });
+
+        console.log('📍 Reverse geocode result:', JSON.stringify(place));
+
+        // Try multiple location levels: city, subregion (district), region (state)
+        const searchTerms = [
+          place?.city,
+          place?.subregion,
+          place?.region,
+        ].filter(Boolean);
+
+        const displayCity = place?.city || place?.subregion || place?.region || '';
+        setUserCity(displayCity);
+
+        if (searchTerms.length === 0) {
+          setLocationLoading(false);
+          return;
+        }
+
+        // Search with each term and merge unique results
+        const allSchools = new Map();
+        for (const term of searchTerms) {
+          try {
+            console.log('🔍 Searching schools with term:', term);
+            const res = await api.get(`/schools/search?q=${encodeURIComponent(term)}`);
+            const schools = res.data?.schools || [];
+            console.log(`✅ Found ${schools.length} schools for "${term}"`);
+            schools.forEach((s) => allSchools.set(s.id, s));
+          } catch (err) {
+            console.log(`⚠️ Search failed for "${term}":`, err.message);
+          }
+        }
+
+        setNearbySchools(Array.from(allSchools.values()));
+      } catch (err) {
+        console.log('❌ Location fetch error:', err);
+      } finally {
+        setLocationLoading(false);
+      }
+    };
+
+    fetchNearbySchools();
   }, []);
 
   useEffect(() => {
@@ -168,10 +284,98 @@ export default function SchoolCodePage() {
       return res.data;
     },
     enabled: false,
-    staleTime: 1000 * 60 * 5, // Cache for 5 minutes
-    gcTime: 1000 * 60 * 10, // Keep in cache for 10 minutes
+    staleTime: 1000 * 60 * 5,
+    gcTime: 1000 * 60 * 10,
   });
 
+  // ─── Debounced School Search ───
+  const handleSearch = useCallback((text) => {
+    setSearchQuery(text);
+    setSearchError('');
+
+    if (searchTimeout.current) {
+      clearTimeout(searchTimeout.current);
+    }
+
+    if (text.trim().length < 2) {
+      setSearchResults([]);
+      setSearching(false);
+      return;
+    }
+
+    setSearching(true);
+
+    searchTimeout.current = setTimeout(async () => {
+      try {
+        const res = await api.get(`/schools/search?q=${encodeURIComponent(text.trim())}`);
+        setSearchResults(res.data?.schools || []);
+      } catch (err) {
+        console.error('School search error:', err);
+        setSearchError('Failed to search. Please try again.');
+        setSearchResults([]);
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+  }, []);
+
+  // ─── Handle School Selection from Search ───
+  const handleSchoolSelect = async (school) => {
+    try {
+      setLoading(true);
+      setError('');
+
+      // The school has schoolCode like "EB-12345", split to get code part
+      const parts = school.schoolCode.split('-');
+      const selectedPrefix = parts[0] || 'EB';
+      const selectedCode = parts.slice(1).join('-') || '';
+
+      setPrefix(selectedPrefix);
+      setCode(selectedCode);
+
+      // Fetch full school data using the school code
+      const res = await api.get(`/schools/by-code?schoolcode=${school.schoolCode}`);
+      const schoolData = res.data;
+
+      if (schoolData?.school) {
+        const fullCode = school.schoolCode;
+
+        // Save the successful school code
+        await SecureStore.setItemAsync('lastSchoolCode', JSON.stringify({
+          prefix: selectedPrefix,
+          code: selectedCode,
+          fullCode,
+          schoolName: schoolData.school.name,
+          timestamp: new Date().toISOString(),
+        }));
+
+        // Check if there are saved profiles for this school
+        const savedProfiles = await getProfilesForSchool(fullCode);
+
+        if (savedProfiles.length > 0) {
+          router.push({
+            pathname: '/(auth)/profile-selector',
+            params: {
+              schoolCode: fullCode,
+              schoolData: JSON.stringify(schoolData),
+            },
+          });
+        } else {
+          router.push({
+            pathname: '/(auth)/login',
+            params: { schoolConfig: JSON.stringify(schoolData) },
+          });
+        }
+      } else {
+        setError('Could not load school details. Please try again.');
+      }
+    } catch (err) {
+      console.error('School select error:', err);
+      setError('Something went wrong. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleNext = async () => {
     try {
@@ -179,7 +383,6 @@ export default function SchoolCodePage() {
       setError('');
       setLoading(true);
 
-      // Pulse animation on button
       buttonPulse.value = withSequence(
         withTiming(0.95, { duration: 100 }),
         withTiming(1, { duration: 100 })
@@ -191,7 +394,6 @@ export default function SchoolCodePage() {
       if (data?.school) {
         const fullCode = `${prefix}-${code}`;
 
-        // Save the successful school code
         await SecureStore.setItemAsync('lastSchoolCode', JSON.stringify({
           prefix,
           code,
@@ -200,11 +402,9 @@ export default function SchoolCodePage() {
           timestamp: new Date().toISOString(),
         }));
 
-        // Check if there are saved profiles for this school
         const savedProfiles = await getProfilesForSchool(fullCode);
 
         if (savedProfiles.length > 0) {
-          // Navigate to profile selector
           router.push({
             pathname: '/(auth)/profile-selector',
             params: {
@@ -213,7 +413,6 @@ export default function SchoolCodePage() {
             },
           });
         } else {
-          // Navigate to login (no saved profiles)
           router.push({
             pathname: '/(auth)/login',
             params: { schoolConfig: JSON.stringify(data) },
@@ -234,13 +433,10 @@ export default function SchoolCodePage() {
   };
 
   const handleCodeChange = (text) => {
-    // Only allow numbers
     const numericText = text.replace(/[^0-9]/g, '');
 
-    // If user tried to enter non-numeric characters, show brief error
     if (text !== numericText && text.length > 0) {
       setError('Only numbers are allowed');
-      // Clear error after 2 seconds
       setTimeout(() => {
         if (error === 'Only numbers are allowed') {
           setError('');
@@ -267,6 +463,113 @@ export default function SchoolCodePage() {
   const buttonAnimatedStyle = useAnimatedStyle(() => ({
     transform: [{ scale: buttonPulse.value }],
   }));
+
+  // ─── Render Search Results ───
+  const renderSearchContent = () => {
+    if (searching) {
+      return (
+        <View style={styles.searchStateContainer}>
+          <ActivityIndicator size="small" color="#2563EB" />
+          <Text style={styles.searchStateText}>Searching schools...</Text>
+        </View>
+      );
+    }
+
+    if (searchError) {
+      return (
+        <View style={styles.searchStateContainer}>
+          <Text style={styles.searchErrorText}>{searchError}</Text>
+        </View>
+      );
+    }
+
+    if (searchQuery.length >= 2 && searchResults.length === 0 && !searching) {
+      return (
+        <View style={styles.searchStateContainer}>
+          <Text style={styles.noResultsEmoji}>🏫</Text>
+          <Text style={styles.noResultsText}>No schools found</Text>
+          <Text style={styles.noResultsSubtext}>
+            Try a different name or city
+          </Text>
+          <TouchableOpacity
+            style={styles.switchToCodeLink}
+            onPress={() => setActiveTab('code')}
+          >
+            <Text style={styles.switchToCodeText}>Enter code manually →</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    if (searchResults.length > 0) {
+      return (
+        <ScrollView
+          style={styles.searchResultsList}
+          nestedScrollEnabled={true}
+          showsVerticalScrollIndicator={true}
+        >
+          {searchResults.map((school) => (
+            <SchoolSearchItem
+              key={school.id}
+              school={school}
+              onPress={handleSchoolSelect}
+            />
+          ))}
+        </ScrollView>
+      );
+    }
+
+    // Default state — show nearby schools from geolocation
+    if (locationLoading) {
+      return (
+        <View style={styles.searchStateContainer}>
+          <ActivityIndicator size="small" color="#2563EB" />
+          <Text style={styles.searchStateText}>Finding schools near you...</Text>
+        </View>
+      );
+    }
+
+    if (nearbySchools.length > 0) {
+      return (
+        <View>
+          <View style={styles.nearbyHeader}>
+            <Text style={styles.nearbyHeaderText}>
+              📍 Schools in {userCity}
+            </Text>
+            <Text style={styles.nearbySubtext}>
+              {nearbySchools.length} school{nearbySchools.length !== 1 ? 's' : ''} found
+            </Text>
+          </View>
+          <ScrollView
+            style={styles.searchResultsList}
+            nestedScrollEnabled={true}
+            showsVerticalScrollIndicator={true}
+          >
+            {nearbySchools.map((school) => (
+              <SchoolSearchItem
+                key={school.id}
+                school={school}
+                onPress={handleSchoolSelect}
+              />
+            ))}
+          </ScrollView>
+        </View>
+      );
+    }
+
+    // Fallback — no location or no nearby schools
+    return (
+      <View style={styles.searchHintContainer}>
+        <Text style={styles.searchHintEmoji}>🔍</Text>
+        <Text style={styles.searchHintText}>
+          Search by school name or city
+        </Text>
+        <Text style={styles.searchHintSubtext}>
+          e.g. "DAV", "Delhi Public", "Hazaribagh"
+        </Text>
+      </View>
+    );
+  };
 
   return (
     <View style={styles.fullScreenContainer}>
@@ -296,83 +599,158 @@ export default function SchoolCodePage() {
                 </View>
               </View>
 
-              {/* Heading */}
-              {/* <View style={styles.headingContainer}>
-                <Text style={styles.mainHeading}>
-                  All-in-One{'\n'}
-                  <Text style={styles.gradientText}>Cloud Platform</Text>
-                  {'\n'}for Modern Schools
-                </Text>
-                <Text style={styles.subtitle}>
-                  One smart, seamless platform designed for modern education
-                </Text>
-              </View> */}
-
               {/* Glassmorphism Card */}
               <Animated.View style={[styles.cardWrapper, cardAnimatedStyle]}>
                 <BlurView intensity={40} tint="light" style={styles.blurCard}>
                   <View style={styles.inputCard}>
-                    <Text style={styles.inputLabel}>Enter Your School Code</Text>
-                    {savedCode && (
-                      <TouchableOpacity
-                        style={styles.savedCodeHint}
-                        onPress={() => setCode(savedCode.code)}
-                      >
-                        <Text style={styles.savedCodeText}>Last used: {savedCode.fullCode}</Text>
-                        <Text style={styles.savedCodeSubtext}>Tap to use</Text>
-                      </TouchableOpacity>
-                    )}
 
-                    <View style={[styles.inputWrapper, error && styles.inputWrapperError]}>
-                      <LinearGradient
-                        colors={['#0a57d2', '#2563eb']}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                        style={styles.prefixContainer}
-                      >
-                        <Text style={styles.prefixText}>{prefix}</Text>
-                      </LinearGradient>
-
-                      <TextInput
-                        style={styles.input}
-                        placeholder="00000"
-                        placeholderTextColor="#94A3B8"
-                        value={code}
-                        onChangeText={handleCodeChange}
-                        keyboardType="number-pad"
-                        maxLength={5}
-                        autoCorrect={false}
-                      />
-                    </View>
-
-                    <Animated.View style={buttonAnimatedStyle}>
+                    {/* ─── Tab Switcher ─── */}
+                    <View style={styles.tabContainer}>
                       <TouchableOpacity
                         style={[
-                          styles.getStartedButton,
-                          (!code.trim() || loading) && styles.buttonDisabled,
+                          styles.tab,
+                          activeTab === 'find' && styles.tabActive,
                         ]}
-                        onPress={handleNext}
-                        disabled={loading || !code.trim()}
-                        activeOpacity={0.85}
+                        onPress={() => {
+                          setActiveTab('find');
+                          setError('');
+                        }}
+                        activeOpacity={0.7}
                       >
-                        <LinearGradient
-                          colors={loading || !code.trim() ? ['#94a3b8', '#94a3b8'] : ['#0a57d2', '#1d4ed8']}
-                          start={{ x: 0, y: 0 }}
-                          end={{ x: 1, y: 1 }}
-                          style={styles.buttonGradient}
-                        >
-                          {loading ? (
-                            <View style={styles.loadingContainer}>
-                              <ActivityIndicator size="small" color="#FFFFFF" />
-                              <Text style={styles.buttonText}>Verifying...</Text>
-                            </View>
-                          ) : (
-                            <Text style={styles.buttonText}>Get Started</Text>
-                          )}
-                        </LinearGradient>
+                        <Text style={[
+                          styles.tabText,
+                          activeTab === 'find' && styles.tabTextActive,
+                        ]}>
+                          Find School
+                        </Text>
                       </TouchableOpacity>
-                    </Animated.View>
+                      <TouchableOpacity
+                        style={[
+                          styles.tab,
+                          activeTab === 'code' && styles.tabActive,
+                        ]}
+                        onPress={() => {
+                          setActiveTab('code');
+                          setSearchError('');
+                        }}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[
+                          styles.tabText,
+                          activeTab === 'code' && styles.tabTextActive,
+                        ]}>
+                          Enter Code
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
 
+                    {/* ─── Find School Tab ─── */}
+                    {activeTab === 'find' && (
+                      <View>
+                        <View style={[styles.searchInputWrapper, searchError && styles.inputWrapperError]}>
+                          <Text style={styles.searchIcon}>🔍</Text>
+                          <TextInput
+                            style={styles.searchInput}
+                            placeholder="Search by school name or city..."
+                            placeholderTextColor="#94A3B8"
+                            value={searchQuery}
+                            onChangeText={handleSearch}
+                            autoCorrect={false}
+                            autoCapitalize="none"
+                          />
+                          {searchQuery.length > 0 && (
+                            <TouchableOpacity
+                              onPress={() => {
+                                setSearchQuery('');
+                                setSearchResults([]);
+                                setSearchError('');
+                              }}
+                              style={styles.clearButton}
+                            >
+                              <Text style={styles.clearButtonText}>✕</Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
+
+                        {renderSearchContent()}
+
+                        {/* Loading overlay when selecting a school */}
+                        {loading && (
+                          <View style={styles.selectingOverlay}>
+                            <ActivityIndicator size="small" color="#FFFFFF" />
+                            <Text style={styles.selectingText}>Connecting to school...</Text>
+                          </View>
+                        )}
+                      </View>
+                    )}
+
+                    {/* ─── Enter Code Tab ─── */}
+                    {activeTab === 'code' && (
+                      <View>
+                        <Text style={styles.inputLabel}>Enter Your School Code</Text>
+                        {savedCode && (
+                          <TouchableOpacity
+                            style={styles.savedCodeHint}
+                            onPress={() => setCode(savedCode.code)}
+                          >
+                            <Text style={styles.savedCodeText}>Last used: {savedCode.fullCode}</Text>
+                            <Text style={styles.savedCodeSubtext}>Tap to use</Text>
+                          </TouchableOpacity>
+                        )}
+
+                        <View style={[styles.inputWrapper, error && styles.inputWrapperError]}>
+                          <LinearGradient
+                            colors={['#0a57d2', '#2563eb']}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.prefixContainer}
+                          >
+                            <Text style={styles.prefixText}>{prefix}</Text>
+                          </LinearGradient>
+
+                          <TextInput
+                            style={styles.input}
+                            placeholder="00000"
+                            placeholderTextColor="#94A3B8"
+                            value={code}
+                            onChangeText={handleCodeChange}
+                            keyboardType="number-pad"
+                            maxLength={5}
+                            autoCorrect={false}
+                          />
+                        </View>
+
+                        <Animated.View style={buttonAnimatedStyle}>
+                          <TouchableOpacity
+                            style={[
+                              styles.getStartedButton,
+                              (!code.trim() || loading) && styles.buttonDisabled,
+                            ]}
+                            onPress={handleNext}
+                            disabled={loading || !code.trim()}
+                            activeOpacity={0.85}
+                          >
+                            <LinearGradient
+                              colors={loading || !code.trim() ? ['#94a3b8', '#94a3b8'] : ['#0a57d2', '#1d4ed8']}
+                              start={{ x: 0, y: 0 }}
+                              end={{ x: 1, y: 1 }}
+                              style={styles.buttonGradient}
+                            >
+                              {loading ? (
+                                <View style={styles.loadingContainer}>
+                                  <ActivityIndicator size="small" color="#FFFFFF" />
+                                  <Text style={styles.buttonText}>Verifying...</Text>
+                                </View>
+                              ) : (
+                                <Text style={styles.buttonText}>Get Started</Text>
+                              )}
+                            </LinearGradient>
+                          </TouchableOpacity>
+                        </Animated.View>
+                      </View>
+                    )}
+
+                    {/* Error display (shared) */}
                     {error ? (
                       <View style={styles.errorContainer}>
                         <Text style={styles.errorIcon}>⚠️</Text>
@@ -398,7 +776,7 @@ export default function SchoolCodePage() {
           </ScrollView>
         </KeyboardAvoidingView>
       </View>
-    </View >
+    </View>
   );
 }
 
@@ -478,31 +856,6 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  headingContainer: {
-    alignItems: 'center',
-    marginBottom: verticalScale(32),
-  },
-  mainHeading: {
-    fontSize: moderateScale(28, 0.4),
-    fontWeight: '800',
-    color: '#0F172A',
-    textAlign: 'center',
-    lineHeight: moderateScale(36, 0.4),
-    letterSpacing: -0.5,
-    marginBottom: verticalScale(12),
-  },
-  gradientText: {
-    color: '#2563EB',
-    fontStyle: 'italic',
-  },
-  subtitle: {
-    fontSize: moderateScale(14, 0.3),
-    color: '#475569',
-    textAlign: 'center',
-    lineHeight: moderateScale(22, 0.3),
-    fontWeight: '500',
-    paddingHorizontal: moderateScale(20),
-  },
   cardWrapper: {
     marginBottom: verticalScale(24),
     borderRadius: moderateScale(22),
@@ -524,6 +877,239 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.5)',
   },
+
+  // ─── Tab Switcher ───
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#F1F5F9',
+    borderRadius: moderateScale(12),
+    padding: 3,
+    marginBottom: verticalScale(16),
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: moderateScale(10),
+    borderRadius: moderateScale(10),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabActive: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  tabText: {
+    fontSize: moderateScale(13, 0.3),
+    fontWeight: '600',
+    color: '#94A3B8',
+  },
+  tabTextActive: {
+    color: '#0F172A',
+    fontWeight: '700',
+  },
+
+  // ─── Search Input ───
+  searchInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#e2e8f0',
+    borderRadius: moderateScale(14),
+    backgroundColor: '#F8FAFC',
+    paddingHorizontal: moderateScale(12),
+    marginBottom: verticalScale(12),
+  },
+  searchIcon: {
+    fontSize: moderateScale(16),
+    marginRight: moderateScale(8),
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: moderateScale(14),
+    fontSize: moderateScale(15, 0.3),
+    color: '#0F172A',
+    fontWeight: '500',
+  },
+  clearButton: {
+    padding: moderateScale(6),
+    borderRadius: 20,
+    backgroundColor: '#E2E8F0',
+  },
+  clearButtonText: {
+    fontSize: moderateScale(12),
+    color: '#64748B',
+    fontWeight: '700',
+  },
+
+  // ─── Search Results ───
+  searchResultsList: {
+    maxHeight: verticalScale(240),
+  },
+  searchResultItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: moderateScale(12),
+    paddingHorizontal: moderateScale(10),
+    borderRadius: moderateScale(12),
+    backgroundColor: '#F8FAFC',
+    marginBottom: moderateScale(8),
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  searchResultIcon: {
+    marginRight: moderateScale(12),
+  },
+  schoolThumb: {
+    width: moderateScale(40),
+    height: moderateScale(40),
+    borderRadius: moderateScale(10),
+  },
+  schoolThumbPlaceholder: {
+    width: moderateScale(40),
+    height: moderateScale(40),
+    borderRadius: moderateScale(10),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  schoolThumbText: {
+    color: '#FFFFFF',
+    fontSize: moderateScale(18),
+    fontWeight: '800',
+  },
+  searchResultInfo: {
+    flex: 1,
+  },
+  searchResultName: {
+    fontSize: moderateScale(14, 0.3),
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 2,
+  },
+  searchResultLocation: {
+    fontSize: moderateScale(12, 0.3),
+    fontWeight: '500',
+    color: '#64748B',
+  },
+  searchResultCode: {
+    fontSize: moderateScale(11, 0.3),
+    fontWeight: '600',
+    color: '#2563EB',
+    marginTop: 2,
+  },
+  searchResultArrow: {
+    paddingLeft: moderateScale(8),
+  },
+  arrowText: {
+    fontSize: moderateScale(18),
+    color: '#2563EB',
+    fontWeight: '600',
+  },
+
+  // ─── Nearby Schools ───
+  nearbyHeader: {
+    marginBottom: verticalScale(10),
+  },
+  nearbyHeaderText: {
+    fontSize: moderateScale(14, 0.3),
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  nearbySubtext: {
+    fontSize: moderateScale(12, 0.3),
+    color: '#64748B',
+    fontWeight: '500',
+    marginTop: 2,
+  },
+
+  // ─── Search States ───
+  searchStateContainer: {
+    alignItems: 'center',
+    paddingVertical: verticalScale(24),
+  },
+  searchStateText: {
+    fontSize: moderateScale(13, 0.3),
+    color: '#64748B',
+    marginTop: verticalScale(8),
+    fontWeight: '500',
+  },
+  searchErrorText: {
+    fontSize: moderateScale(13, 0.3),
+    color: '#DC2626',
+    fontWeight: '600',
+  },
+  noResultsEmoji: {
+    fontSize: moderateScale(32),
+    marginBottom: verticalScale(8),
+  },
+  noResultsText: {
+    fontSize: moderateScale(15, 0.3),
+    fontWeight: '700',
+    color: '#334155',
+  },
+  noResultsSubtext: {
+    fontSize: moderateScale(13, 0.3),
+    color: '#94A3B8',
+    fontWeight: '500',
+    marginTop: verticalScale(4),
+    marginBottom: verticalScale(12),
+  },
+  switchToCodeLink: {
+    paddingVertical: moderateScale(8),
+    paddingHorizontal: moderateScale(16),
+    borderRadius: moderateScale(8),
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  switchToCodeText: {
+    fontSize: moderateScale(13, 0.3),
+    fontWeight: '600',
+    color: '#2563EB',
+  },
+
+  // ─── Search Hints ───
+  searchHintContainer: {
+    alignItems: 'center',
+    paddingVertical: verticalScale(20),
+  },
+  searchHintEmoji: {
+    fontSize: moderateScale(28),
+    marginBottom: verticalScale(8),
+  },
+  searchHintText: {
+    fontSize: moderateScale(14, 0.3),
+    fontWeight: '600',
+    color: '#475569',
+  },
+  searchHintSubtext: {
+    fontSize: moderateScale(12, 0.3),
+    color: '#94A3B8',
+    fontWeight: '500',
+    marginTop: verticalScale(4),
+    fontStyle: 'italic',
+  },
+
+  // ─── Selecting Overlay ───
+  selectingOverlay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2563EB',
+    paddingVertical: moderateScale(14),
+    borderRadius: moderateScale(12),
+    marginTop: verticalScale(8),
+    gap: 10,
+  },
+  selectingText: {
+    color: '#FFFFFF',
+    fontSize: moderateScale(14, 0.3),
+    fontWeight: '700',
+  },
+
+  // ─── Existing Code Entry Styles ───
   inputLabel: {
     fontSize: moderateScale(16, 0.3),
     fontWeight: '700',

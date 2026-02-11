@@ -13,6 +13,15 @@ module.exports = function (api) {
           allowUndefined: true,
         },
       ],
+      [
+        'module-resolver',
+        {
+          root: ['.'],
+          alias: {
+            'react-native-device-info': './react-native-device-info.js',
+          },
+        },
+      ],
     ],
   };
 };

@@ -20,6 +20,9 @@ import NetInfo from '@react-native-community/netinfo';
 import NoInternetScreen from './components/NoInternetScreen';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import VideoSplash from './components/VideoSplash';
+import MaintenanceScreen from './components/MaintenanceScreen';
+import ChangelogModal from './components/ChangelogModal';
+import { checkForUpdates, setupUpdateListener } from '../services/updateChecker';
 
 const BADGE_KEY = 'noticeBadgeCount';
 
@@ -71,6 +74,12 @@ function RootLayoutContent() {
     // Network connectivity state
     const [isConnected, setIsConnected] = useState(true);
     const [isUserLoggedIn, setIsUserLoggedIn] = useState(false);
+
+    // Update & maintenance state
+    const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
+    const [maintenanceMessage, setMaintenanceMessage] = useState('');
+    const [showChangelog, setShowChangelog] = useState(false);
+    const [changelogData, setChangelogData] = useState({ changelog: [], latestVersion: '' });
     const wasOfflineRef = useRef(false);
 
     // Get current route info
@@ -278,6 +287,57 @@ function RootLayoutContent() {
         return () => subscription.remove();
     }, []);
 
+    // ========================================================================
+    // APP UPDATE & MAINTENANCE CHECK
+    // Checks on mount and when app returns to foreground (5min cooldown)
+    // ========================================================================
+    useEffect(() => {
+        const runUpdateCheck = async () => {
+            try {
+                const result = await checkForUpdates();
+                if (result.maintenanceMode) {
+                    setIsMaintenanceMode(true);
+                    setMaintenanceMessage(result.maintenanceMessage || '');
+                } else {
+                    setIsMaintenanceMode(false);
+                    // Show changelog modal for non-force updates
+                    if (result.updateData?.changelog?.length > 0 && result.updateData?.canSkip) {
+                        setChangelogData({
+                            changelog: result.updateData.changelog,
+                            latestVersion: result.updateData.latestVersion,
+                        });
+                        setShowChangelog(true);
+                    }
+                }
+            } catch (e) {
+                console.log('[Layout] Update check error:', e.message);
+            }
+        };
+
+        // Check on mount
+        runUpdateCheck();
+
+        // Listen for foreground returns
+        const cleanup = setupUpdateListener((msg) => {
+            setIsMaintenanceMode(true);
+            setMaintenanceMessage(msg || '');
+        });
+
+        return cleanup;
+    }, []);
+
+    // Handle maintenance retry
+    const handleMaintenanceRetry = async () => {
+        try {
+            const result = await checkForUpdates();
+            if (!result.maintenanceMode) {
+                setIsMaintenanceMode(false);
+            }
+        } catch (e) {
+            console.log('[Layout] Maintenance retry error:', e.message);
+        }
+    };
+
     // -------------------------------
     // Splash + fonts
     // -------------------------------
@@ -379,6 +439,20 @@ function RootLayoutContent() {
                 {showVideoSplash && (
                     <VideoSplash onComplete={handleVideoSplashComplete} />
                 )}
+                {/* Maintenance Mode Overlay */}
+                {isMaintenanceMode && (
+                    <MaintenanceScreen
+                        message={maintenanceMessage}
+                        onRetry={handleMaintenanceRetry}
+                    />
+                )}
+                {/* Changelog Modal */}
+                <ChangelogModal
+                    visible={showChangelog}
+                    onClose={() => setShowChangelog(false)}
+                    changelog={changelogData.changelog}
+                    latestVersion={changelogData.latestVersion}
+                />
             </View>
         </>
     );

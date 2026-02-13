@@ -369,6 +369,33 @@ const PROFILE_CONFIG = {
       { id: 4, label: 'School Profile', icon: School, action: 'viewSchoolProfile', color: '#10B981' },
     ],
   },
+  ACCOUNTANT: {
+    fieldMappings: {
+      name: 'name',
+      email: 'email',
+      phone: 'phone',
+      role: 'role.name',
+      school: 'school.name',
+      profilePicture: 'profilePicture',
+      gender: 'gender',
+      createdAt: 'createdAt',
+      status: 'status',
+    },
+    allowNameEdit: true,
+    stats: [],
+    contactInfo: [
+      { key: 'email', label: 'Email', icon: Mail, color: '#0469ff', dataPath: 'email' },
+    ],
+    additionalInfo: [
+      { key: 'gender', label: 'Gender', dataPath: 'gender' },
+      { key: 'status', label: 'Account Status', dataPath: 'status' },
+      { key: 'memberSince', label: 'Member Since', dataPath: 'createdAt', isDate: true },
+    ],
+    menuItems: [
+      { id: 1, label: 'Edit Name', icon: Edit, action: 'editName', color: '#84CC16' },
+      { id: 2, label: 'School Profile', icon: School, action: 'viewSchoolProfile', color: '#10B981' },
+    ],
+  },
 };
 
 // ==================== HELPER FUNCTIONS ====================
@@ -586,15 +613,26 @@ export default function ProfileScreen() {
               // DO NOT call supabase.auth.signOut() - this is a soft logout
               // The refresh token in the saved profile remains valid
 
-              if (currentSchool?.schoolCode && currentSchool?.schoolData) {
-                // Redirect to profile-selector with school data
-                router.replace({
-                  pathname: '/(auth)/profile-selector',
-                  params: {
-                    schoolCode: currentSchool.schoolCode,
-                    schoolData: JSON.stringify(currentSchool.schoolData),
-                  },
-                });
+              if (currentSchool?.schoolCode) {
+                // Check if there are other saved profiles for this school
+                const { getProfilesForSchool } = await import('../../lib/profileManager');
+                const savedProfiles = await getProfilesForSchool(currentSchool.schoolCode);
+
+                if (savedProfiles && savedProfiles.length > 0) {
+                  // Redirect to profile-selector with school data
+                  router.replace({
+                    pathname: '/(auth)/profile-selector',
+                    params: {
+                      schoolCode: currentSchool.schoolCode,
+                      ...(currentSchool.schoolData && {
+                        schoolData: JSON.stringify(currentSchool.schoolData),
+                      }),
+                    },
+                  });
+                } else {
+                  // No saved profiles, go to schoolcode
+                  router.replace('/(auth)/schoolcode');
+                }
               } else {
                 // Fallback to schoolcode if no saved school data
                 router.replace('/(auth)/schoolcode');
@@ -969,7 +1007,7 @@ export default function ProfileScreen() {
                     }
 
                     // Format date fields
-                    if ((info.key === 'dob' || info.key === 'licenseExpiry' || info.key === 'joiningDate' || info.key === 'admissionDate') && value && value !== 'N/A') {
+                    if ((info.isDate || info.key === 'dob' || info.key === 'licenseExpiry' || info.key === 'joiningDate' || info.key === 'admissionDate') && value && value !== 'N/A') {
                       try {
                         const date = new Date(value);
                         value = date.toLocaleDateString('en-IN', {

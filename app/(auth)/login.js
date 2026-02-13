@@ -11,7 +11,9 @@ import {
     Platform,
     ScrollView,
     ActivityIndicator,
+    Alert,
     useWindowDimensions,
+    Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import fetchUser from '../../lib/queries/user';
@@ -75,8 +77,15 @@ const LoginSchema = z.object({
 });
 
 // School info card component - Enhanced Professional Design with collapse functionality
-const SchoolInfoCard = ({ schoolData, onSwitchSchool }) => {
+const SchoolInfoCard = ({ schoolData, onSwitchSchool, keyboardVisible }) => {
     const [isExpanded, setIsExpanded] = useState(true);
+
+    // Auto-minimize when keyboard opens
+    useEffect(() => {
+        if (keyboardVisible) {
+            setIsExpanded(false);
+        }
+    }, [keyboardVisible]);
 
     if (!schoolData) return null;
 
@@ -145,7 +154,8 @@ const SchoolInfoCard = ({ schoolData, onSwitchSchool }) => {
                         resizeMode="cover"
                     />
                     <LinearGradient
-                        colors={['transparent', 'rgba(0,0,0,0.7)']}
+                        colors={['transparent', 'rgba(0,0,0,0.6)']}
+                        locations={[0.3, 1]}
                         style={styles.bannerOverlay}
                     />
                 </View>
@@ -248,9 +258,9 @@ const SchoolInfoCard = ({ schoolData, onSwitchSchool }) => {
             )}
 
             <View style={styles.schoolDetailsSection}>
-                {/* Location & Contact Row */}
-                <View style={styles.detailsRow}>
-                    {schoolData.location && (
+                {/* Location Row */}
+                {schoolData.location && (
+                    <View style={styles.detailsRow}>
                         <View style={styles.detailItem}>
                             <View style={styles.detailIconContainer}>
                                 <Ionicons name="location-outline" size={16} color={PRIMARY_COLOR} />
@@ -259,66 +269,8 @@ const SchoolInfoCard = ({ schoolData, onSwitchSchool }) => {
                                 {schoolData.location}
                             </Text>
                         </View>
-                    )}
-                    {schoolData.contactNumber && (
-                        <View style={styles.detailItem}>
-                            <View style={styles.detailIconContainer}>
-                                <Ionicons name="call-outline" size={16} color={PRIMARY_COLOR} />
-                            </View>
-                            <Text style={styles.detailText} numberOfLines={1}>
-                                {schoolData.contactNumber}
-                            </Text>
-                        </View>
-                    )}
-                </View>
-
-                {/* Stats Row */}
-                <View style={styles.statsRow}>
-                    {establishedYear && (
-                        <View style={styles.statItem}>
-                            <View style={styles.statIconBg}>
-                                <Ionicons name="calendar-outline" size={14} color={PRIMARY_COLOR} />
-                            </View>
-                            <View style={styles.statContent}>
-                                <Text style={styles.statValue}>Est. {establishedYear}</Text>
-                                <Text style={styles.statLabel}>Founded</Text>
-                            </View>
-                        </View>
-                    )}
-                    {totalStudents > 0 && (
-                        <View style={styles.statItem}>
-                            <View style={styles.statIconBg}>
-                                <Ionicons name="people-outline" size={14} color={PRIMARY_COLOR} />
-                            </View>
-                            <View style={styles.statContent}>
-                                <Text style={styles.statValue}>{totalStudents.toLocaleString()}+</Text>
-                                <Text style={styles.statLabel}>Students</Text>
-                            </View>
-                        </View>
-                    )}
-                    {totalTeachers > 0 && (
-                        <View style={styles.statItem}>
-                            <View style={styles.statIconBg}>
-                                <Ionicons name="person-outline" size={14} color={PRIMARY_COLOR} />
-                            </View>
-                            <View style={styles.statContent}>
-                                <Text style={styles.statValue}>{totalTeachers}+</Text>
-                                <Text style={styles.statLabel}>Teachers</Text>
-                            </View>
-                        </View>
-                    )}
-                    {!establishedYear && !totalStudents && !totalTeachers && schoolData.Language && (
-                        <View style={styles.statItem}>
-                            <View style={styles.statIconBg}>
-                                <Ionicons name="language-outline" size={14} color={PRIMARY_COLOR} />
-                            </View>
-                            <View style={styles.statContent}>
-                                <Text style={styles.statValue}>{schoolData.Language}</Text>
-                                <Text style={styles.statLabel}>Medium</Text>
-                            </View>
-                        </View>
-                    )}
-                </View>
+                    </View>
+                )}
 
                 {/* Switch School Button */}
                 <TouchableOpacity
@@ -337,57 +289,56 @@ const SchoolInfoCard = ({ schoolData, onSwitchSchool }) => {
 
 
 
-// Theme Pattern Background Component with Decorative Elements
+// Theme Pattern Background Component — Premium Design
 const ThemePatternBackground = () => {
     return (
         <View style={styles.patternContainer}>
-            {/* Gradient Background */}
+            {/* Rich multi-stop gradient */}
             <LinearGradient
-                colors={[
-                    PRIMARY_COLOR,
-                    '#0847b3',
-                    '#063d99',
-                ]}
-                locations={[0, 0.5, 1]}
+                colors={['#1a6fff', '#0b5cde', '#0847b3', '#042e7a']}
+                locations={[0, 0.3, 0.65, 1]}
+                start={{ x: 0.2, y: 0 }}
+                end={{ x: 0.8, y: 1 }}
                 style={styles.gradientBackground}
             />
 
-            {/* Decorative floating circles */}
+            {/* Luminous orbs with glow */}
             <View style={[styles.floatingCircle, styles.circle1]} />
             <View style={[styles.floatingCircle, styles.circle2]} />
             <View style={[styles.floatingCircle, styles.circle3]} />
             <View style={[styles.floatingCircle, styles.circle4]} />
 
-            {/* Small decorative dots */}
-            <View style={[styles.decorativeDot, styles.dot1]} />
-            <View style={[styles.decorativeDot, styles.dot2]} />
-            <View style={[styles.decorativeDot, styles.dot3]} />
-            <View style={[styles.decorativeDot, styles.dot4]} />
-            <View style={[styles.decorativeDot, styles.dot5]} />
+            {/* Glow rings around orbs */}
+            <View style={styles.glowRing1} />
+            <View style={styles.glowRing2} />
 
-            {/* Wave pattern overlay */}
-            <View style={styles.wavePattern}>
-                <View style={styles.wave1} />
-                <View style={styles.wave2} />
-            </View>
-
-            {/* Grid lines for subtle texture */}
+            {/* Soft mesh lines */}
             <View style={styles.gridOverlay}>
-                {[...Array(8)].map((_, i) => (
+                {[...Array(6)].map((_, i) => (
                     <View
                         key={`h-${i}`}
-                        style={[
-                            styles.gridLine,
-                            { top: i * responsive(25, 30, 40) },
-                        ]}
+                        style={[styles.gridLine, { top: i * responsive(35, 45, 55) }]}
+                    />
+                ))}
+                {[...Array(5)].map((_, i) => (
+                    <View
+                        key={`v-${i}`}
+                        style={[styles.gridLineVertical, { left: i * responsive(75, 85, 100) }]}
                     />
                 ))}
             </View>
 
-            {/* Bottom fade for smooth transition */}
+            {/* Sparkle dots */}
+            <View style={[styles.sparkleDot, { top: '15%', left: '20%', width: 4, height: 4, opacity: 0.6 }]} />
+            <View style={[styles.sparkleDot, { top: '35%', right: '15%', width: 3, height: 3, opacity: 0.4 }]} />
+            <View style={[styles.sparkleDot, { top: '55%', left: '65%', width: 5, height: 5, opacity: 0.5 }]} />
+            <View style={[styles.sparkleDot, { top: '25%', left: '80%', width: 3, height: 3, opacity: 0.35 }]} />
+            <View style={[styles.sparkleDot, { top: '70%', left: '30%', width: 4, height: 4, opacity: 0.45 }]} />
+
+            {/* Bottom curve transition */}
             <LinearGradient
-                colors={['transparent', 'rgba(11, 92, 222, 0.5)', PRIMARY_COLOR]}
-                locations={[0, 0.5, 1]}
+                colors={['transparent', 'rgba(4, 46, 122, 0.4)', 'rgba(4, 46, 122, 0.8)']}
+                locations={[0, 0.6, 1]}
                 style={styles.bottomFade}
             />
         </View>
@@ -410,6 +361,7 @@ const FeatureItem = ({ icon, text, delay }) => (
 export default function LoginScreen() {
     const insets = useSafeAreaInsets();
     const passwordRef = useRef(null);
+    const scrollViewRef = useRef(null);
     const { schoolConfig: schoolConfigParam, prefillEmail } = useLocalSearchParams();
     const [schoolConfig, setSchoolConfig] = useState(null);
     const [credential, setCredential] = useState(prefillEmail || '');
@@ -417,8 +369,36 @@ export default function LoginScreen() {
     const [errors, setErrors] = useState({});
     const [loading, setLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
+    const [keyboardVisible, setKeyboardVisible] = useState(false);
+    const [keyboardHeight, setKeyboardHeight] = useState(0);
 
     const buttonScale = useSharedValue(1);
+
+    // Keyboard visibility listener
+    useEffect(() => {
+        const showSub = Keyboard.addListener(
+            Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+            (e) => {
+                setKeyboardVisible(true);
+                setKeyboardHeight(e.endCoordinates.height);
+                // Auto-scroll down on Android so fields stay visible
+                if (Platform.OS === 'android') {
+                    setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+                }
+            }
+        );
+        const hideSub = Keyboard.addListener(
+            Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+            () => {
+                setKeyboardVisible(false);
+                setKeyboardHeight(0);
+            }
+        );
+        return () => {
+            showSub.remove();
+            hideSub.remove();
+        };
+    }, []);
 
     useEffect(() => {
         if (schoolConfigParam) {
@@ -581,6 +561,18 @@ export default function LoginScreen() {
                 setErrors({ general: 'User not found in system' });
                 return;
             }
+
+            // Block ADMIN role from mobile app – direct them to web dashboard
+            if (user.role?.name === 'ADMIN') {
+                await supabase.auth.signOut();
+                Alert.alert(
+                    'Web Only',
+                    'Admin accounts can only access the web dashboard at school.edubreezy.com. Please use the web version for admin features.',
+                    [{ text: 'OK' }]
+                );
+                setLoading(false);
+                return;
+            }
             // Store minimal user data in SecureStore (2048 byte limit)
             const minimalUser = {
                 id: user.id,
@@ -656,54 +648,44 @@ export default function LoginScreen() {
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
-            {/* <StatusBar style="light" /> */}
-            <StatusBar style="light" />
+            <StatusBar style="dark" />
 
             <ScrollView
-                contentContainerStyle={{ flexGrow: 1, backgroundColor: '#FFFFFF' }}
+                ref={scrollViewRef}
+                contentContainerStyle={{
+                    flexGrow: 1,
+                    backgroundColor: '#FFFFFF',
+                    paddingBottom: Platform.OS === 'android' && keyboardVisible ? keyboardHeight + 20 : 0,
+                }}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode="interactive"
                 bounces={false}
                 style={{ flex: 1, backgroundColor: '#FFFFFF' }}
-                automaticallyAdjustKeyboardInsets={true}
+                automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
             >
-                {/* Blue Header Background - Extends to safe area */}
-                <View style={[styles.headerBackground, { paddingTop: insets.top + 24 }]}>
-                    {/* Theme Pattern Background */}
-                    <ThemePatternBackground />
+                <View style={[styles.loginScreenWrapper, { paddingTop: insets.top + verticalScale(20), paddingBottom: Math.max(insets.bottom, 20) }]}>
 
-                    {/* Shield Icon */}
+                    {/* Header Section */}
                     <Animated.View
-                        entering={FadeIn.delay(100).duration(500)}
-                        style={styles.shieldContainer}
+                        entering={FadeInDown.delay(100).duration(500)}
+                        style={styles.loginHeader}
                     >
-                        <View style={styles.shieldIcon}>
-                            <Ionicons name="shield-checkmark" size={36} color={PRIMARY_COLOR} />
-                        </View>
+                        <Text style={styles.signInTitle}>Sign In</Text>
+                        <Text style={styles.signInSubtitle}>Enter your credentials to continue</Text>
                     </Animated.View>
 
-                    {/* Title */}
+                    {/* Form Section */}
                     <Animated.View
-                        entering={FadeInDown.delay(200).duration(600)}
-                        style={styles.headerTextContainer}
+                        entering={FadeInDown.delay(200).duration(500)}
+                        style={styles.loginFormSection}
                     >
-                        <Text style={styles.headerTitle}>Sign in to your</Text>
-                        <Text style={styles.headerTitle}>Account</Text>
-                        <Text style={styles.headerSubtitle}>
-                            Enter your email/phone and password to log in
-                        </Text>
-                    </Animated.View>
-                </View>
-
-                {/* White Card Content */}
-                <View style={[styles.contentWrapper, { paddingBottom: Math.max(insets.bottom, 24) }]}>
-                    <View style={styles.formCard}>
                         {/* School Info Card */}
                         {schoolConfig && (
                             <SchoolInfoCard
                                 schoolData={schoolConfig}
                                 onSwitchSchool={handleSwitchSchool}
+                                keyboardVisible={keyboardVisible}
                             />
                         )}
 
@@ -718,7 +700,7 @@ export default function LoginScreen() {
                             </Animated.View>
                         )}
 
-                        {/* Credential (Email/Phone) Input */}
+                        {/* Credential Input */}
                         <View style={styles.inputGroup}>
                             <Text style={styles.inputLabel}>Email or Phone Number</Text>
                             <View
@@ -728,15 +710,15 @@ export default function LoginScreen() {
                                 ]}
                             >
                                 <Ionicons
-                                    name="person-outline"
+                                    name="mail-outline"
                                     size={20}
-                                    color={(errors.credential || errors.email) ? '#DC2626' : '#9CA3AF'}
+                                    color={(errors.credential || errors.email) ? '#DC2626' : '#94A3B8'}
                                     style={styles.inputIcon}
                                 />
                                 <TextInput
                                     style={styles.input}
                                     placeholder="Enter email or 10-digit mobile number"
-                                    placeholderTextColor="#9CA3AF"
+                                    placeholderTextColor="#94A3B8"
                                     value={credential}
                                     onChangeText={(text) => {
                                         setCredential(text);
@@ -777,14 +759,14 @@ export default function LoginScreen() {
                                 <Ionicons
                                     name="lock-closed-outline"
                                     size={20}
-                                    color={errors.password ? '#DC2626' : '#9CA3AF'}
+                                    color={errors.password ? '#DC2626' : '#94A3B8'}
                                     style={styles.inputIcon}
                                 />
                                 <TextInput
                                     ref={passwordRef}
                                     style={styles.input}
                                     placeholder="Enter your password"
-                                    placeholderTextColor="#9CA3AF"
+                                    placeholderTextColor="#94A3B8"
                                     value={password}
                                     onChangeText={(text) => {
                                         setPassword(text);
@@ -806,7 +788,7 @@ export default function LoginScreen() {
                                     <Ionicons
                                         name={showPassword ? 'eye-off-outline' : 'eye-outline'}
                                         size={22}
-                                        color="#9CA3AF"
+                                        color="#94A3B8"
                                     />
                                 </TouchableOpacity>
                             </View>
@@ -820,19 +802,17 @@ export default function LoginScreen() {
                             )}
                         </View>
 
-                        {/* Forgot Password Row */}
-                        <View style={styles.optionsRow}>
-                            <TouchableOpacity
-                                onPress={handleForgotPassword}
-                                style={styles.forgotPassword}
-                                activeOpacity={0.7}
-                            >
-                                <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
-                            </TouchableOpacity>
-                        </View>
+                        {/* Forgot Password */}
+                        <TouchableOpacity
+                            onPress={handleForgotPassword}
+                            style={styles.forgotPassword}
+                            activeOpacity={0.7}
+                        >
+                            <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+                        </TouchableOpacity>
 
                         {/* Login Button */}
-                        <Animated.View style={buttonScaleStyle}>
+                        <Animated.View style={[buttonScaleStyle, { marginTop: verticalScale(8) }]}>
                             <TouchableOpacity
                                 style={[styles.loginButton, loading && styles.loginButtonDisabled]}
                                 onPress={handleLogin}
@@ -845,12 +825,14 @@ export default function LoginScreen() {
                                         <Text style={styles.loginButtonText}>Signing in...</Text>
                                     </View>
                                 ) : (
-                                    <Text style={styles.loginButtonText}>Log In</Text>
+                                    <View style={styles.loginButtonContent}>
+                                        <Text style={styles.loginButtonText}>Log In</Text>
+                                        <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
+                                    </View>
                                 )}
                             </TouchableOpacity>
                         </Animated.View>
-
-                    </View>
+                    </Animated.View>
                 </View>
             </ScrollView>
         </KeyboardAvoidingView>
@@ -860,7 +842,40 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: PRIMARY_COLOR,
+        backgroundColor: '#FFFFFF',
+    },
+    loginScreenWrapper: {
+        flexGrow: 1,
+        backgroundColor: '#FFFFFF',
+        paddingHorizontal: moderateScale(24),
+    },
+    loginHeader: {
+        alignItems: 'center',
+        marginBottom: verticalScale(24),
+    },
+    signInTitle: {
+        fontSize: moderateScale(32, 0.4),
+        fontWeight: '800',
+        color: '#0F172A',
+        letterSpacing: -0.8,
+        marginBottom: verticalScale(6),
+    },
+    signInSubtitle: {
+        fontSize: moderateScale(14, 0.3),
+        fontWeight: '400',
+        color: '#64748B',
+        letterSpacing: 0.1,
+    },
+    loginFormSection: {
+        width: '100%',
+        maxWidth: isTablet ? 460 : '100%',
+        alignSelf: 'center',
+    },
+    loginButtonContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
     },
     headerBackground: {
         backgroundColor: PRIMARY_COLOR,
@@ -1038,15 +1053,7 @@ const styles = StyleSheet.create({
     scrollContent: {
         flexGrow: 1,
     },
-    formCard: {
-        flex: 1,
-        backgroundColor: '#FFFFFF',
-        borderTopLeftRadius: responsive(24, 32, 40),
-        borderTopRightRadius: responsive(24, 32, 40),
-        paddingHorizontal: moderateScale(24),
-        paddingTop: verticalScale(24),
-        width: '100%',
-    },
+
     schoolCard: {
         backgroundColor: '#FFFFFF',
         borderRadius: moderateScale(20),
@@ -1134,7 +1141,7 @@ const styles = StyleSheet.create({
     },
     bannerContainer: {
         width: '100%',
-        height: responsive(100, 120, 140),
+        height: responsive(140, 160, 180),
         position: 'relative',
     },
     bannerImage: {
@@ -1151,11 +1158,11 @@ const styles = StyleSheet.create({
         overflow: 'hidden',
     },
     schoolCardHeaderWithBanner: {
-        marginTop: -verticalScale(30),
-        paddingTop: verticalScale(10),
+        marginTop: -verticalScale(50),
+        paddingTop: verticalScale(16),
         borderTopLeftRadius: moderateScale(20),
         borderTopRightRadius: moderateScale(20),
-        backgroundColor: 'rgba(0, 0, 0, 0.55)',
+        backgroundColor: 'rgba(0, 0, 0, 0.6)',
     },
     smokyOverlay: {
         ...StyleSheet.absoluteFillObject,
@@ -1407,8 +1414,9 @@ const styles = StyleSheet.create({
         marginTop: verticalScale(2),
     },
     forgotPassword: {
-        paddingVertical: 4,
-        paddingHorizontal: 4,
+        alignSelf: 'flex-end',
+        paddingVertical: 6,
+        marginBottom: verticalScale(4),
     },
     forgotPasswordText: {
         fontSize: moderateScale(13, 0.3),

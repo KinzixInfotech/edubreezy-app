@@ -620,6 +620,11 @@ export default function HomeScreen() {
                 '{role.name}': user_acc?.role?.name || 'Principal',
                 '{school.name}': user_acc?.school?.name || '',
             },
+            accountant: {
+                '{name}': user_acc?.name || 'Accountant',
+                '{role.name}': user_acc?.role?.name || 'ACCOUNTANT',
+                '{school.name}': user_acc?.school?.name || '',
+            },
         };
 
         const map = placeholders[role.toLowerCase()] || {};
@@ -829,6 +834,17 @@ export default function HomeScreen() {
                     paddingTop={paddingTop}
                     header={headerComponent}
                     refreshOffset={refreshOffset}
+                    navigateOnce={navigateOnce}
+                />;
+            case 'accountant':
+                return <AccountantView
+                    refreshing={refreshing}
+                    onRefresh={onRefresh}
+                    schoolId={schoolId}
+                    userId={userId}
+                    paddingTop={paddingTop}
+                    refreshOffset={refreshOffset}
+                    banner={permissionBanner}
                     navigateOnce={navigateOnce}
                 />;
             default:
@@ -3169,6 +3185,402 @@ export default function HomeScreen() {
                                     No notices yet
                                 </Text>
                             </Animated.View>
+                        )}
+                    </View>
+                </Animated.View>
+
+                {/* Bottom Spacer */}
+                <View style={{ height: 100 }} />
+            </ScrollView>
+        );
+    };
+
+    // ==================== ACCOUNTANT VIEW ====================
+    const AccountantView = ({ refreshing, onRefresh, schoolId, userId, paddingTop, refreshOffset, banner, navigateOnce }) => {
+        const { data: dashboardData, isLoading, refetch } = useQuery({
+            queryKey: ['accountant-dashboard', schoolId, userId],
+            queryFn: async () => {
+                if (!schoolId || !userId) return null;
+                const res = await api.get(`/mobile/dashboard/accountant?schoolId=${schoolId}&userId=${userId}`);
+                return res.data?.data || res.data;
+            },
+            enabled: !!schoolId && !!userId,
+            ...CACHE_CONFIG.MODERATE,
+        });
+
+        const fees = dashboardData?.fees;
+        const todaysCollections = dashboardData?.todaysCollections;
+        const recentPayments = dashboardData?.recentPayments || [];
+        const notices = (dashboardData?.notices || []).map(n => ({
+            id: n.id,
+            title: n.title,
+            time: new Date(n.time || n.createdAt).toLocaleString(),
+            unread: n.unread ?? true,
+        }));
+        const upcomingEvents = dashboardData?.events || [];
+
+        // Currency formatter (same pattern as parent view)
+        const formatAbbr = (amount) => {
+            if (!amount || amount === 0) return '0';
+            const value = Math.abs(amount);
+            if (value >= 10000000) return `${Math.round(value / 10000000)}Cr`;
+            if (value >= 100000) return `${(value / 100000).toFixed(1).replace(/\.0$/, '')}L`;
+            if (value >= 1000) return `${(value / 1000).toFixed(1).replace(/\.0$/, '')}K`;
+            return `${Math.round(value)}`;
+        };
+
+        const formatDate = (date) => {
+            if (!date) return '';
+            const d = new Date(date);
+            return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+        };
+
+        // Quick actions - matching parent/teacher actionGroups pattern
+        const actionGroups = [
+            {
+                title: 'Fee Management',
+                actions: [
+                    {
+                        icon: DollarSign,
+                        label: 'Collect Fee',
+                        color: '#10B981',
+                        bgColor: '#D1FAE5',
+                        href: '/(screens)/accountant-collect-fee',
+                    },
+                    {
+                        icon: TimerIcon,
+                        label: 'History',
+                        color: '#0469ff',
+                        bgColor: '#DBEAFE',
+                        href: '/(screens)/accountant-payment-history',
+                    },
+                ],
+            },
+            {
+                title: 'General',
+                actions: [
+                    {
+                        icon: Calendar,
+                        label: 'Calendar',
+                        color: '#4CAF50',
+                        bgColor: '#E8F5E9',
+                        href: '/(screens)/calendarscreen',
+                    },
+                    {
+                        icon: ImageIcon,
+                        label: 'Gallery',
+                        color: '#EC4899',
+                        bgColor: '#FCE7F3',
+                        href: '/(screens)/gallery',
+                    },
+                ],
+            },
+        ];
+
+        const handleActionPress = (action) => {
+            if (action.href) {
+                navigateOnce(action.href);
+            } else {
+                Alert.alert('Coming Soon', `${action.label} feature is coming soon!`);
+            }
+        };
+
+        const getMethodIcon = (method) => {
+            switch (method?.toUpperCase()) {
+                case 'CASH': return '💵';
+                case 'UPI': return '📱';
+                case 'ONLINE': return '🌐';
+                case 'CHEQUE': return '📝';
+                case 'BANK_TRANSFER': return '🏦';
+                default: return '💳';
+            }
+        };
+
+        return (
+            <ScrollView
+                style={styles.container}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingTop: paddingTop }}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
+                        tintColor="#84CC16"
+                        progressViewOffset={refreshOffset}
+                    />
+                }
+            >
+                {/* School Banner Carousel */}
+                <BannerCarousel schoolId={schoolId} role={user_acc?.role?.name} />
+
+                {/* Fee Overview - stat cards matching parent/teacher gradient style */}
+                <Animated.View entering={FadeInDown.delay(200).duration(600)} style={styles.section}>
+                    <Text style={styles.sectionTitle}>Fee Overview</Text>
+                    <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+                        <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/(screens)/payfees')}>
+                            <LinearGradient
+                                colors={['#0469ff', '#0256d0']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={[styles.statCard, { shadowColor: '#0469ff', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                            >
+                                <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                                <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+                                <View style={styles.statIcon}><DollarSign size={22} color="#fff" /></View>
+                                <View>
+                                    <Text style={styles.statValue}>₹{isLoading ? '...' : formatAbbr(fees?.totalFees)}</Text>
+                                    <Text style={styles.statLabel}>Total Fees</Text>
+                                </View>
+                            </LinearGradient>
+                        </HapticTouchable>
+
+                        <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/(screens)/accountant-payment-history')}>
+                            <LinearGradient
+                                colors={['#10B981', '#059669']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={[styles.statCard, { shadowColor: '#10B981', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                            >
+                                <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                                <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+                                <View style={styles.statIcon}><CheckCircle2 size={22} color="#fff" /></View>
+                                <View>
+                                    <Text style={styles.statValue}>₹{isLoading ? '...' : formatAbbr(fees?.collected)}</Text>
+                                    <Text style={styles.statLabel}>Collected{fees?.collectionRate > 0 ? ` (${fees.collectionRate}%)` : ''}</Text>
+                                </View>
+                            </LinearGradient>
+                        </HapticTouchable>
+
+                        <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/(screens)/payfees')}>
+                            <LinearGradient
+                                colors={fees?.pending > 0 ? ['#FF6B6B', '#EE5A5A'] : ['#6B7280', '#4B5563']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={[styles.statCard, { shadowColor: fees?.pending > 0 ? '#FF6B6B' : '#6B7280', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                            >
+                                <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                                <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+                                <View style={styles.statIcon}><Clock size={22} color="#fff" /></View>
+                                <View>
+                                    <Text style={styles.statValue}>₹{isLoading ? '...' : formatAbbr(fees?.pending)}</Text>
+                                    <Text style={styles.statLabel}>Pending</Text>
+                                </View>
+                            </LinearGradient>
+                        </HapticTouchable>
+                    </View>
+                </Animated.View>
+
+                {/* Today's Collections Banner */}
+                <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.section}>
+                    <LinearGradient
+                        colors={['#84CC16', '#65A30D']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={{
+                            borderRadius: 16, padding: 16,
+                            flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                            overflow: 'hidden',
+                        }}
+                    >
+                        <View style={{ position: 'absolute', top: -20, right: -20, width: 100, height: 100, borderRadius: 50, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                        <View style={{ position: 'absolute', bottom: -30, left: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+                        <View>
+                            <Text style={{ fontSize: 13, color: '#FFFFFF', fontWeight: '600', opacity: 0.9 }}>Today's Collections</Text>
+                            <Text style={{ fontSize: 26, fontWeight: '800', color: '#FFFFFF', marginTop: 2 }}>
+                                ₹{isLoading ? '...' : formatAbbr(todaysCollections?.totalAmount)}
+                            </Text>
+                        </View>
+                        <View style={{
+                            backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 8,
+                        }}>
+                            <Text style={{ fontSize: 22, fontWeight: '800', color: '#FFFFFF' }}>
+                                {isLoading ? '...' : (todaysCollections?.count || 0)}
+                            </Text>
+                            <Text style={{ fontSize: 10, color: '#FFFFFF', fontWeight: '600', opacity: 0.9, textAlign: 'center' }}>payments</Text>
+                        </View>
+                    </LinearGradient>
+                </Animated.View>
+
+
+                {/* Quick Actions - Grid matching parent/teacher pattern */}
+                {actionGroups.map((group, groupIndex) => (
+                    <Animated.View
+                        key={group.title}
+                        entering={FadeInDown.delay(400 + groupIndex * 100).duration(600)}
+                        style={styles.section}
+                    >
+                        <Text style={styles.sectionTitle}>{group.title}</Text>
+                        <View style={styles.actionsGrid}>
+                            {group.actions.map((action, index) => (
+                                <Animated.View
+                                    key={action.label}
+                                    entering={FadeInDown.delay(500 + index * 50).duration(400)}
+                                    style={{ width: isTablet ? '31.5%' : '48%' }}
+                                >
+                                    <HapticTouchable onPress={() => handleActionPress(action)}>
+                                        <View style={[styles.actionButton, { backgroundColor: action.bgColor, width: '100%' }]}>
+                                            {/* Decorative Graphics */}
+                                            <View style={{ position: 'absolute', top: -15, right: -15, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.2)' }} />
+                                            <View style={{ position: 'absolute', bottom: -20, left: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.15)' }} />
+
+                                            <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
+                                                <action.icon size={22} color={action.color} />
+                                            </View>
+                                            <Text style={styles.actionLabel} numberOfLines={1}>
+                                                {action.label}
+                                            </Text>
+                                        </View>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))}
+                        </View>
+                    </Animated.View>
+                ))}
+
+                {/* Recent Payments */}
+                <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Recent Payments</Text>
+                        <HapticTouchable onPress={() => navigateOnce('/(screens)/accountant-payment-history')}>
+                            <Text style={styles.seeAll}>View All</Text>
+                        </HapticTouchable>
+                    </View>
+                    {isLoading ? (
+                        <View style={{ padding: 20, alignItems: 'center' }}>
+                            <ActivityIndicator color="#84CC16" />
+                        </View>
+                    ) : recentPayments.length === 0 ? (
+                        <View style={styles.emptyStateCard}>
+                            <View style={styles.emptyStateIconContainer}>
+                                <DollarSign size={28} color="#10b981" />
+                            </View>
+                            <Text style={styles.emptyStateTitle}>No payments yet</Text>
+                            <Text style={styles.emptyStateSubtitle}>Recent fee payments will appear here</Text>
+                        </View>
+                    ) : (
+                        <View style={{
+                            backgroundColor: '#FFFFFF', borderRadius: 16,
+                            borderWidth: 1, borderColor: '#F1F5F9', overflow: 'hidden',
+                        }}>
+                            {recentPayments.slice(0, 5).map((payment, index) => (
+                                <View key={payment.id} style={{
+                                    flexDirection: 'row', alignItems: 'center', padding: 14,
+                                    borderBottomWidth: index < Math.min(recentPayments.length, 5) - 1 ? 1 : 0,
+                                    borderBottomColor: '#F8FAFC',
+                                }}>
+                                    <View style={{
+                                        width: 40, height: 40, borderRadius: 12,
+                                        backgroundColor: '#F0FDF4', justifyContent: 'center',
+                                        alignItems: 'center', marginRight: 12,
+                                    }}>
+                                        <Text style={{ fontSize: 18 }}>{getMethodIcon(payment.method)}</Text>
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={{ fontSize: 14, fontWeight: '600', color: '#0F172A' }} numberOfLines={1}>
+                                            {payment.studentName}
+                                        </Text>
+                                        <Text style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>
+                                            {payment.className}{payment.sectionName ? ` - ${payment.sectionName}` : ''} • {formatDate(payment.date)}
+                                        </Text>
+                                    </View>
+                                    <View style={{ alignItems: 'flex-end' }}>
+                                        <Text style={{ fontSize: 15, fontWeight: '700', color: '#10B981' }}>₹{payment.amount}</Text>
+                                        <Text style={{ fontSize: 10, color: '#94A3B8', marginTop: 2, textTransform: 'capitalize' }}>
+                                            {payment.method?.toLowerCase()?.replace('_', ' ') || 'N/A'}
+                                        </Text>
+                                    </View>
+                                </View>
+                            ))}
+                        </View>
+                    )}
+                </Animated.View>
+
+                {/* Upcoming Events - matching parent/teacher pattern */}
+                <Animated.View entering={FadeInDown.delay(700).duration(600)} style={styles.section}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Upcoming Events</Text>
+                        <HapticTouchable onPress={() => navigateOnce('/(screens)/calendarscreen')}>
+                            <Text style={styles.seeAll}>See All</Text>
+                        </HapticTouchable>
+                    </View>
+                    <View style={styles.eventsContainer}>
+                        {upcomingEvents && upcomingEvents.length > 0 ? (
+                            upcomingEvents.slice(0, 4).map((event, index) => (
+                                <Animated.View key={event.id} entering={FadeInRight.delay(800 + index * 100).duration(500)}>
+                                    <HapticTouchable onPress={() => navigateOnce({ pathname: '/(screens)/calendarscreen', params: { eventid: event.id } })}>
+                                        <View style={styles.eventCard}>
+                                            <View style={[styles.eventIcon, { backgroundColor: event.color + '20' }]}>
+                                                <Text style={styles.eventEmoji}>{event.icon}</Text>
+                                            </View>
+                                            <View style={styles.eventInfo}>
+                                                <Text style={styles.eventTitle}>{event.title}</Text>
+                                                <View style={styles.eventDate}>
+                                                    <Calendar size={14} color="#666" />
+                                                    <Text style={styles.eventDateText}>{event.date}</Text>
+                                                </View>
+                                            </View>
+                                            <ChevronRight size={20} color="#999" />
+                                        </View>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))
+                        ) : (
+                            <View style={styles.emptyStateCard}>
+                                <View style={styles.emptyStateIconContainer}>
+                                    <Calendar size={28} color="#10b981" />
+                                </View>
+                                <Text style={styles.emptyStateTitle}>You're all caught up!</Text>
+                                <Text style={styles.emptyStateSubtitle}>No upcoming events scheduled</Text>
+                                <HapticTouchable
+                                    onPress={() => navigateOnce('/(screens)/calendarscreen')}
+                                    style={styles.emptyStateButton}
+                                >
+                                    <Text style={styles.emptyStateButtonText}>View Calendar</Text>
+                                    <ChevronRight size={16} color="#0469ff" />
+                                </HapticTouchable>
+                            </View>
+                        )}
+                    </View>
+                </Animated.View>
+
+                {/* Recent Notices - matching parent/teacher pattern */}
+                <Animated.View entering={FadeInDown.delay(800).duration(600)} style={[styles.section, { marginBottom: 30 }]}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Recent Notices</Text>
+                        <HapticTouchable onPress={() => navigateOnce('/(tabs)/noticeboard')}>
+                            <Text style={styles.seeAll}>View All</Text>
+                        </HapticTouchable>
+                    </View>
+                    <View style={styles.noticesContainer}>
+                        {notices && notices.length > 0 ? (
+                            notices.map((notice, index) => (
+                                <Animated.View key={notice.id} entering={FadeInRight.delay(900 + index * 100).duration(500)}>
+                                    <HapticTouchable onPress={() => navigateOnce('/(tabs)/noticeboard')}>
+                                        <View style={styles.noticeCard}>
+                                            <View style={styles.noticeLeft}>
+                                                <View style={[styles.noticeIcon, notice.unread && styles.unreadIcon]}>
+                                                    <Bell size={16} color={notice.unread ? '#0469ff' : '#999'} />
+                                                </View>
+                                                <View style={styles.noticeInfo}>
+                                                    <Text style={[styles.noticeTitle, notice.unread && styles.unreadTitle]}>
+                                                        {notice.title}
+                                                    </Text>
+                                                    <Text style={styles.noticeTime}>{notice.time}</Text>
+                                                </View>
+                                            </View>
+                                            <ChevronRight size={18} color="#999" />
+                                        </View>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))
+                        ) : (
+                            <View style={styles.emptyStateCard}>
+                                <View style={styles.emptyStateIconContainer}>
+                                    <Bell size={28} color="#0469ff" />
+                                </View>
+                                <Text style={styles.emptyStateTitle}>No notices</Text>
+                                <Text style={styles.emptyStateSubtitle}>School notices will appear here</Text>
+                            </View>
                         )}
                     </View>
                 </Animated.View>

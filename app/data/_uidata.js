@@ -67,6 +67,13 @@ export const dataUi = {
         { "text": "Principal", "type": "role" }
       ],
       "icons": ["refresh", "bell"]
+    },
+    "accountant": {
+      "title": "{name}",
+      "subtitle": [
+        { "text": "Accountant", "type": "role" }
+      ],
+      "icons": ["refresh", "bell"]
     }
   },
   "upcomingExam": {

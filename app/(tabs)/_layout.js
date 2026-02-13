@@ -65,6 +65,8 @@ function TabsLayout() {
         return { showHome: true, showProfile: true, markSelf: false, showNoticeBoard: true, showMarkAttendance: false };
       case 'PRINCIPAL':
         return { showHome: true, showProfile: true, markSelf: false, showNoticeBoard: true, showMarkAttendance: false };
+      case 'ACCOUNTANT':
+        return { showHome: true, showProfile: true, markSelf: false, showNoticeBoard: true, showMarkAttendance: false };
       default:
         return { showHome: true, showProfile: true, showNoticeBoard: false, markSelf: false, showMarkAttendance: false };
     }

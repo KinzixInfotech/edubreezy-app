@@ -33,6 +33,9 @@ const ROLE_COLORS = {
     ADMIN: '#EF4444',
     DRIVER: '#F59E0B',
     CONDUCTOR: '#06B6D4',
+    ACCOUNTANT: '#84CC16',
+    DIRECTOR: '#7C3AED',
+    PRINCIPAL: '#DC2626',
 };
 
 import { useQueryClient } from '@tanstack/react-query';

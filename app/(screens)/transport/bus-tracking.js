@@ -27,26 +27,98 @@ import {
     AlertCircle,
     Sun,
     Moon,
+    ZoomIn,
+    ZoomOut,
+    Locate,
+    School,
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import HapticTouchable from '../../components/HapticTouch';
-import api from '../../../lib/api';
+import api, { API_BASE_URL } from '../../../lib/api';
+import { fetchRouteDirections } from '../../../lib/google-maps-service';
+import { calculateETA, resetETAState } from '../../../lib/eta-service';
+import { getSchoolLocation } from '../../../lib/geofence-service';
 import { StatusBar } from 'expo-status-bar';
 
 const { height, width } = Dimensions.get('window');
 
-// Memoized bus marker to prevent unnecessary re-renders (fixes iOS lag)
-const BusMarkerView = memo(({ status, isStale }) => (
-    <View style={[styles.busMarker,
-    isStale ? styles.busMarkerStale :
-        status === 'MOVING' ? styles.busMarkerMoving :
-            status === 'IDLE' ? styles.busMarkerIdle :
-                styles.busMarkerOffline
-    ]}>
-        <Bus size={20} color="#fff" />
-    </View>
-));
+// Blinkit-style clean map — hides EVERYTHING except roads
+const CLEAN_MAP_STYLE = [
+    // Hide ALL points of interest
+    {
+        featureType: "all",
+        elementType: "labels.text",
+        stylers: [{ visibility: "off" }]
+    },
+    // Hide ALL transit
+    { featureType: 'transit', elementType: 'all', stylers: [{ visibility: 'off' }] },
+    // Hide ALL road labels and icons
+    { featureType: 'road', elementType: 'labels', stylers: [{ visibility: 'on' }] },
+    // Hide ALL administrative labels (city names, neighborhoods, etc.)
+    { featureType: 'administrative', elementType: 'labels', stylers: [{ visibility: 'off' }] },
+    // Hide water labels
+    { featureType: 'water', elementType: 'labels', stylers: [{ visibility: 'on' }] },
+    // Subtle road colors
+    { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#dadada' }] },
+    { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#cfcfcf' }] },
+    { featureType: 'road.arterial', elementType: 'geometry', stylers: [{ color: '#e8e8e8' }] },
+    { featureType: 'road.local', elementType: 'geometry', stylers: [{ color: '#f0f0f0' }] },
+    // Very light landscape
+    { featureType: 'landscape', elementType: 'geometry', stylers: [{ color: '#f7f7f7' }] },
+    // Subtle water
+    { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#dbeafe' }] },
+    // Subtle parks
+    { featureType: 'poi.park', elementType: 'geometry', stylers: [{ visibility: 'on' }, { color: '#e8f5e9' }] },
+];
+
+// Blinkit-inspired bus marker — uses Text for guaranteed Android rendering
+const BusMarkerView = memo(({ status, isStale, licensePlate }) => {
+    const bgColor = isStale ? '#F97316' :
+        status === 'MOVING' ? '#22C55E' :
+            status === 'IDLE' ? '#F59E0B' : '#EF4444';
+
+    return (
+        <View style={{ width: 120, height: 85, alignItems: 'center', justifyContent: 'flex-end' }}>
+            {/* License Plate Badge */}
+            {licensePlate ? (
+                <View style={{
+                    backgroundColor: '#1E293B',
+                    paddingHorizontal: 8, paddingVertical: 3,
+                    borderRadius: 8, borderWidth: 2, borderColor: '#fff',
+                    marginBottom: 2, elevation: 5,
+                }}>
+                    <Text style={{ color: '#fff', fontSize: 10, fontWeight: '900', letterSpacing: 0.5 }}>
+                        {licensePlate}
+                    </Text>
+                </View>
+            ) : null}
+            {/* Pin Circle with emoji (guaranteed to render on Android) */}
+            <View style={{
+                width: 42, height: 42, borderRadius: 21,
+                backgroundColor: bgColor,
+                alignItems: 'center', justifyContent: 'center',
+                borderWidth: 3, borderColor: '#fff',
+                elevation: 8,
+            }}>
+                <Text style={{ fontSize: 20 }}>🚌</Text>
+            </View>
+            {/* Pointer */}
+            <View style={{
+                width: 0, height: 0,
+                borderLeftWidth: 7, borderRightWidth: 7, borderTopWidth: 8,
+                borderLeftColor: 'transparent', borderRightColor: 'transparent',
+                borderTopColor: '#fff', marginTop: -2,
+            }} />
+            {/* Shadow dot */}
+            <View style={{
+                width: 14, height: 5, borderRadius: 7,
+                backgroundColor: 'rgba(0,0,0,0.15)',
+                marginTop: 1,
+            }} />
+        </View>
+    );
+});
 
 export default function BusTrackingScreen() {
     const params = useLocalSearchParams();
@@ -54,6 +126,10 @@ export default function BusTrackingScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const mapRef = useRef(null);
     const markerRef = useRef(null);
+    const [routePolyline, setRoutePolyline] = useState(null);
+    const [googleETA, setGoogleETA] = useState(null);
+    const [zoomLevel, setZoomLevel] = useState(0.015);
+    const [schoolLocation, setSchoolLocation] = useState(null); // Cost-optimized ETA result
 
     // Parse child data from params
     const childData = params.childData ? JSON.parse(params.childData) : null;
@@ -83,6 +159,22 @@ export default function BusTrackingScreen() {
 
     const assignment = assignmentData?.assignments?.[0];
     const vehicleId = assignment?.vehicle?.id || assignment?.route?.vehicle?.id;
+
+    // Fetch school location for map marker
+    useEffect(() => {
+        if (schoolId) {
+            console.log('[BusTracking] Fetching school location for schoolId:', schoolId);
+            getSchoolLocation(schoolId, API_BASE_URL)
+                .then(loc => {
+                    console.log('[BusTracking] School location result:', JSON.stringify(loc));
+                    if (loc?.latitude && loc?.longitude) setSchoolLocation(loc);
+                    else console.warn('[BusTracking] School location missing lat/lng:', loc);
+                })
+                .catch((err) => {
+                    console.error('[BusTracking] School location fetch failed:', err);
+                });
+        }
+    }, [schoolId]);
 
     // Fetch bus location - poll every 10 seconds
     const { data: locationData, isLoading: locationLoading, refetch } = useQuery({
@@ -125,6 +217,8 @@ export default function BusTrackingScreen() {
 
     // Calculate ETA to child's stop
     const childStop = assignment?.stop;
+    console.log('[BusTracking] childStop:', childStop?.name, childStop?.latitude, childStop?.longitude);
+    console.log('[BusTracking] assignment:', assignment?.id, 'vehicle:', vehicle?.licensePlate);
     const distanceToStop = (location?.latitude && childStop?.latitude)
         ? getDistanceKm(location.latitude, location.longitude, childStop.latitude, childStop.longitude)
         : null;
@@ -140,18 +234,60 @@ export default function BusTrackingScreen() {
         ? new Date(Date.now() + etaMinutes * 60 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         : null;
 
-    // Move map camera when bus location updates (native animation for smooth iOS performance)
+    // Auto-fit map to show relevant markers on initial load
     useEffect(() => {
-        if (location?.latitude && location?.longitude && mapRef.current) {
-            // Use native animateToRegion for smoother iOS performance
+        if (!mapRef.current) return;
+
+        if (busIsActive && location?.latitude && childStop?.latitude) {
+            // Active: fit to bus + child stop + optional school
+            const coords = [
+                { latitude: location.latitude, longitude: location.longitude },
+                { latitude: childStop.latitude, longitude: childStop.longitude },
+            ];
+            if (schoolLocation?.latitude) {
+                coords.push({ latitude: schoolLocation.latitude, longitude: schoolLocation.longitude });
+            }
+            setTimeout(() => {
+                mapRef.current?.fitToCoordinates(coords, {
+                    edgePadding: { top: 80, right: 60, bottom: 60, left: 60 },
+                    animated: true,
+                });
+            }, 500);
+        } else if (childStop?.latitude) {
+            // Offline: fit to home + school (if available), else just center on home
+            const coords = [{ latitude: childStop.latitude, longitude: childStop.longitude }];
+            if (schoolLocation?.latitude) {
+                coords.push({ latitude: schoolLocation.latitude, longitude: schoolLocation.longitude });
+            }
+            setTimeout(() => {
+                if (coords.length > 1) {
+                    mapRef.current?.fitToCoordinates(coords, {
+                        edgePadding: { top: 100, right: 60, bottom: 60, left: 60 },
+                        animated: true,
+                    });
+                } else {
+                    mapRef.current?.animateToRegion({
+                        latitude: childStop.latitude,
+                        longitude: childStop.longitude,
+                        latitudeDelta: 0.008,
+                        longitudeDelta: 0.008,
+                    }, 500);
+                }
+            }, 500);
+        }
+    }, [!!location, !!childStop, !!schoolLocation, busIsActive]);
+
+    // Track bus position only when active
+    useEffect(() => {
+        if (busIsActive && location?.latitude && location?.longitude && mapRef.current) {
             mapRef.current.animateToRegion({
                 latitude: location.latitude,
                 longitude: location.longitude,
                 latitudeDelta: 0.008,
                 longitudeDelta: 0.008,
-            }, 500); // Shorter duration = less lag
+            }, 500);
         }
-    }, [location?.latitude, location?.longitude]);
+    }, [busIsActive, location?.latitude, location?.longitude]);
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
@@ -163,6 +299,34 @@ export default function BusTrackingScreen() {
         if (phoneNumber) {
             Linking.openURL(`tel:${phoneNumber}`);
         }
+    };
+
+    // Zoom controls
+    const handleZoomIn = async () => {
+        if (!mapRef.current) return;
+        try {
+            const camera = await mapRef.current.getCamera();
+            mapRef.current.animateCamera({ ...camera, zoom: (camera.zoom || 14) + 1 }, { duration: 300 });
+        } catch (e) { }
+    };
+
+    const handleZoomOut = async () => {
+        if (!mapRef.current) return;
+        try {
+            const camera = await mapRef.current.getCamera();
+            mapRef.current.animateCamera({ ...camera, zoom: Math.max((camera.zoom || 14) - 1, 5) }, { duration: 300 });
+        } catch (e) { }
+    };
+
+    // Focus on bus
+    const focusOnBus = () => {
+        if (!location?.latitude || !mapRef.current) return;
+        mapRef.current.animateToRegion({
+            latitude: location.latitude,
+            longitude: location.longitude,
+            latitudeDelta: 0.005,
+            longitudeDelta: 0.005,
+        }, 500);
     };
 
     const isLoading = assignmentLoading || locationLoading;
@@ -177,10 +341,46 @@ export default function BusTrackingScreen() {
         return `${Math.floor(seconds / 3600)}h ago`;
     };
 
-    // Build route polyline
-    const routeCoordinates = stops
-        .filter(s => s.latitude && s.longitude)
-        .map(s => ({ latitude: s.latitude, longitude: s.longitude }));
+    // ====== BLINKIT-STYLE POLYLINE LOGIC ======
+    // When bus is ACTIVE (MOVING/IDLE) → solid blue road-following polyline from bus → child stop
+    // When bus is OFFLINE → dashed line from school → child stop
+    const busIsActive = status === 'MOVING' || status === 'IDLE';
+
+    // Fetch Google Directions route (only when bus is active)
+    useEffect(() => {
+        if (!busIsActive || !location?.latitude || !childStop?.latitude) {
+            setRoutePolyline(null);
+            return;
+        }
+
+        const origin = { latitude: location.latitude, longitude: location.longitude };
+        const destination = { latitude: childStop.latitude, longitude: childStop.longitude };
+        const cacheKey = `route_${Math.round(origin.latitude * 100)}_${Math.round(origin.longitude * 100)}_${Math.round(destination.latitude * 100)}`;
+
+        fetchRouteDirections([origin, destination], cacheKey)
+            .then(result => {
+                if (result?.polyline?.length) {
+                    setRoutePolyline(result.polyline);
+                }
+            })
+            .catch(() => { });
+
+        return () => resetETAState();
+    }, [busIsActive, location?.latitude, location?.longitude, childStop?.latitude]);
+
+    // Cost-optimized ETA calculation (Google Distance Matrix within 3km, speed/haversine fallback)
+    useEffect(() => {
+        if (!location?.latitude || !childStop?.latitude) {
+            setGoogleETA(null);
+            return;
+        }
+        calculateETA(
+            { latitude: location.latitude, longitude: location.longitude, speed: location.speed },
+            childStop
+        )
+            .then(eta => setGoogleETA(eta))
+            .catch(() => setGoogleETA(null));
+    }, [location?.latitude, location?.longitude, childStop?.id]);
 
     // No child data error state
     if (!childData) {
@@ -203,22 +403,10 @@ export default function BusTrackingScreen() {
         );
     }
 
-    const [tracksViewChanges, setTracksViewChanges] = useState(true);
 
-    // Optimization: Stop tracking view changes after render to save memory/battery
-    useEffect(() => {
-        if (tracksViewChanges) {
-            const timer = setTimeout(() => {
-                setTracksViewChanges(false);
-            }, 500);
-            return () => clearTimeout(timer);
-        }
-    }, [tracksViewChanges]);
+    // NOTE: tracksViewChanges is hardcoded to {true} on all markers.
+    // Android fails to render custom View markers if tracksViewChanges flips to false.
 
-    // Restart tracking when visual state changes
-    useEffect(() => {
-        setTracksViewChanges(true);
-    }, [status, isStale]);
 
     return (
         <View style={styles.container}>
@@ -261,111 +449,181 @@ export default function BusTrackingScreen() {
             ) : (
                 <View style={styles.contentContainer}>
                     {/* Map View */}
-                    <View style={styles.mapContainer}>
-                        {!location ? (
-                            <View style={styles.mapPlaceholder}>
-                                <View style={styles.mapOverlay}>
-                                    <MapPin size={32} color="#64748B" />
-                                    <Text style={styles.mapOverlayTitle}>Waiting for live location...</Text>
-                                    <Text style={styles.mapOverlayText}>Bus has not sent location data yet.</Text>
-                                </View>
-                            </View>
-                        ) : (
-                            <MapView
-                                ref={mapRef}
-                                provider={PROVIDER_GOOGLE}
-                                style={styles.map}
-                                mapType="standard"
-                                showsPointsOfInterest={true}
-                                showsBuildings={true}
-                                initialRegion={{
-                                    latitude: location.latitude,
-                                    longitude: location.longitude,
-                                    latitudeDelta: 0.008,
-                                    longitudeDelta: 0.008,
-                                }}
-                                showsUserLocation={true}
-                                showsMyLocationButton={true}
-                                rotateEnabled={false} // Keep north up for less confusion
-                            >
-                                <Marker
-                                    ref={markerRef}
-                                    coordinate={{
-                                        latitude: location.latitude,
-                                        longitude: location.longitude,
-                                    }}
-                                    title={vehicle?.licensePlate}
-                                    anchor={{ x: 0.5, y: 0.5 }}
-                                    tracksViewChanges={tracksViewChanges}
-                                >
-                                    <BusMarkerView status={status} isStale={isStale} />
-                                </Marker>
-
-                                {/* Route Line */}
-                                {routeCoordinates.length > 1 && (
-                                    <Polyline
-                                        coordinates={routeCoordinates}
-                                        strokeColor="#3B82F6"
-                                        strokeWidth={4}
-                                    />
-                                )}
-
-                                {/* Stop Markers - tracksViewChanges=false for iOS performance */}
-                                {stops.map((stop, index) => (
-                                    stop.latitude && stop.longitude && (
-                                        <Marker
-                                            key={stop.id}
-                                            coordinate={{
-                                                latitude: stop.latitude,
-                                                longitude: stop.longitude,
-                                            }}
-                                            title={stop.name}
-                                            pinColor={index === 0 ? 'green' : index === stops.length - 1 ? 'red' : 'blue'}
-                                            tracksViewChanges={false}
-                                        />
-                                    )
-                                ))}
-                            </MapView>
-                        )}
-
-                        {/* Status Overlay */}
-                        <View style={styles.statusOverlay}>
-                            <View style={[styles.statusBadge,
-                            isStale ? styles.statusBadgeOffline :
-                                status === 'MOVING' ? styles.statusBadgeMoving :
-                                    status === 'IDLE' ? styles.statusBadgeIdle :
-                                        styles.statusBadgeOffline
-                            ]}>
-                                <View style={[styles.statusDot,
-                                isStale ? styles.statusDotOffline :
-                                    status === 'MOVING' ? styles.statusDotMoving :
-                                        status === 'IDLE' ? styles.statusDotIdle :
-                                            styles.statusDotOffline
-                                ]} />
-                                <Text style={[styles.statusText,
-                                isStale ? styles.statusTextOffline :
-                                    status === 'MOVING' ? styles.statusTextMoving :
-                                        status === 'IDLE' ? styles.statusTextIdle :
-                                            styles.statusTextOffline
-                                ]}>
-                                    {isStale ? 'Delayed Update' :
-                                        status === 'MOVING' ? 'Moving' :
-                                            status === 'IDLE' ? 'Idle' : 'Offline'}
-                                </Text>
-                            </View>
-                            <View style={styles.timeBadge}>
-                                <Clock size={12} color="#64748B" />
-                                <Text style={styles.timeText}>Updated: {formatTimeAgo(secondsAgo, status)}</Text>
-                            </View>
-                        </View>
-                    </View>
-
-                    {/* Info Cards ScrollView */}
                     <ScrollView
                         style={styles.detailsContainer}
                         showsVerticalScrollIndicator={false}
                         contentContainerStyle={{ paddingBottom: 40 }}
                     >
+                        <View style={{ borderRadius: 10, marginBottom: 20, overflow: 'hidden', borderWidth: 1, borderColor: '#E2E8F0' }}>
+                            <View style={styles.mapContainer}>
+                                {!location ? (
+                                    <View style={styles.mapPlaceholder}>
+                                        <View style={styles.mapOverlay}>
+                                            <MapPin size={32} color="#64748B" />
+                                            <Text style={styles.mapOverlayTitle}>Waiting for live location...</Text>
+                                            <Text style={styles.mapOverlayText}>Bus has not sent location data yet.</Text>
+                                        </View>
+                                    </View>
+                                ) : (
+                                    <MapView
+                                        ref={mapRef}
+                                        provider={PROVIDER_GOOGLE}
+                                        style={styles.map}
+                                        mapType="standard"
+                                        customMapStyle={CLEAN_MAP_STYLE}
+                                        showsPointsOfInterest={false}
+                                        showsBuildings={false}
+                                        showsTraffic={false}
+                                        showsIndoors={false}
+                                        toolbarEnabled={false}
+                                        initialRegion={{
+                                            latitude: location.latitude,
+                                            longitude: location.longitude,
+                                            latitudeDelta: 0.015,
+                                            longitudeDelta: 0.015,
+                                        }}
+                                        showsUserLocation={false}
+                                        showsMyLocationButton={false}
+                                        rotateEnabled={false}
+                                        onRegionChangeComplete={(region) => setZoomLevel(region.latitudeDelta)}
+                                    >
+                                        {/* ====== BUS MARKER (only when active — hide when offline) ====== */}
+                                        {busIsActive && (
+                                            <Marker
+                                                ref={markerRef}
+                                                coordinate={{
+                                                    latitude: location.latitude,
+                                                    longitude: location.longitude,
+                                                }}
+                                                anchor={{ x: 0.5, y: 0.5 }}
+                                                title={`🚌 ${vehicle?.licensePlate || 'Bus'}`}
+                                                description={status === 'MOVING' ? 'On the way' : 'Idle'}
+                                                image={require('../../../assets/marker.png')}
+                                                style={{
+                                                    width: 50,
+                                                    height: 50,
+                                                    resizeMode: "contain",
+                                                    shadowColor: "#000",
+                                                    shadowOpacity: 0.25,
+                                                    shadowRadius: 4,
+                                                    elevation: 6,
+                                                }}
+                                            />
+                                        )}
+
+                                        {/* ====== HOME / STOP MARKER (always visible) ====== */}
+                                        {childStop?.latitude && childStop?.longitude && (
+                                            <Marker
+                                                coordinate={{ latitude: childStop.latitude, longitude: childStop.longitude }}
+                                                title={`🏠 ${childStop.name || 'Stop'}`}
+                                                image={require('../../../assets/house.png')}
+                                                description="Child's bus stop"
+
+                                            />
+                                        )}
+
+                                        {/* ====== POLYLINES ====== */}
+                                        {/* ACTIVE: shadow + blue road-following line */}
+                                        {busIsActive && routePolyline?.length > 1 && (
+                                            <Polyline
+                                                coordinates={routePolyline}
+                                                strokeColor="rgba(0,0,0,0.08)"
+                                                strokeWidth={12}
+                                            />
+                                        )}
+                                        {busIsActive && routePolyline?.length > 1 && (
+                                            <Polyline
+                                                coordinates={routePolyline}
+                                                strokeColor="#2563EB"
+                                                strokeWidth={5}
+                                            />
+                                        )}
+                                        {/* ACTIVE fallback: straight line */}
+                                        {busIsActive && !routePolyline && childStop?.latitude && (
+                                            <Polyline
+                                                coordinates={[
+                                                    { latitude: location.latitude, longitude: location.longitude },
+                                                    { latitude: childStop.latitude, longitude: childStop.longitude },
+                                                ]}
+                                                strokeColor="#2563EB"
+                                                strokeWidth={4}
+                                            />
+                                        )}
+                                        {/* OFFLINE: dashed line between school ↔ home */}
+                                        {!busIsActive && childStop?.latitude && schoolLocation?.latitude && (
+                                            <Polyline
+                                                coordinates={[
+                                                    { latitude: schoolLocation.latitude, longitude: schoolLocation.longitude },
+                                                    { latitude: childStop.latitude, longitude: childStop.longitude },
+                                                ]}
+                                                strokeColor="#94A3B8"
+                                                strokeWidth={3}
+                                                lineDashPattern={[12, 6]}
+                                            />
+                                        )}
+
+                                        {/* ====== SCHOOL MARKER (only when zoomed in enough) ====== */}
+                                        {schoolLocation?.latitude && schoolLocation?.longitude && (
+                                            <Marker
+                                                coordinate={{ latitude: schoolLocation.latitude, longitude: schoolLocation.longitude }}
+                                                // image={require('../../../assets/school.png')}
+                                                title={`🏫 ${userData?.school?.name || 'School'}`}
+                                                description="School location"
+                                            />
+                                        )}
+                                    </MapView>
+                                )}
+
+                                {/* Status Overlay */}
+                                <View style={styles.statusOverlay}>
+                                    <View style={[styles.statusBadge,
+                                    isStale ? styles.statusBadgeOffline :
+                                        status === 'MOVING' ? styles.statusBadgeMoving :
+                                            status === 'IDLE' ? styles.statusBadgeIdle :
+                                                styles.statusBadgeOffline
+                                    ]}>
+                                        <View style={[styles.statusDot,
+                                        isStale ? styles.statusDotOffline :
+                                            status === 'MOVING' ? styles.statusDotMoving :
+                                                status === 'IDLE' ? styles.statusDotIdle :
+                                                    styles.statusDotOffline
+                                        ]} />
+                                        <Text style={[styles.statusText,
+                                        isStale ? styles.statusTextOffline :
+                                            status === 'MOVING' ? styles.statusTextMoving :
+                                                status === 'IDLE' ? styles.statusTextIdle :
+                                                    styles.statusTextOffline
+                                        ]}>
+                                            {isStale ? 'Delayed Update' :
+                                                status === 'MOVING' ? 'Moving' :
+                                                    status === 'IDLE' ? 'Idle' : 'Offline'}
+                                        </Text>
+                                    </View>
+                                    <View style={styles.timeBadge}>
+                                        <Clock size={12} color="#64748B" />
+                                        <Text style={styles.timeText}>Updated: {formatTimeAgo(secondsAgo, status)}</Text>
+                                    </View>
+                                </View>
+
+                                {/* Map Controls — Zoom In/Out + Focus on Bus */}
+                                <View style={styles.mapControlsContainer}>
+                                    <HapticTouchable onPress={handleZoomIn} style={styles.mapControlBtn}>
+                                        <ZoomIn size={18} color="#334155" />
+                                    </HapticTouchable>
+                                    <HapticTouchable onPress={handleZoomOut} style={styles.mapControlBtn}>
+                                        <ZoomOut size={18} color="#334155" />
+                                    </HapticTouchable>
+                                    {location && (
+                                        <HapticTouchable onPress={focusOnBus} style={[styles.mapControlBtn, { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' }]}>
+                                            <Locate size={18} color="#2563EB" />
+                                        </HapticTouchable>
+                                    )}
+                                </View>
+                            </View>
+                        </View>
+
+                        {/* Info Cards ScrollView */}
+
                         {/* Driver Card */}
                         {driver && (
                             <View style={styles.card}>
@@ -394,20 +652,31 @@ export default function BusTrackingScreen() {
                         )}
 
                         {/* ETA Card - Show when bus is moving and we have ETA data */}
-                        {status === 'MOVING' && etaMinutes !== null && (
+                        {status === 'MOVING' && (googleETA || etaMinutes !== null) && (
                             <View style={styles.etaCard}>
                                 <View style={styles.etaHeader}>
                                     <Clock size={20} color="#2563EB" />
                                     <Text style={styles.etaTitle}>Arriving Soon!</Text>
+                                    {googleETA?.source && (
+                                        <View style={{ backgroundColor: googleETA.source === 'google' ? '#DBEAFE' : '#F3F4F6', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8, marginLeft: 'auto' }}>
+                                            <Text style={{ fontSize: 9, fontWeight: '600', color: googleETA.source === 'google' ? '#2563EB' : '#6B7280' }}>
+                                                {googleETA.source === 'google' ? '🚦 Traffic' : googleETA.source === 'speed' ? '📡 GPS' : '📏 Est.'}
+                                            </Text>
+                                        </View>
+                                    )}
                                 </View>
                                 <View style={styles.etaContent}>
                                     <View style={styles.etaItem}>
-                                        <Text style={styles.etaValue}>{distanceToStop?.toFixed(1)} km</Text>
+                                        <Text style={styles.etaValue}>
+                                            {googleETA ? `${(googleETA.distance / 1000).toFixed(1)} km` : `${distanceToStop?.toFixed(1)} km`}
+                                        </Text>
                                         <Text style={styles.etaLabel}>Distance</Text>
                                     </View>
                                     <View style={styles.etaDivider} />
                                     <View style={styles.etaItem}>
-                                        <Text style={styles.etaValue}>{etaMinutes} min</Text>
+                                        <Text style={styles.etaValue}>
+                                            {googleETA ? `${googleETA.etaMinutes} min` : `${etaMinutes} min`}
+                                        </Text>
                                         <Text style={styles.etaLabel}>ETA</Text>
                                     </View>
                                     <View style={styles.etaDivider} />
@@ -588,9 +857,10 @@ export default function BusTrackingScreen() {
                             <Text style={styles.tipsText}>• Pull down to refresh for latest location</Text>
                         </View>
                     </ScrollView>
-                </View>
-            )}
-        </View>
+                </View >
+            )
+            }
+        </View >
     );
 }
 
@@ -603,7 +873,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingTop: Platform.OS === 'ios' ? 60 : 40,
+        paddingTop: Platform.OS === 'ios' ? 65 : 48,
         paddingBottom: 16,
         paddingHorizontal: 20,
         backgroundColor: '#fff',
@@ -669,10 +939,9 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     mapContainer: {
-        height: height * 0.45,
+        height: height * 0.50,
         width: '100%',
         position: 'relative',
-        paddingBottom: 30, // Space for Google logo
     },
     map: {
         ...StyleSheet.absoluteFillObject,
@@ -704,6 +973,27 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#64748B',
         marginTop: 4,
+    },
+    mapControlsContainer: {
+        position: 'absolute',
+        right: 12,
+        bottom: 16,
+        gap: 8,
+    },
+    mapControlBtn: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: '#fff',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.15,
+        shadowRadius: 3,
+        elevation: 3,
     },
     statusOverlay: {
         position: 'absolute',
@@ -763,20 +1053,17 @@ const styles = StyleSheet.create({
     detailsContainer: {
         flex: 1,
         backgroundColor: '#F8FAFC',
-        borderTopLeftRadius: 24,
-        borderTopRightRadius: 24,
-        marginTop: -20, // Overlap for rounded corner effect
-        paddingTop: 20,
+        paddingTop: 12,
         paddingHorizontal: 16,
         paddingBottom: 40,
     },
     card: {
         backgroundColor: '#fff',
-        borderRadius: 16,
+        borderRadius: 12,
         borderWidth: 1,
         borderColor: '#E2E8F0',
         padding: 16,
-        marginBottom: 16,
+        marginBottom: 12,
     },
     warningCard: {
         backgroundColor: '#FEFCE8',
@@ -908,24 +1195,6 @@ const styles = StyleSheet.create({
         fontSize: 13,
         color: '#B45309',
     },
-    busMarker: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 2,
-        borderColor: '#fff',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.2,
-        shadowRadius: 3,
-        elevation: 5,
-    },
-    busMarkerMoving: { backgroundColor: '#10B981' },
-    busMarkerIdle: { backgroundColor: '#EAB308' },
-    busMarkerOffline: { backgroundColor: '#EF4444' },
-    busMarkerStale: { backgroundColor: '#F97316' }, // Orange for stale data
 
     // Vehicle Info Grid
     vehicleInfoGrid: {

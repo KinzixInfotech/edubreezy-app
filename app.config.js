@@ -5,7 +5,7 @@ export default {
         name: "EduBreezy",
         slug: "EduBreezy",
         scheme: "edubreezy",
-        version: "1.0.1",
+        version: "1.0.2",
         orientation: "portrait",
         icon: "./assets/icon.png",
         userInterfaceStyle: "light",
@@ -111,6 +111,7 @@ export default {
 
         extra: {
             router: {},
+            googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY,
             eas: {
                 projectId: "705e829d-f67a-48d6-b0aa-654cb5ae901d"
             }

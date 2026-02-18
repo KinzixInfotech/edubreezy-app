@@ -46,6 +46,7 @@ import {
     startBackgroundLocationTask,
     stopBackgroundLocationTask,
     flushLocationQueue,
+    updateTripStops,
 } from '../../../lib/transport-location-task';
 import {
     getDistanceMeters,
@@ -59,6 +60,9 @@ import {
     getSchoolLocation,
     isNearSchool,
 } from '../../../lib/geofence-service';
+import { fetchRouteDirections, checkRouteDeviation, clearCachedRoute } from '../../../lib/google-maps-service';
+import { calculateETA, resetETAState } from '../../../lib/eta-service';
+import { animateMarkerMovement, calculateBearing } from '../../../lib/map-utils';
 import { StatusBar } from 'expo-status-bar';
 
 const { height, width } = Dimensions.get('window');
@@ -119,6 +123,11 @@ export default function ActiveTripScreen() {
     const [showCompleteReminder, setShowCompleteReminder] = useState(false); // Reminder when all stops done
     const [schoolLocation, setSchoolLocation] = useState(null); // School coordinates for geofencing
     const [isNearSchoolFlag, setIsNearSchoolFlag] = useState(false); // Flag for approaching school
+    const [routePolyline, setRoutePolyline] = useState(null); // Google Directions polyline
+    const [nextStopETA, setNextStopETA] = useState(null); // ETA to next stop
+    const busMarkerRef = useRef(null); // For animated marker
+    const prevLocationRef = useRef(null); // Previous location for animation
+    const [busHeading, setBusHeading] = useState(0); // Bus heading for marker rotation
 
     // Optimization: Stop tracking view changes after render
     useEffect(() => {
@@ -280,7 +289,12 @@ export default function ActiveTripScreen() {
             const vehicleId = trip?.vehicleId;
             if (!vehicleId) return;
 
-            await startBackgroundLocationTask(tripId, vehicleId, routeName, API_BASE_URL);
+            await startBackgroundLocationTask(tripId, vehicleId, routeName, API_BASE_URL, {
+                schoolId: currentUser?.schoolId,
+                licensePlate: vehicle?.licensePlate,
+                tripType: trip?.tripType,
+                stops,
+            });
             setIsTracking(true);
         } catch (err) {
             console.error('Error starting location tracking:', err);
@@ -320,13 +334,15 @@ export default function ActiveTripScreen() {
         }
     };
 
-    // Handle stop completion
     const handleMarkStopComplete = async (stop) => {
         try {
             const updatedStops = await markStopCompleted(tripId, stop.id);
             setCompletedStopIds(updatedStops);
             setShowStopConfirmModal(false);
             setPendingStopCompletion(null);
+
+            // Sync completed stops to background task for notification dedup
+            await updateTripStops(tripId, updatedStops);
 
             // Check if all stops are completed
             if (areAllStopsCompleted(stops, updatedStops)) {
@@ -388,10 +404,45 @@ export default function ActiveTripScreen() {
         if (phoneNumber) Linking.openURL(`tel:${phoneNumber}`);
     };
 
-    // Build route coordinates
+    // Build route coordinates (fallback if Google Directions not available)
     const routeCoordinates = stops
         .filter(s => s.latitude && s.longitude)
         .map(s => ({ latitude: s.latitude, longitude: s.longitude }));
+
+    // Choose polyline: Google Directions (accurate road-following) or straight-line fallback
+    const displayPolyline = routePolyline || routeCoordinates;
+
+    // Fetch Google Directions route once when trip starts (cached per trip)
+    useEffect(() => {
+        if (stops.length >= 2 && trip?.status === 'IN_PROGRESS') {
+            const stopsWithCoords = stops.filter(s => s.latitude && s.longitude);
+            if (stopsWithCoords.length >= 2) {
+                fetchRouteDirections(stopsWithCoords, `trip_${tripId}`)
+                    .then(result => {
+                        if (result?.polyline?.length) {
+                            setRoutePolyline(result.polyline);
+                            console.log(`[Route] Fetched ${result.polyline.length} points for trip polyline`);
+                        }
+                    })
+                    .catch(err => console.warn('[Route] Directions fetch failed, using straight-line:', err.message));
+            }
+        }
+        return () => {
+            // Cleanup ETA state when component unmounts
+            resetETAState();
+        };
+    }, [trip?.status, stops.length]);
+
+    // Calculate ETA to next stop (cost-optimized, uses cached data when possible)
+    useEffect(() => {
+        if (!currentLocation || !nextStop?.latitude) {
+            setNextStopETA(null);
+            return;
+        }
+        calculateETA(currentLocation, nextStop)
+            .then(eta => setNextStopETA(eta))
+            .catch(() => setNextStopETA(null));
+    }, [currentLocation?.latitude, currentLocation?.longitude, nextStop?.id]);
 
     // Initial map region
     const initialRegion = currentLocation || (stops[0]?.latitude ? {
@@ -499,9 +550,9 @@ export default function ActiveTripScreen() {
                     minZoomLevel={5}
                     maxZoomLevel={20}
                 >
-                    {/* Route Polyline */}
-                    {routeCoordinates.length > 1 && (
-                        <Polyline coordinates={routeCoordinates} strokeColor="#3B82F6" strokeWidth={4} />
+                    {/* Route Polyline — Google Directions (road-following) or straight-line fallback */}
+                    {displayPolyline.length > 1 && (
+                        <Polyline coordinates={displayPolyline} strokeColor="#3B82F6" strokeWidth={4} />
                     )}
 
                     {/* Stop Markers with Name Labels */}
@@ -618,6 +669,14 @@ export default function ActiveTripScreen() {
                         <View style={styles.nextStopBadge}>
                             <Target size={12} color="#10B981" />
                             <Text style={styles.nextStopText}>Next: {nextStop.name}</Text>
+                            {nextStopETA && nextStopETA.etaMinutes >= 0 && (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                    <Clock size={10} color="#64748B" />
+                                    <Text style={styles.nextStopDistance}>
+                                        ~{nextStopETA.etaMinutes}m
+                                    </Text>
+                                </View>
+                            )}
                             {currentLocation && (
                                 <Text style={styles.nextStopDistance}>
                                     {formatDistance(getDistanceMeters(currentLocation.latitude, currentLocation.longitude, nextStop.latitude, nextStop.longitude))}

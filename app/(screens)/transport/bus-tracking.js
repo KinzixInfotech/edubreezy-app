@@ -10,6 +10,7 @@ import {
     RefreshControl,
     Linking,
     Platform,
+    Image,
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -142,6 +143,7 @@ export default function BusTrackingScreen() {
         },
         staleTime: Infinity,
     });
+    console.log("profile", userData);
 
     const schoolId = userData?.schoolId;
 
@@ -200,6 +202,7 @@ export default function BusTrackingScreen() {
     // EDGE CASE: Driver/Conductor from permanent assignment if no active trip
     const driver = locationData?.driver || activeTrip?.driver || assignment?.route?.vehicle?.routeAssignments?.[0]?.driver;
     const conductor = locationData?.conductor || activeTrip?.conductor || assignment?.route?.vehicle?.routeAssignments?.[0]?.conductor;
+    const schoolProfilePicture = locationData?.schoolProfilePicture;
 
     // Edge Case #19: Detect stale data despite "MOVING" status
     const isStale = secondsAgo > 60 && status === 'MOVING';
@@ -564,12 +567,30 @@ export default function BusTrackingScreen() {
 
                                         {/* ====== SCHOOL MARKER (only when zoomed in enough) ====== */}
                                         {schoolLocation?.latitude && schoolLocation?.longitude && (
-                                            <Marker
-                                                coordinate={{ latitude: schoolLocation.latitude, longitude: schoolLocation.longitude }}
-                                                // image={require('../../../assets/school.png')}
-                                                title={`🏫 ${userData?.school?.name || 'School'}`}
-                                                description="School location"
-                                            />
+                                            <View>
+
+                                                <Marker
+                                                    coordinate={{
+                                                        latitude: Number(schoolLocation.latitude),
+                                                        longitude: Number(schoolLocation.longitude),
+                                                    }}
+
+
+                                                    title={`🏫 ${userData?.school?.name || 'School'}`}
+                                                    description="School location"
+                                                >
+                                                    <Image
+                                                        source={
+                                                            schoolProfilePicture
+                                                                ? { uri: schoolProfilePicture }
+                                                                : require('../../../assets/school.png')
+                                                        }
+                                                        style={{ width: 33, height: 33, borderRadius: 20 }}
+                                                        resizeMode="contain"
+                                                    />
+                                                </Marker>
+                                            </View>
+
                                         )}
                                     </MapView>
                                 )}
@@ -634,7 +655,14 @@ export default function BusTrackingScreen() {
                                 </View>
                                 <View style={styles.driverRow}>
                                     <View style={styles.driverAvatar}>
-                                        <Text style={styles.driverInitials}>{driver.name?.charAt(0) || 'D'}</Text>
+                                        {driver.profilePicture && driver.profilePicture !== 'default.png' ? (
+                                            <Image
+                                                source={{ uri: driver.profilePicture }}
+                                                style={styles.driverAvatarImage}
+                                            />
+                                        ) : (
+                                            <Text style={styles.driverInitials}>{driver.name?.charAt(0) || 'D'}</Text>
+                                        )}
                                     </View>
                                     <View style={styles.driverInfo}>
                                         <Text style={styles.driverName}>{driver.name}</Text>
@@ -707,8 +735,15 @@ export default function BusTrackingScreen() {
                                     <Text style={styles.cardTitle}>Conductor</Text>
                                 </View>
                                 <View style={styles.driverRow}>
-                                    <View style={[styles.driverAvatar, { backgroundColor: '#F3E8FF' }]}>
-                                        <Text style={[styles.driverInitials, { color: '#9333EA' }]}>{conductor.name?.charAt(0) || 'C'}</Text>
+                                    <View style={[styles.driverAvatar, { backgroundColor: conductor.profilePicture && conductor.profilePicture !== 'default.png' ? 'transparent' : '#F3E8FF' }]}>
+                                        {conductor.profilePicture && conductor.profilePicture !== 'default.png' ? (
+                                            <Image
+                                                source={{ uri: conductor.profilePicture }}
+                                                style={styles.driverAvatarImage}
+                                            />
+                                        ) : (
+                                            <Text style={[styles.driverInitials, { color: '#9333EA' }]}>{conductor.name?.charAt(0) || 'C'}</Text>
+                                        )}
                                     </View>
                                     <View style={styles.driverInfo}>
                                         <Text style={styles.driverName}>{conductor.name}</Text>
@@ -1102,6 +1137,12 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         marginRight: 12,
+        overflow: 'hidden',
+    },
+    driverAvatarImage: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
     },
     driverInitials: {
         fontSize: 16,

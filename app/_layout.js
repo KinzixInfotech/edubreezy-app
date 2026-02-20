@@ -98,7 +98,7 @@ function RootLayoutContent() {
         Roboto_700Bold,
     });
 
-    const initRef = useRef(false);
+
     const fcmUnsubscribeRef = useRef(null);
 
     const { incrementNoticeBadge, setBadgeCount, isLoaded } = useNotification();
@@ -222,51 +222,102 @@ function RootLayoutContent() {
         };
     }, [incrementNoticeBadge]);
 
-    // -------------------------------
-    // App initialization - ONLY ONCE (FCM token only)
-    // -------------------------------
+    // ========================================================================
+    // TRACK LOGGED-IN USER ID - triggers FCM registration after login
+    // ========================================================================
+    const [loggedInUserId, setLoggedInUserId] = useState(null);
+    const tokenRefreshUnsubRef = useRef(null);
+
+    // Detect user login/logout by watching SecureStore + route changes
     useEffect(() => {
-        if (initRef.current) {
-            console.log('Init already called, skipping...');
-            return;
-        }
-
-        async function init() {
+        const checkUser = async () => {
             try {
-                console.log('Starting initialization...');
-
-                const configString = await SecureStore.getItemAsync('user');
-                if (!configString) {
-                    console.log('No user config found in SecureStore.');
-                    return;
+                const userStr = await SecureStore.getItemAsync('user');
+                if (userStr) {
+                    const user = JSON.parse(userStr);
+                    setLoggedInUserId(prev => {
+                        if (prev !== user?.id) {
+                            console.log('[FCM] User detected:', user?.email);
+                        }
+                        return user?.id || null;
+                    });
+                } else {
+                    setLoggedInUserId(null);
                 }
+            } catch (e) {
+                console.error('Error checking user for FCM:', e);
+            }
+        };
 
-                const config = JSON.parse(configString);
-                console.log('Loaded user config:', config.email);
+        // Check immediately + on route changes (catches post-login navigation)
+        checkUser();
 
-                // FCM: Request permission + register token (listener already set above)
+        // Also re-check when app becomes active
+        const subscription = AppState.addEventListener('change', (nextState) => {
+            if (nextState === 'active') {
+                checkUser();
+            }
+        });
+
+        return () => subscription.remove();
+    }, [pathname]);
+
+    // ========================================================================
+    // FCM TOKEN REGISTRATION - runs when user logs in or changes
+    // ========================================================================
+    useEffect(() => {
+        if (!loggedInUserId) return;
+
+        async function registerFcm() {
+            try {
+                console.log('[FCM Init] Registering token for user:', loggedInUserId);
                 const hasPermission = await fcmService.requestPermission();
                 if (hasPermission) {
-                    await fcmService.registerToken(config?.id);
-                    console.log('FCM token registered for user:', config?.id);
+                    await fcmService.registerToken(loggedInUserId);
+                    console.log('[FCM Init] ✅ Token registered for user:', loggedInUserId);
+
+                    // Sync any pending tokens from failed refreshes
+                    await fcmService.syncPendingToken(loggedInUserId);
                 } else {
-                    console.warn('FCM permission denied');
+                    console.warn('[FCM Init] ⚠️ Permission denied for user:', loggedInUserId);
                 }
 
-                initRef.current = true;
-                console.log('Initialization complete');
+                // Setup token refresh listener
+                if (tokenRefreshUnsubRef.current) {
+                    tokenRefreshUnsubRef.current();
+                }
+                tokenRefreshUnsubRef.current = fcmService.setupTokenRefreshListener(loggedInUserId);
             } catch (e) {
-                console.error('Error during init:', e);
+                console.error('[FCM Init] Error:', e);
             }
         }
 
-        init();
+        registerFcm();
 
-        // Cleanup only on unmount
         return () => {
-            console.log('Cleanup triggered');
+            if (tokenRefreshUnsubRef.current) {
+                tokenRefreshUnsubRef.current();
+                tokenRefreshUnsubRef.current = null;
+            }
         };
-    }, []);
+    }, [loggedInUserId]);
+
+    // ========================================================================
+    // VERIFY FCM TOKEN ON APP FOREGROUND (catches token refresh while backgrounded)
+    // ========================================================================
+    useEffect(() => {
+        if (!loggedInUserId) return;
+
+        const subscription = AppState.addEventListener('change', (nextState) => {
+            if (nextState === 'active') {
+                fcmService.verifyToken(loggedInUserId).catch(e =>
+                    console.error('[FCM Verify] Error on foreground:', e)
+                );
+            }
+        });
+
+        return () => subscription.remove();
+    }, [loggedInUserId]);
 
     // -------------------------------
     // Monitor app state

@@ -102,8 +102,8 @@ const CACHE_CONFIG = {
     },
     // Semi-dynamic data (stats, homework, attendance)
     MODERATE: {
-        staleTime: 1000 * 60 * 5, // 5 min
-        gcTime: 1000 * 60 * 30, // 30 min
+        staleTime: 1000 * 60 * 15, // 15 min - prevents reload on back navigation
+        gcTime: 1000 * 60 * 60, // 1 hour - keep cached data longer
         refetchOnMount: false,
         refetchOnWindowFocus: false, // No auto-refresh
     },
@@ -1451,7 +1451,8 @@ export default function HomeScreen() {
 
         // Extract child stats from dashboard response (when child is selected)
         const childStats = dashboardData?.childStats;
-        const isChildStatsFetching = isFetching && !!selectedChild?.studentId;
+        // Only show loading on INITIAL load, not background refetches
+        const isChildStatsFetching = isLoading && !!selectedChild?.studentId && !dashboardData;
 
         // Fetch last viewed timestamps for badge calculation
         const { data: badgeTimestamps } = useQuery({
@@ -1529,7 +1530,8 @@ export default function HomeScreen() {
         }).length;
 
         // Combined loading state for stats cards
-        const isStatsLoading = isChildStatsFetching;
+        // Only show stats loading on initial load (not background refetches)
+        const isStatsLoading = isLoading && !dashboardData;
 
         // Count new exam results (CREATED after last viewed) - uses focus-refreshed timestamp
         // Uses createdAt (when result was published), NOT examDate (which can be in the future)
@@ -1927,8 +1929,8 @@ export default function HomeScreen() {
             );
         };
 
-        // Loading state - wait for ALL critical data before rendering
-        const isCriticalDataLoading = isPending || !selectedChild || isChildStatsFetching;
+        // Loading state - only block UI on INITIAL load (no cached data), not background refetches
+        const isCriticalDataLoading = (isPending && !dashboardData) || !selectedChild;
 
         if (isCriticalDataLoading) {
             return (

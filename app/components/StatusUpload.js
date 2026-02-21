@@ -14,6 +14,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
 import api from '../../lib/api';
 import { uploadFile } from '../../lib/uploadthing';
+import { StatusBar } from 'expo-status-bar';
 
 // Lazy load to avoid crash if expo-video-thumbnails native module isn't in current build
 const VideoTrimmer = React.lazy(() => import('./VideoTrimmer'));
@@ -248,7 +249,8 @@ const StatusUpload = ({ visible, onClose, schoolId, userId }) => {
     if (!visible) return null;
 
     return (
-        <Modal visible={visible} animationType="slide" transparent={false} statusBarTranslucent>
+        <Modal visible={visible} animationType="slide" transparent={false} >
+            <StatusBar style='dark' />
             <View style={[styles.container, { paddingTop: insets.top }]}>
                 {/* Header */}
                 <View style={styles.header}>

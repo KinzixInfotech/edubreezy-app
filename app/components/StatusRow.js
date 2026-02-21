@@ -178,10 +178,7 @@ const StatusItem = memo(({ item, onPress, onAddPress, isMyStatus, canPost }) => 
                 {/* Add button for own status — separately tappable */}
                 {isMyStatus && canPost && (
                     <HapticTouchable
-                        onPress={(e) => {
-                            e?.stopPropagation?.();
-                            onAddPress?.();
-                        }}
+                        onPress={() => onAddPress?.()}
                         style={styles.addBadge}
                     >
                         <Plus size={12} color="#fff" strokeWidth={3} />

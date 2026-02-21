@@ -1,12 +1,14 @@
-import React, { useState, useCallback, memo, Suspense } from 'react';
+import React, { useState, useCallback, useRef, memo, Suspense } from 'react';
 import {
     View, Text, StyleSheet, Alert, TextInput, ScrollView, KeyboardAvoidingView,
     Platform, Dimensions, Modal, ActivityIndicator
 } from 'react-native';
 import { Image } from 'expo-image';
+import { Video, ResizeMode } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
-    Camera, ImageIcon, Type, X, Send, ChevronDown, Users, UserCheck, BookOpen
+    Camera, ImageIcon, Type, X, Send, ChevronDown, Users, UserCheck, BookOpen,
+    Play, Pause
 } from 'lucide-react-native';
 import HapticTouchable from './HapticTouch';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -51,6 +53,8 @@ const StatusUpload = ({ visible, onClose, schoolId, userId }) => {
     const [uploading, setUploading] = useState(false);
     const [showTrimmer, setShowTrimmer] = useState(false);
     const [pendingVideo, setPendingVideo] = useState(null); // video that needs trimming
+    const [isPlaying, setIsPlaying] = useState(false);
+    const videoRef = useRef(null);
 
     const reset = useCallback(() => {
         setMode(null);
@@ -62,7 +66,18 @@ const StatusUpload = ({ visible, onClose, schoolId, userId }) => {
         setUploading(false);
         setShowTrimmer(false);
         setPendingVideo(null);
+        setIsPlaying(false);
     }, []);
+
+    const togglePlayback = useCallback(async () => {
+        if (!videoRef.current) return;
+        if (isPlaying) {
+            await videoRef.current.pauseAsync();
+        } else {
+            await videoRef.current.playAsync();
+        }
+        setIsPlaying(!isPlaying);
+    }, [isPlaying]);
 
     const handleClose = useCallback(() => {
         reset();
@@ -76,7 +91,6 @@ const StatusUpload = ({ visible, onClose, schoolId, userId }) => {
                 mediaTypes: ImagePicker.MediaTypeOptions.Images,
                 allowsEditing: true,
                 quality: 0.75,
-                aspect: [9, 16],
             });
 
             if (!result.canceled && result.assets?.[0]) {
@@ -167,7 +181,6 @@ const StatusUpload = ({ visible, onClose, schoolId, userId }) => {
                 mediaTypes: ImagePicker.MediaTypeOptions.Images,
                 allowsEditing: true,
                 quality: 0.75,
-                aspect: [9, 16],
             });
 
             if (!result.canceled && result.assets?.[0]) {
@@ -377,11 +390,36 @@ const StatusUpload = ({ visible, onClose, schoolId, userId }) => {
                 {/* Image/Video Preview */}
                 {mode === 'preview' && selectedMedia && (
                     <View style={styles.previewContainer}>
-                        <Image
-                            source={{ uri: selectedMedia.uri }}
-                            style={styles.previewImage}
-                            contentFit="cover"
-                        />
+                        {selectedMedia.type === 'video' ? (
+                            <View style={{ flex: 1 }}>
+                                <Video
+                                    ref={videoRef}
+                                    source={{ uri: selectedMedia.uri }}
+                                    style={styles.previewImage}
+                                    resizeMode={ResizeMode.COVER}
+                                    isLooping
+                                    onPlaybackStatusUpdate={(status) => {
+                                        if (status.isLoaded) setIsPlaying(status.isPlaying);
+                                    }}
+                                />
+                                <HapticTouchable
+                                    onPress={togglePlayback}
+                                    style={styles.playPauseBtn}
+                                >
+                                    {isPlaying ? (
+                                        <Pause size={32} color="#fff" fill="#fff" />
+                                    ) : (
+                                        <Play size={32} color="#fff" fill="#fff" />
+                                    )}
+                                </HapticTouchable>
+                            </View>
+                        ) : (
+                            <Image
+                                source={{ uri: selectedMedia.uri }}
+                                style={styles.previewImage}
+                                contentFit="cover"
+                            />
+                        )}
                         <TextInput
                             value={caption}
                             onChangeText={setCaption}
@@ -554,6 +592,19 @@ const styles = StyleSheet.create({
     },
     previewImage: {
         flex: 1,
+    },
+    playPauseBtn: {
+        position: 'absolute',
+        top: '50%',
+        left: '50%',
+        marginTop: -30,
+        marginLeft: -30,
+        width: 60,
+        height: 60,
+        borderRadius: 30,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     captionInput: {
         paddingHorizontal: 16,

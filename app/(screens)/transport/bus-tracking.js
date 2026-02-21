@@ -32,6 +32,7 @@ import {
     ZoomOut,
     Locate,
     School,
+    Home,
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
@@ -471,6 +472,7 @@ export default function BusTrackingScreen() {
                                     <MapView
                                         ref={mapRef}
                                         provider={PROVIDER_GOOGLE}
+                                        googleRenderer={'LEGACY'}
                                         style={styles.map}
                                         mapType="standard"
                                         customMapStyle={CLEAN_MAP_STYLE}
@@ -490,7 +492,7 @@ export default function BusTrackingScreen() {
                                         rotateEnabled={false}
                                         onRegionChangeComplete={(region) => setZoomLevel(region.latitudeDelta)}
                                     >
-                                        {/* ====== BUS MARKER (only when active — hide when offline) ====== */}
+                                        {/* ====== BUS MARKER ====== */}
                                         {busIsActive && (
                                             <Marker
                                                 ref={markerRef}
@@ -499,34 +501,44 @@ export default function BusTrackingScreen() {
                                                     longitude: location.longitude,
                                                 }}
                                                 anchor={{ x: 0.5, y: 0.5 }}
+                                                tracksViewChanges={true}
                                                 title={`🚌 ${vehicle?.licensePlate || 'Bus'}`}
                                                 description={status === 'MOVING' ? 'On the way' : 'Idle'}
-                                                image={require('../../../assets/marker.png')}
-                                                style={{
-                                                    width: 50,
-                                                    height: 50,
-                                                    resizeMode: "contain",
-                                                    shadowColor: "#000",
-                                                    shadowOpacity: 0.25,
-                                                    shadowRadius: 4,
-                                                    elevation: 6,
-                                                }}
-                                            />
+                                            >
+                                                <View style={{
+                                                    width: 40, height: 40, borderRadius: 20,
+                                                    backgroundColor: isStale ? '#F97316' : status === 'MOVING' ? '#22C55E' : status === 'IDLE' ? '#F59E0B' : '#EF4444',
+                                                    alignItems: 'center', justifyContent: 'center',
+                                                    borderWidth: 3, borderColor: '#fff',
+                                                    elevation: 5,
+                                                }}>
+                                                    <Bus size={20} color="#fff" />
+                                                </View>
+                                            </Marker>
                                         )}
 
-                                        {/* ====== HOME / STOP MARKER (always visible) ====== */}
+                                        {/* ====== HOME / STOP MARKER ====== */}
                                         {childStop?.latitude && childStop?.longitude && (
                                             <Marker
                                                 coordinate={{ latitude: childStop.latitude, longitude: childStop.longitude }}
+                                                anchor={{ x: 0.5, y: 0.5 }}
+                                                tracksViewChanges={true}
                                                 title={`🏠 ${childStop.name || 'Stop'}`}
-                                                image={require('../../../assets/house.png')}
                                                 description="Child's bus stop"
-
-                                            />
+                                            >
+                                                <View style={{
+                                                    width: 34, height: 34, borderRadius: 17,
+                                                    backgroundColor: '#3B82F6',
+                                                    alignItems: 'center', justifyContent: 'center',
+                                                    borderWidth: 3, borderColor: '#fff',
+                                                    elevation: 4,
+                                                }}>
+                                                    <Home size={17} color="#fff" />
+                                                </View>
+                                            </Marker>
                                         )}
 
                                         {/* ====== POLYLINES ====== */}
-                                        {/* ACTIVE: shadow + blue road-following line */}
                                         {busIsActive && routePolyline?.length > 1 && (
                                             <Polyline
                                                 coordinates={routePolyline}
@@ -541,7 +553,6 @@ export default function BusTrackingScreen() {
                                                 strokeWidth={5}
                                             />
                                         )}
-                                        {/* ACTIVE fallback: straight line */}
                                         {busIsActive && !routePolyline && childStop?.latitude && (
                                             <Polyline
                                                 coordinates={[
@@ -552,7 +563,6 @@ export default function BusTrackingScreen() {
                                                 strokeWidth={4}
                                             />
                                         )}
-                                        {/* OFFLINE: dashed line between school ↔ home */}
                                         {!busIsActive && childStop?.latitude && schoolLocation?.latitude && (
                                             <Polyline
                                                 coordinates={[
@@ -565,32 +575,28 @@ export default function BusTrackingScreen() {
                                             />
                                         )}
 
-                                        {/* ====== SCHOOL MARKER (only when zoomed in enough) ====== */}
+                                        {/* ====== SCHOOL MARKER ====== */}
                                         {schoolLocation?.latitude && schoolLocation?.longitude && (
-                                            <View>
-
-                                                <Marker
-                                                    coordinate={{
-                                                        latitude: Number(schoolLocation.latitude),
-                                                        longitude: Number(schoolLocation.longitude),
-                                                    }}
-
-
-                                                    title={`🏫 ${userData?.school?.name || 'School'}`}
-                                                    description="School location"
-                                                >
-                                                    <Image
-                                                        source={
-                                                            schoolProfilePicture
-                                                                ? { uri: schoolProfilePicture }
-                                                                : require('../../../assets/school.png')
-                                                        }
-                                                        style={{ width: 33, height: 33, borderRadius: 20 }}
-                                                        resizeMode="contain"
-                                                    />
-                                                </Marker>
-                                            </View>
-
+                                            <Marker
+                                                coordinate={{
+                                                    latitude: Number(schoolLocation.latitude),
+                                                    longitude: Number(schoolLocation.longitude),
+                                                }}
+                                                anchor={{ x: 0.5, y: 0.5 }}
+                                                tracksViewChanges={true}
+                                                title={`🏫 ${userData?.school?.name || 'School'}`}
+                                                description="School location"
+                                            >
+                                                <View style={{
+                                                    width: 34, height: 34, borderRadius: 17,
+                                                    backgroundColor: '#10B981',
+                                                    alignItems: 'center', justifyContent: 'center',
+                                                    borderWidth: 3, borderColor: '#fff',
+                                                    elevation: 4,
+                                                }}>
+                                                    <School size={17} color="#fff" />
+                                                </View>
+                                            </Marker>
                                         )}
                                     </MapView>
                                 )}

@@ -33,7 +33,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as Notifications from 'expo-notifications';
 import * as Location from 'expo-location';
 import HapticTouchable from '../components/HapticTouch';
-import { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef, memo, useReducer } from 'react';
 import Animated, { FadeInDown, FadeInRight, FadeInUp, useSharedValue, useAnimatedScrollHandler, useAnimatedStyle, interpolate, Extrapolation } from 'react-native-reanimated';
 import { dataUi } from '../data/_uidata';
 
@@ -125,8 +125,20 @@ export default function HomeScreen() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [notificationPermission, setNotificationPermission] = useState(false);
-    const [selectedStatusGroup, setSelectedStatusGroup] = useState(null);
-    const [showStatusUpload, setShowStatusUpload] = useState(false);
+    // Use refs for modal states so opening/closing modals doesn't re-render
+    // the entire HomeScreen (which would remount inline view components)
+    const selectedStatusGroupRef = useRef(null);
+    const showStatusUploadRef = useRef(false);
+    const modalUpdateRef = useRef(null); // callback to trigger modal re-render
+
+    const setSelectedStatusGroup = useCallback((group) => {
+        selectedStatusGroupRef.current = group;
+        modalUpdateRef.current?.();
+    }, []);
+    const setShowStatusUpload = useCallback((show) => {
+        showStatusUploadRef.current = show;
+        modalUpdateRef.current?.();
+    }, []);
 
 
 
@@ -1191,9 +1203,10 @@ export default function HomeScreen() {
                                     <Animated.View
                                         key={action.label}
                                         entering={FadeInDown.delay(500 + index * 50).duration(400)}
+                                        style={{ width: isTablet ? '31.5%' : '48%' }}
                                     >
                                         <HapticTouchable onPress={() => navigateOnce(action.href || '')}>
-                                            <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}>
+                                            <View style={[styles.actionButton, { backgroundColor: action.bgColor, width: '100%' }]}>
                                                 {/* Decorative Graphics */}
                                                 <View style={{ position: 'absolute', top: -15, right: -15, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.2)' }} />
                                                 <View style={{ position: 'absolute', bottom: -20, left: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.15)' }} />
@@ -1866,14 +1879,9 @@ export default function HomeScreen() {
             }
         }, [queryClient, schoolId, parentId, onRefresh]);
 
-        // Loading state
-        if (isPending) {
-            return (
-                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-                    <ActivityIndicator size="large" color="#0469ff" />
-                </View>
-            );
-        }
+        // Note: removed aggressive `if (isPending)` loading guard here.
+        // The smarter check at `isCriticalDataLoading` below handles initial-only loading
+        // without blocking the UI during background refetches.
 
         // Empty state - No children added yet
         if (!isPending && uiChildren.length === 0) {
@@ -3718,7 +3726,37 @@ export default function HomeScreen() {
             {renderContent()}
             {activeTripBanner}
 
-            {/* Global Status Modals */}
+            {/* Global Status Modals — reads from refs, re-renders independently */}
+            <StatusModals
+                selectedStatusGroupRef={selectedStatusGroupRef}
+                showStatusUploadRef={showStatusUploadRef}
+                setSelectedStatusGroup={setSelectedStatusGroup}
+                setShowStatusUpload={setShowStatusUpload}
+                schoolId={schoolId}
+                userId={userId}
+                queryClient={queryClient}
+                modalUpdateRef={modalUpdateRef}
+            />
+        </View>
+    );
+}
+
+
+// Self-managing modal wrapper — re-renders independently from HomeScreen
+const StatusModals = ({ selectedStatusGroupRef, showStatusUploadRef, setSelectedStatusGroup, setShowStatusUpload, schoolId, userId, queryClient, modalUpdateRef }) => {
+    const [, forceUpdate] = useReducer(x => x + 1, 0);
+
+    // Register the forceUpdate callback so HomeScreen can trigger re-renders
+    useEffect(() => {
+        modalUpdateRef.current = forceUpdate;
+        return () => { modalUpdateRef.current = null; };
+    }, [modalUpdateRef]);
+
+    const selectedStatusGroup = selectedStatusGroupRef.current;
+    const showStatusUpload = showStatusUploadRef.current;
+
+    return (
+        <>
             <StatusViewer
                 visible={!!selectedStatusGroup}
                 statusGroup={selectedStatusGroup}
@@ -3726,7 +3764,6 @@ export default function HomeScreen() {
                 viewerId={userId}
                 onClose={() => {
                     setSelectedStatusGroup(null);
-                    // Silently refetch feed in background to update seen/unseen rings
                     queryClient.refetchQueries({ queryKey: ['statusFeed'], type: 'active' });
                 }}
             />
@@ -3736,10 +3773,9 @@ export default function HomeScreen() {
                 schoolId={schoolId}
                 userId={userId}
             />
-        </View>
+        </>
     );
-}
-
+};
 
 // === STYLES ===
 const styles = StyleSheet.create({
@@ -5710,7 +5746,6 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                                 longitude: location.coords.longitude
                             });
                             if (res.data.success) {
-                                refetch();
                                 router.push({ pathname: '/(screens)/transport/active-trip', params: { tripId: res.data.trip.id } });
                             }
                         } catch (err) {
@@ -5928,7 +5963,6 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                                     try {
                                         const res = await api.post(`/schools/transport/trips/${trip.id}/start`, { driverId: transportStaffId });
                                         if (res.data.success) {
-                                            refetch();
                                             router.push({ pathname: '/(screens)/transport/active-trip', params: { tripId: trip.id } });
                                         }
                                     } catch (err) {
@@ -6232,9 +6266,9 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                 <Text style={styles.sectionTitle}>Quick Actions</Text>
                 <View style={styles.actionsGrid}>
                     {quickActions.map((action, index) => (
-                        <Animated.View key={action.label} entering={FadeInDown.delay(300 + index * 50).duration(400)}>
+                        <Animated.View key={action.label} entering={FadeInDown.delay(300 + index * 50).duration(400)} style={{ width: isTablet ? '31.5%' : '48%' }}>
                             <HapticTouchable onPress={() => action.href && navigateOnce(action.href)} disabled={!action.href}>
-                                <View style={[styles.actionButton, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5 }]}>
+                                <View style={[styles.actionButton, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5, width: '100%' }]}>
                                     {/* Decorative Graphics */}
                                     <View style={{ position: 'absolute', top: -15, right: -15, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.2)' }} />
                                     <View style={{ position: 'absolute', bottom: -20, left: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.15)' }} />
@@ -6629,9 +6663,9 @@ const ConductorView = ({ refreshing, onRefresh, onScroll, paddingTop, refreshOff
                 <Text style={styles.sectionTitle}>Quick Actions</Text>
                 <View style={styles.actionsGrid}>
                     {quickActions.map((action, index) => (
-                        <Animated.View key={action.label} entering={FadeInDown.delay(300 + index * 50).duration(400)}>
+                        <Animated.View key={action.label} entering={FadeInDown.delay(300 + index * 50).duration(400)} style={{ width: isTablet ? '31.5%' : '48%' }}>
                             <HapticTouchable onPress={() => action.href && navigateOnce(action.href)} disabled={!action.href}>
-                                <View style={[styles.actionButton, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5 }]}>
+                                <View style={[styles.actionButton, { backgroundColor: action.bgColor, opacity: action.href ? 1 : 0.5, width: '100%' }]}>
                                     {/* Decorative Graphics */}
                                     <View style={{ position: 'absolute', top: -15, right: -15, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.2)' }} />
                                     <View style={{ position: 'absolute', bottom: -20, left: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.15)' }} />

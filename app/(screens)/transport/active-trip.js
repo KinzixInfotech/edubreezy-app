@@ -129,6 +129,14 @@ export default function ActiveTripScreen() {
     const prevLocationRef = useRef(null); // Previous location for animation
     const [busHeading, setBusHeading] = useState(0); // Bus heading for marker rotation
 
+    // Refs to keep location callback values current (avoids stale closure)
+    const completedStopIdsRef = useRef([]);
+    const pendingStopRef = useRef(null);
+    const stopsRef = useRef([]);
+    const schoolLocationRef = useRef(null);
+    const isNearSchoolRef = useRef(false);
+    const showStopModalRef = useRef(false);
+
     // Optimization: Stop tracking view changes after render
     useEffect(() => {
         if (tracksViewChanges) {
@@ -136,6 +144,14 @@ export default function ActiveTripScreen() {
             return () => clearTimeout(timer);
         }
     }, [tracksViewChanges]);
+
+    // Keep refs in sync with state
+    useEffect(() => { completedStopIdsRef.current = completedStopIds; }, [completedStopIds]);
+    useEffect(() => { pendingStopRef.current = pendingStopCompletion; }, [pendingStopCompletion]);
+    useEffect(() => { stopsRef.current = stops; }, [stops]);
+    useEffect(() => { schoolLocationRef.current = schoolLocation; }, [schoolLocation]);
+    useEffect(() => { isNearSchoolRef.current = isNearSchoolFlag; }, [isNearSchoolFlag]);
+    useEffect(() => { showStopModalRef.current = showStopConfirmModal; }, [showStopConfirmModal]);
 
     // Get current user and school location
     useEffect(() => {
@@ -220,13 +236,11 @@ export default function ActiveTripScreen() {
             if (trip?.status === 'IN_PROGRESS' && !isTracking) {
                 await startLocationTracking();
 
-                const { status } = await Location.requestForegroundPermissionsAsync();
-                if (status === 'granted') {
-                    locationSubscription = await Location.watchPositionAsync(
-                        { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 10 },
-                        handleLocationUpdate
-                    );
-                }
+                // Permissions already granted by startBackgroundLocationTask — no need to re-request
+                locationSubscription = await Location.watchPositionAsync(
+                    { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 10 },
+                    handleLocationUpdate
+                );
             }
         };
         setupTracking();
@@ -243,28 +257,37 @@ export default function ActiveTripScreen() {
         setCurrentLocation({ latitude, longitude, speed });
         setTracksViewChanges(true);
 
-        // Check proximity to stops
-        const nearStops = checkStopProximity(latitude, longitude, stops, completedStopIds, STOP_GEOFENCE_RADIUS);
-        if (nearStops.length > 0 && !pendingStopCompletion) {
-            const nearest = nearStops[0];
-            setPendingStopCompletion(nearest.stop);
-            setShowStopConfirmModal(true);
+        // Use refs for current values (avoids stale closure)
+        const currentCompletedStops = completedStopIdsRef.current;
+        const currentPendingStop = pendingStopRef.current;
+        const currentStops = stopsRef.current;
+        const currentSchoolLoc = schoolLocationRef.current;
+        const currentIsNearSchool = isNearSchoolRef.current;
+        const isModalShowing = showStopModalRef.current;
+
+        // Check proximity to stops — skip if modal is already showing
+        if (!isModalShowing && !currentPendingStop) {
+            const nearStops = checkStopProximity(latitude, longitude, currentStops, currentCompletedStops, STOP_GEOFENCE_RADIUS);
+            if (nearStops.length > 0) {
+                const nearest = nearStops[0];
+                setPendingStopCompletion(nearest.stop);
+                setShowStopConfirmModal(true);
+            }
         }
 
-        // Check proximity to school (for PICKUP trips - auto-complete when reaching school)
-        if (schoolLocation?.latitude && schoolLocation?.longitude) {
+        // Check proximity to school (for PICKUP trips)
+        if (currentSchoolLoc?.latitude && currentSchoolLoc?.longitude) {
             const nearSchool = isNearSchool(
                 latitude,
                 longitude,
-                schoolLocation.latitude,
-                schoolLocation.longitude,
-                schoolLocation.radiusMeters || 200
+                currentSchoolLoc.latitude,
+                currentSchoolLoc.longitude,
+                currentSchoolLoc.radiusMeters || 200
             );
-            if (nearSchool && !isNearSchoolFlag) {
+            if (nearSchool && !currentIsNearSchool) {
                 setIsNearSchoolFlag(true);
                 console.log('📍 Driver approaching school location!');
-                // For PICKUP trips, you might want to trigger completion here
-            } else if (!nearSchool && isNearSchoolFlag) {
+            } else if (!nearSchool && currentIsNearSchool) {
                 setIsNearSchoolFlag(false);
             }
         }
@@ -361,8 +384,11 @@ export default function ActiveTripScreen() {
             return res.data;
         },
         onSuccess: async () => {
-            await stopLocationTracking();
-            await clearCompletedStops(tripId);
+            // Fire-and-forget: stop tracking in background (trip is already completed server-side)
+            stopLocationTracking().catch(err => console.error('Error stopping tracking:', err));
+            clearCompletedStops(tripId).catch(err => console.error('Error clearing stops:', err));
+
+            // Invalidate queries (don't await — these are cache operations)
             queryClient.invalidateQueries(['trip-details']);
             queryClient.invalidateQueries(['transport-trips']);
 
@@ -538,6 +564,7 @@ export default function ActiveTripScreen() {
                 <MapView
                     ref={mapRef}
                     provider={PROVIDER_GOOGLE}
+                    googleRenderer={'LEGACY'}
                     style={styles.map}
                     initialRegion={initialRegion}
                     showsUserLocation={true}
@@ -555,7 +582,7 @@ export default function ActiveTripScreen() {
                         <Polyline coordinates={displayPolyline} strokeColor="#3B82F6" strokeWidth={4} />
                     )}
 
-                    {/* Stop Markers with Name Labels */}
+                    {/* Stop Markers */}
                     {stops.map((stop, index) => {
                         const isCompleted = completedStopIds.includes(stop.id);
                         const isNext = nextStop?.id === stop.id;
@@ -563,38 +590,34 @@ export default function ActiveTripScreen() {
                             <Marker
                                 key={stop.id}
                                 coordinate={{ latitude: stop.latitude, longitude: stop.longitude }}
-                                anchor={{ x: 0.5, y: 1 }}
+                                anchor={{ x: 0.5, y: 0.5 }}
+                                tracksViewChanges={true}
+                                title={`${isCompleted ? '✅' : '📍'} ${index + 1}. ${stop.name}`}
+                                description={isCompleted ? 'Completed' : isNext ? 'Next stop' : trip?.tripType === 'PICKUP' ? stop.pickupTime : stop.dropTime}
                                 onPress={() => zoomToStop(stop)}
                             >
                                 <View style={{ alignItems: 'center' }}>
-                                    {/* Stop Name Badge */}
                                     <View style={{
                                         backgroundColor: isCompleted ? '#10B981' : isNext ? '#F59E0B' : '#3B82F6',
-                                        paddingHorizontal: 8,
-                                        paddingVertical: 4,
-                                        borderRadius: 8,
-                                        marginBottom: 4,
-                                        maxWidth: 120,
+                                        paddingHorizontal: 6, paddingVertical: 2,
+                                        borderRadius: 6, marginBottom: 3,
+                                        maxWidth: 100,
                                     }}>
-                                        <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }} numberOfLines={1}>
+                                        <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }} numberOfLines={1}>
                                             {index + 1}. {stop.name}
                                         </Text>
                                     </View>
-                                    {/* Stop Number Circle */}
                                     <View style={{
-                                        width: 28,
-                                        height: 28,
-                                        borderRadius: 14,
+                                        width: 34, height: 34, borderRadius: 17,
                                         backgroundColor: isCompleted ? '#10B981' : isNext ? '#F59E0B' : '#3B82F6',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        borderWidth: 2,
-                                        borderColor: '#fff',
+                                        alignItems: 'center', justifyContent: 'center',
+                                        borderWidth: 3, borderColor: '#fff',
+                                        elevation: 4,
                                     }}>
                                         {isCompleted ? (
-                                            <Check size={14} color="#fff" />
+                                            <Check size={17} color="#fff" />
                                         ) : (
-                                            <Text style={{ color: '#fff', fontSize: 12, fontWeight: '800' }}>{index + 1}</Text>
+                                            <Text style={{ color: '#fff', fontSize: 14, fontWeight: '800' }}>{index + 1}</Text>
                                         )}
                                     </View>
                                 </View>
@@ -602,52 +625,30 @@ export default function ActiveTripScreen() {
                         );
                     })}
 
-                    {/* Bus Marker with License Plate and Route Name */}
+                    {/* Bus Marker */}
                     {currentLocation && (
                         <Marker
                             coordinate={currentLocation}
-                            anchor={{ x: 0.5, y: 1 }}
+                            anchor={{ x: 0.5, y: 0.5 }}
                             tracksViewChanges={tracksViewChanges}
+                            title={`🚌 ${vehicle?.licensePlate || 'Bus'}`}
+                            description={isTracking ? 'Tracking live' : 'Idle'}
                         >
                             <View style={{ alignItems: 'center' }}>
-                                {/* Route Name Badge */}
-                                <View style={{
-                                    backgroundColor: '#0F172A',
-                                    paddingHorizontal: 10,
-                                    paddingVertical: 4,
-                                    borderRadius: 8,
-                                    marginBottom: 2,
-                                    borderWidth: 1,
-                                    borderColor: '#fff',
-                                }}>
-                                    <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>{trip?.route?.name || 'Route'}</Text>
-                                </View>
-                                {/* License Plate Badge */}
                                 <View style={{
                                     backgroundColor: '#1E293B',
-                                    paddingHorizontal: 8,
-                                    paddingVertical: 3,
-                                    borderRadius: 6,
-                                    marginBottom: 4,
-                                    borderWidth: 1,
-                                    borderColor: '#fff',
+                                    paddingHorizontal: 6, paddingVertical: 2,
+                                    borderRadius: 6, marginBottom: 3,
                                 }}>
-                                    <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>{vehicle?.licensePlate || 'BUS'}</Text>
+                                    <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>
+                                        {vehicle?.licensePlate || 'BUS'}
+                                    </Text>
                                 </View>
-                                {/* Bus Circle */}
                                 <View style={{
-                                    width: 40,
-                                    height: 40,
-                                    borderRadius: 20,
+                                    width: 40, height: 40, borderRadius: 20,
                                     backgroundColor: isTracking ? '#10B981' : '#EAB308',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                    borderWidth: 3,
-                                    borderColor: '#fff',
-                                    shadowColor: '#000',
-                                    shadowOffset: { width: 0, height: 2 },
-                                    shadowOpacity: 0.25,
-                                    shadowRadius: 4,
+                                    alignItems: 'center', justifyContent: 'center',
+                                    borderWidth: 3, borderColor: '#fff',
                                     elevation: 5,
                                 }}>
                                     <Bus size={20} color="#fff" />
@@ -929,7 +930,7 @@ export default function ActiveTripScreen() {
                     </View>
                 </View>
             </Modal>
-        </View>
+        </View >
     );
 }
 

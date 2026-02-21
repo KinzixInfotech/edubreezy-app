@@ -48,6 +48,9 @@ import GlowingStatusBar from '../components/GlowingStatusBar';
 import AddChildModal from '../components/AddChildModal';
 import DelegationCheckModal from '../components/DelegationCheckModal';
 import BannerCarousel from '../components/BannerCarousel';
+import StatusRow from '../components/StatusRow';
+import StatusViewer from '../components/StatusViewer';
+import StatusUpload from '../components/StatusUpload';
 import { useActiveTrip } from '../../hooks/useActiveTrip';
 import { stopBackgroundLocationTask, isBackgroundTaskRunning } from '../../lib/transport-location-task';
 import ProfileAvatar from '../components/ProfileAvatar';
@@ -122,6 +125,8 @@ export default function HomeScreen() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [notificationPermission, setNotificationPermission] = useState(false);
+    const [selectedStatusGroup, setSelectedStatusGroup] = useState(null);
+    const [showStatusUpload, setShowStatusUpload] = useState(false);
 
 
 
@@ -766,7 +771,7 @@ export default function HomeScreen() {
             case 'student':
                 return <StudentView refreshing={refreshing} onRefresh={onRefresh} banner={permissionBanner} paddingTop={paddingTop} refreshOffset={refreshOffset} navigateOnce={navigateOnce} />;
             case 'teaching_staff':
-                return <TeacherView refreshing={refreshing} schoolId={schoolId} userId={userId} teacher={teacher} onRefresh={onRefresh} upcomingEvents={upcomingEvents} todaysEvents={todaysEvents} banner={permissionBanner} paddingTop={paddingTop} refreshOffset={refreshOffset} onScroll={scrollHandler} navigateOnce={navigateOnce} />;
+                return <TeacherView refreshing={refreshing} schoolId={schoolId} userId={userId} teacher={teacher} onRefresh={onRefresh} upcomingEvents={upcomingEvents} todaysEvents={todaysEvents} banner={permissionBanner} paddingTop={paddingTop} refreshOffset={refreshOffset} onScroll={scrollHandler} navigateOnce={navigateOnce} onStatusPress={(group) => setSelectedStatusGroup(group)} onMyStatusPress={() => setShowStatusUpload(true)} />;
             case 'admin':
                 return <AdminView refreshing={refreshing} onRefresh={onRefresh} banner={permissionBanner} paddingTop={paddingTop} refreshOffset={refreshOffset} navigateOnce={navigateOnce} />;
             case 'parent':
@@ -1033,6 +1038,18 @@ export default function HomeScreen() {
                 }
             >
                 {banner}
+
+                {/* Status Row */}
+                <StatusRow
+                    schoolId={schoolId}
+                    userId={userId}
+                    userRole={user_acc?.role?.name}
+                    userName={user_acc?.name}
+                    userAvatar={user_acc?.profilePicture}
+                    onStatusPress={(group) => setSelectedStatusGroup(group)}
+                    onMyStatusPress={() => setShowStatusUpload(true)}
+                />
+
                 {/* Today's Events */}
                 {todaysEvents.length > 0 && (
                     <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.section}>
@@ -1320,6 +1337,18 @@ export default function HomeScreen() {
             }
         >
             {banner}
+
+            {/* Status Row */}
+            <StatusRow
+                schoolId={schoolId}
+                userId={userId}
+                userRole={user_acc?.role?.name}
+                userName={user_acc?.name}
+                userAvatar={user_acc?.profilePicture}
+                onStatusPress={(group) => setSelectedStatusGroup(group)}
+                onMyStatusPress={() => setShowStatusUpload(true)}
+            />
+
             {todaysEvents.length > 0 && (
                 <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
                     <View style={styles.sectionHeader}>
@@ -1361,6 +1390,7 @@ export default function HomeScreen() {
 
             <Text style={styles.sectionTitle}>School Dashboard</Text>
             <Text style={{ padding: 16, color: '#666' }}>Admin features coming soon.</Text>
+
 
             {/* Bottom Spacer */}
             <View style={{ height: 100 }} />
@@ -1961,6 +1991,17 @@ export default function HomeScreen() {
                 }
             >
                 {banner}
+
+                {/* Status Row */}
+                <StatusRow
+                    schoolId={schoolId}
+                    userId={userId}
+                    userRole={user_acc?.role?.name}
+                    userName={user_acc?.name}
+                    userAvatar={user_acc?.profilePicture}
+                    onStatusPress={(group) => setSelectedStatusGroup(group)}
+                    onMyStatusPress={() => setShowStatusUpload(true)}
+                />
 
                 {todaysEvents.length > 0 && (
                     <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
@@ -3676,6 +3717,25 @@ export default function HomeScreen() {
             {/* Today's Events (if any) */}
             {renderContent()}
             {activeTripBanner}
+
+            {/* Global Status Modals */}
+            <StatusViewer
+                visible={!!selectedStatusGroup}
+                statusGroup={selectedStatusGroup}
+                schoolId={schoolId}
+                viewerId={userId}
+                onClose={() => {
+                    setSelectedStatusGroup(null);
+                    // Silently refetch feed in background to update seen/unseen rings
+                    queryClient.refetchQueries({ queryKey: ['statusFeed'], type: 'active' });
+                }}
+            />
+            <StatusUpload
+                visible={showStatusUpload}
+                onClose={() => setShowStatusUpload(false)}
+                schoolId={schoolId}
+                userId={userId}
+            />
         </View>
     );
 }
@@ -4810,7 +4870,7 @@ const styles = StyleSheet.create({
 
 // === TEACHER VIEW (MOVED) ===
 // === TEACHING STAFF VIEW ===
-const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, upcomingEvents, todaysEvents, banner, onScroll, paddingTop, refreshOffset, navigateOnce }) => {
+const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, upcomingEvents, todaysEvents, banner, onScroll, paddingTop, refreshOffset, navigateOnce, onStatusPress, onMyStatusPress }) => {
     const [showDelegationModal, setShowDelegationModal] = useState(false);
     const [activeDelegations, setActiveDelegations] = useState([]);
     const [shownDelegations, setShownDelegations] = useState({});
@@ -5121,7 +5181,21 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                 />
             }
         >
-            {banner}
+            {/* {banner} */}
+            {/* Status Row */}
+            <StatusRow
+                schoolId={schoolId}
+                userId={userId}
+                userRole="TEACHING_STAFF"
+                userName={teacher?.user?.name}
+                userAvatar={teacher?.user?.profilePicture}
+                onStatusPress={onStatusPress}
+                onMyStatusPress={onMyStatusPress}
+            />
+
+            {/* School Banner Carousel */}
+            <BannerCarousel schoolId={schoolId} role="TEACHING_STAFF" />
+
             {/* Delegation Banner */}
             {activeDelegations.length > 0 && (
                 <Animated.View entering={FadeInDown.duration(400)} style={styles.delegationBannerContainer}>
@@ -5275,28 +5349,35 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                 </View>
             </Animated.View>
 
-            {/* School Banner Carousel */}
-            <BannerCarousel schoolId={schoolId} role="TEACHING_STAFF" />
-
             {/* Quick Actions */}
             {actionGroups.map((group, groupIndex) => (
                 <Animated.View key={group.title} entering={FadeInDown.delay(400 + groupIndex * 100).duration(600)} style={styles.section}>
                     <Text style={styles.sectionTitle}>{group.title}</Text>
                     <View style={styles.actionsGrid}>
-                        {group.actions.map((action, index) => (
-                            <Animated.View key={action.label} entering={FadeInDown.delay(500 + index * 50).duration(400)}>
-                                <HapticTouchable onPress={() => action.params ? navigateOnce(action.href, action.params) : navigateOnce(action.href || '')}>
-                                    <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}>
-                                        {/* Decorative Graphics */}
-                                        <View style={{ position: 'absolute', top: -15, right: -15, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.2)' }} />
-                                        <View style={{ position: 'absolute', bottom: -20, left: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.15)' }} />
+                        {group.actions.map((action, index) => {
+                            const totalItems = group.actions.length;
+                            const isFullWidth = totalItems === 1;
+                            const itemWidth = isTablet ? '31.5%' : '48%';
 
-                                        <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}><action.icon size={22} color={action.color} /></View>
-                                        <Text style={styles.actionLabel} numberOfLines={1}>{action.label}</Text>
-                                    </View>
-                                </HapticTouchable>
-                            </Animated.View>
-                        ))}
+                            return (
+                                <Animated.View
+                                    key={action.label}
+                                    entering={FadeInDown.delay(500 + index * 50).duration(400)}
+                                    style={{ width: isFullWidth ? '100%' : itemWidth }}
+                                >
+                                    <HapticTouchable onPress={() => action.params ? navigateOnce(action.href, action.params) : navigateOnce(action.href || '')}>
+                                        <View style={[styles.actionButton, { backgroundColor: action.bgColor, width: '100%' }]}>
+                                            {/* Decorative Graphics */}
+                                            <View style={{ position: 'absolute', top: -15, right: -15, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.2)' }} />
+                                            <View style={{ position: 'absolute', bottom: -20, left: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.15)' }} />
+
+                                            <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}><action.icon size={22} color={action.color} /></View>
+                                            <Text style={styles.actionLabel} numberOfLines={1}>{action.label}</Text>
+                                        </View>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            );
+                        })}
                     </View>
                 </Animated.View>
             ))}
@@ -6482,7 +6563,7 @@ const ConductorView = ({ refreshing, onRefresh, onScroll, paddingTop, refreshOff
                                 </View>
                                 <View style={{ flex: 1 }}>
                                     <Text style={{ fontSize: 16, fontWeight: '700', color: '#fff' }}>Trip Active</Text>
-                                    <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.9)', marginTop: 2 }}>Tap to mark attendance</Text>
+                                    <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.9)', marginTop: 2 }}>Tap to  </Text>
                                 </View>
                                 <ChevronRight size={24} color="#fff" />
                             </View>

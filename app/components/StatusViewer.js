@@ -6,14 +6,15 @@ import {
 import { Image } from 'expo-image';
 import { Video as ExpoVideo, ResizeMode } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
-import { X, ChevronLeft, ChevronRight, Eye, Trash2 } from 'lucide-react-native';
+import { X, ChevronLeft, ChevronRight, Eye, Trash2, ChevronUp } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import HapticTouchable from './HapticTouch';
 import Animated, {
     useSharedValue, useAnimatedStyle, withTiming,
-    runOnJS, withSpring
+    runOnJS, withSpring, cancelAnimation
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import * as FileSystem from 'expo-file-system';
 import api from '../../lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -21,11 +22,16 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const PROGRESS_BAR_HEIGHT = 3;
 const IMAGE_DURATION = 5000; // 5 seconds for images
 const DEFAULT_VIDEO_DURATION = 15000; // 15 seconds fallback for video
+const VIDEO_CACHE_DIR = `${FileSystem.cacheDirectory}status_videos/`;
+
+// In-memory map: remote URL -> local cached URI (persists across mounts)
+const videoCacheMap = {};
 
 /**
  * StatusViewer — Fullscreen modal for viewing statuses
- * Features: auto-progress, tap navigation, swipe-to-dismiss, seen tracking,
- *           view count + viewer details, delete own statuses
+ * Features: auto-progress, tap navigation, long-press to pause, swipe-to-dismiss,
+ *           swipe-up to open viewers, seen tracking, view count + viewer details,
+ *           delete own statuses, blurred background for correct aspect ratio, media caching
  */
 const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAllViewed }) => {
     const insets = useSafeAreaInsets();
@@ -33,11 +39,17 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
     const [currentIndex, setCurrentIndex] = useState(0);
     const [paused, setPaused] = useState(false);
     const [videoLoading, setVideoLoading] = useState(false);
+    const [mediaReady, setMediaReady] = useState(false);
+    const [cachedVideoUri, setCachedVideoUri] = useState(null);
     const [localStatuses, setLocalStatuses] = useState([]);
     const progressAnim = useSharedValue(0);
     const timerRef = useRef(null);
     const videoRef = useRef(null);
     const translateY = useSharedValue(0);
+    const loadedMediaRef = useRef(new Set()); // Track URLs already loaded to skip wait on revisit
+
+    // Long-press state
+    const [longPressing, setLongPressing] = useState(false);
 
     // Viewer details state
     const [showViewers, setShowViewers] = useState(false);
@@ -64,6 +76,9 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
             translateY.value = 0;
             setShowViewers(false);
             setViewers([]);
+            setLongPressing(false);
+            setMediaReady(false);
+            setCachedVideoUri(null);
             // Initialize viewCount from feed data (comes from _count in API)
             const firstStatus = statusGroup.statuses[0];
             setViewCount(firstStatus?.viewCount || 0);
@@ -107,9 +122,76 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
         }
     }, [schoolId]);
 
+    // Pre-cache video to local disk so re-views don't re-download
+    useEffect(() => {
+        if (!visible || !currentStatus) return;
+        if (currentStatus.type !== 'video' || !currentStatus.mediaUrl) return;
+
+        const url = currentStatus.mediaUrl;
+
+        // Already resolved from memory map?
+        if (videoCacheMap[url]) {
+            setCachedVideoUri(videoCacheMap[url]);
+            return;
+        }
+
+        let cancelled = false;
+
+        (async () => {
+            try {
+                // Create cache directory if needed
+                const dirInfo = await FileSystem.getInfoAsync(VIDEO_CACHE_DIR);
+                if (!dirInfo.exists) {
+                    await FileSystem.makeDirectoryAsync(VIDEO_CACHE_DIR, { intermediates: true });
+                }
+
+                // Derive a stable filename from URL
+                const filename = url.split('/').pop().split('?')[0] || `video_${Date.now()}.mp4`;
+                const localPath = VIDEO_CACHE_DIR + filename;
+
+                // Check if already on disk
+                const fileInfo = await FileSystem.getInfoAsync(localPath);
+                if (fileInfo.exists) {
+                    videoCacheMap[url] = localPath;
+                    if (!cancelled) setCachedVideoUri(localPath);
+                    return;
+                }
+
+                // Download to disk
+                const download = await FileSystem.downloadAsync(url, localPath);
+                videoCacheMap[url] = download.uri;
+                if (!cancelled) setCachedVideoUri(download.uri);
+            } catch (e) {
+                // Failed to cache — fall through to remote URL (already wired as fallback)
+                console.warn('Video cache failed:', e.message);
+            }
+        })();
+
+        return () => { cancelled = true; };
+    }, [visible, currentStatus?.id]);
+
     // Start timer for current status
     useEffect(() => {
-        if (!visible || !currentStatus || paused || showViewers) return;
+        // Wait for media to finish loading before starting the timer
+        if (!visible || !currentStatus || paused || showViewers || longPressing) return;
+        if (currentStatus.type === 'video' && !mediaReady) {
+            // Videos always need to buffer — never skip the wait
+            progressAnim.value = 0;
+            return;
+        }
+        if (currentStatus.type === 'image' && !mediaReady) {
+            // Images cache locally — check if we've loaded this before
+            if (currentStatus.mediaUrl && loadedMediaRef.current.has(currentStatus.mediaUrl)) {
+                setMediaReady(true);
+            }
+            progressAnim.value = 0;
+            return;
+        }
+        // Text statuses are immediately ready
+        if (currentStatus.type === 'text' && !mediaReady) {
+            setMediaReady(true);
+            return;
+        }
 
         // Record view (not for own statuses)
         if (!isOwnStatus) {
@@ -134,22 +216,34 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
             duration = IMAGE_DURATION;
         }
 
-        // Animate progress bar
-        progressAnim.value = 0;
-        progressAnim.value = withTiming(1, { duration });
-
-        // Auto-advance timer (fallback — video also advances via onPlaybackStatusUpdate)
-        timerRef.current = setTimeout(() => {
-            goNext();
-        }, duration + 500); // slight buffer for video
+        // Check if we're resuming from a pause/long-press (progress is mid-way)
+        const currentProgress = progressAnim.value;
+        if (currentProgress > 0.01 && currentProgress < 0.99) {
+            // Resume: animate remaining portion from current position
+            const remaining = duration * (1 - currentProgress);
+            progressAnim.value = withTiming(1, { duration: remaining });
+            timerRef.current = setTimeout(() => {
+                goNext();
+            }, remaining + 500);
+        } else {
+            // Fresh start: reset and animate full duration
+            progressAnim.value = 0;
+            progressAnim.value = withTiming(1, { duration });
+            timerRef.current = setTimeout(() => {
+                goNext();
+            }, duration + 500);
+        }
 
         return () => {
             if (timerRef.current) clearTimeout(timerRef.current);
+            cancelAnimation(progressAnim); // Freeze progress bar at current position
         };
-    }, [currentIndex, visible, paused, currentStatus?.id, showViewers]);
+    }, [currentIndex, visible, paused, currentStatus?.id, showViewers, longPressing, mediaReady]);
 
     const goNext = useCallback(() => {
         if (timerRef.current) clearTimeout(timerRef.current);
+        setMediaReady(false); // Reset for next status
+        setCachedVideoUri(null);
         if (currentIndex < statuses.length - 1) {
             setCurrentIndex(prev => prev + 1);
             progressAnim.value = 0;
@@ -162,22 +256,58 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
 
     const goPrev = useCallback(() => {
         if (timerRef.current) clearTimeout(timerRef.current);
+        setMediaReady(false); // Reset for prev status
+        setCachedVideoUri(null);
         if (currentIndex > 0) {
             setCurrentIndex(prev => prev - 1);
             progressAnim.value = 0;
         }
     }, [currentIndex]);
 
-    // Tap zones: left 30% = prev, right 70% = next
-    const handleTap = useCallback((evt) => {
-        if (showViewers) return; // Don't navigate when viewers panel is open
-        const x = evt.nativeEvent.locationX;
+    // Tap handler — if viewers panel open, close it; otherwise navigate
+    const handleTap = useCallback((x) => {
+        if (showViewers) {
+            // Tap anywhere closes viewers panel
+            setShowViewers(false);
+            setPaused(false);
+            return;
+        }
         if (x < SCREEN_WIDTH * 0.3) {
             goPrev();
         } else {
             goNext();
         }
     }, [goPrev, goNext, showViewers]);
+
+    // Long-press to pause
+    const handleLongPressStart = useCallback(() => {
+        setLongPressing(true);
+        setPaused(true);
+        if (timerRef.current) clearTimeout(timerRef.current);
+    }, []);
+
+    const handleLongPressEnd = useCallback(() => {
+        setLongPressing(false);
+        setPaused(false);
+    }, []);
+
+    // Gesture: Tap for navigation, LongPress for pause
+    const tapGesture = Gesture.Tap()
+        .onEnd((e) => {
+            runOnJS(handleTap)(e.x);
+        });
+
+    const longPressGesture = Gesture.LongPress()
+        .minDuration(300)
+        .onStart(() => {
+            runOnJS(handleLongPressStart)();
+        })
+        .onEnd(() => {
+            runOnJS(handleLongPressEnd)();
+        });
+
+    // Long press takes priority over tap
+    const composedTapGesture = Gesture.Exclusive(longPressGesture, tapGesture);
 
     // Swipe down gesture to dismiss
     const panGesture = Gesture.Pan()
@@ -191,6 +321,14 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
                 runOnJS(onClose)();
             } else {
                 translateY.value = withSpring(0);
+            }
+        });
+
+    // Swipe-up gesture on the view count footer area to open viewers
+    const swipeUpGesture = Gesture.Pan()
+        .onEnd((e) => {
+            if (e.translationY < -60) {
+                runOnJS(handleOpenViewers)();
             }
         });
 
@@ -316,6 +454,121 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
 
     if (!visible || !currentStatus) return null;
 
+    // Render media content with blurred background for correct aspect ratio
+    const renderMediaContent = () => {
+        if (currentStatus.type === 'image' && currentStatus.mediaUrl) {
+            return (
+                <View style={StyleSheet.absoluteFill}>
+                    {/* Blurred background fill */}
+                    <Image
+                        source={{ uri: currentStatus.mediaUrl }}
+                        style={StyleSheet.absoluteFill}
+                        contentFit="cover"
+                        blurRadius={25}
+                        cachePolicy="memory-disk"
+                    />
+                    <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.3)' }]} />
+                    {/* Actual image — contained for proper aspect ratio */}
+                    <Image
+                        source={{ uri: currentStatus.mediaUrl }}
+                        style={StyleSheet.absoluteFill}
+                        contentFit="contain"
+                        transition={300}
+                        onLoad={() => {
+                            loadedMediaRef.current.add(currentStatus.mediaUrl);
+                            setMediaReady(true);
+                        }}
+                        cachePolicy="memory-disk"
+                    />
+                </View>
+            );
+        }
+
+        if (currentStatus.type === 'video' && currentStatus.mediaUrl) {
+            return (
+                <View style={StyleSheet.absoluteFill}>
+                    {/* Blurred background fill for video */}
+                    {currentStatus.thumbnailUrl && (
+                        <>
+                            <Image
+                                source={{ uri: currentStatus.thumbnailUrl }}
+                                style={StyleSheet.absoluteFill}
+                                contentFit="cover"
+                                blurRadius={25}
+                                cachePolicy="memory-disk"
+                            />
+                            <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.3)' }]} />
+                        </>
+                    )}
+                    {/* Actual video — contained for proper aspect ratio */}
+                    <ExpoVideo
+                        ref={videoRef}
+                        key={currentStatus.mediaUrl}
+                        source={{ uri: cachedVideoUri || currentStatus.mediaUrl }}
+                        style={StyleSheet.absoluteFill}
+                        resizeMode={ResizeMode.CONTAIN}
+                        shouldPlay={!paused && !longPressing}
+                        isLooping={false}
+                        onLoad={async (status) => {
+                            setVideoLoading(false);
+                            // Set initial position only ONCE on load (not on every render)
+                            if (currentStatus.trimStart && videoRef.current) {
+                                try {
+                                    await videoRef.current.setPositionAsync(currentStatus.trimStart * 1000);
+                                } catch (e) { }
+                            }
+                        }}
+                        onPlaybackStatusUpdate={(status) => {
+                            if (status.isLoaded) {
+                                setVideoLoading(false);
+                                // Mark video as ready so the timer can start
+                                if (!mediaReady && status.isPlaying) {
+                                    loadedMediaRef.current.add(currentStatus.mediaUrl);
+                                    setMediaReady(true);
+                                }
+                                // Stop at trimEnd if set
+                                if (currentStatus.trimEnd && status.positionMillis >= currentStatus.trimEnd * 1000) {
+                                    goNext();
+                                }
+                            }
+                            if (status.didJustFinish) {
+                                goNext();
+                            }
+                        }}
+                        onLoadStart={() => setVideoLoading(true)}
+                    />
+                    {videoLoading && (
+                        <View style={styles.videoLoading}>
+                            <ActivityIndicator size="large" color="#fff" />
+                        </View>
+                    )}
+                </View>
+            );
+        }
+
+        if (currentStatus.type === 'text') {
+            return (
+                <LinearGradient
+                    colors={['#667eea', '#764ba2']}
+                    style={StyleSheet.absoluteFill}
+                >
+                    <View style={styles.textStatusContainer}>
+                        <Text style={styles.textStatusContent}>
+                            {currentStatus.text}
+                        </Text>
+                        {currentStatus.caption && (
+                            <Text style={styles.textCaption}>
+                                {currentStatus.caption}
+                            </Text>
+                        )}
+                    </View>
+                </LinearGradient>
+            );
+        }
+
+        return null;
+    };
+
     return (
         <Modal
             visible={visible}
@@ -327,64 +580,11 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
             <GestureHandlerRootView style={{ flex: 1 }}>
                 <GestureDetector gesture={panGesture}>
                     <Animated.View style={[styles.viewerContainer, swipeStyle]}>
-                        <TouchableWithoutFeedback onPress={handleTap}>
+                        <GestureDetector gesture={composedTapGesture}>
                             <View style={styles.contentContainer}>
-                                {/* Background */}
+                                {/* Background with blurred fill + contained media */}
                                 <View style={styles.backgroundFill}>
-                                    {currentStatus.type === 'image' && currentStatus.mediaUrl ? (
-                                        <Image
-                                            source={{ uri: currentStatus.mediaUrl }}
-                                            style={StyleSheet.absoluteFill}
-                                            contentFit="cover"
-                                            transition={300}
-                                        />
-                                    ) : currentStatus.type === 'video' && currentStatus.mediaUrl ? (
-                                        <>
-                                            <ExpoVideo
-                                                ref={videoRef}
-                                                source={{ uri: currentStatus.mediaUrl }}
-                                                style={StyleSheet.absoluteFill}
-                                                resizeMode={ResizeMode.COVER}
-                                                shouldPlay={!paused}
-                                                isLooping={false}
-                                                positionMillis={currentStatus.trimStart ? currentStatus.trimStart * 1000 : 0}
-                                                onPlaybackStatusUpdate={(status) => {
-                                                    if (status.isLoaded) {
-                                                        setVideoLoading(false);
-                                                        // Stop at trimEnd if set
-                                                        if (currentStatus.trimEnd && status.positionMillis >= currentStatus.trimEnd * 1000) {
-                                                            goNext();
-                                                        }
-                                                    }
-                                                    if (status.didJustFinish) {
-                                                        goNext();
-                                                    }
-                                                }}
-                                                onLoadStart={() => setVideoLoading(true)}
-                                            />
-                                            {videoLoading && (
-                                                <View style={styles.videoLoading}>
-                                                    <ActivityIndicator size="large" color="#fff" />
-                                                </View>
-                                            )}
-                                        </>
-                                    ) : currentStatus.type === 'text' ? (
-                                        <LinearGradient
-                                            colors={['#667eea', '#764ba2']}
-                                            style={StyleSheet.absoluteFill}
-                                        >
-                                            <View style={styles.textStatusContainer}>
-                                                <Text style={styles.textStatusContent}>
-                                                    {currentStatus.text}
-                                                </Text>
-                                                {currentStatus.caption && (
-                                                    <Text style={styles.textCaption}>
-                                                        {currentStatus.caption}
-                                                    </Text>
-                                                )}
-                                            </View>
-                                        </LinearGradient>
-                                    ) : null}
+                                    {renderMediaContent()}
                                 </View>
 
                                 {/* Overlay gradient */}
@@ -394,6 +594,13 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
                                     style={StyleSheet.absoluteFill}
                                     pointerEvents="none"
                                 />
+
+                                {/* Long-press pause indicator */}
+                                {longPressing && (
+                                    <View style={styles.pauseIndicator} pointerEvents="none">
+                                        <Text style={styles.pauseIndicatorText}>Paused</Text>
+                                    </View>
+                                )}
 
                                 {/* Progress Bars */}
                                 <ProgressBars />
@@ -407,6 +614,7 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
                                                     source={{ uri: posterAvatar }}
                                                     style={styles.posterAvatarImg}
                                                     contentFit="cover"
+                                                    cachePolicy="memory-disk"
                                                 />
                                             ) : (
                                                 <Text style={styles.posterInitial}>
@@ -446,21 +654,26 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
                                     </View>
                                 )}
 
-                                {/* View count footer (own statuses only) */}
+                                {/* View count footer (own statuses only) — swipeable to open viewers */}
                                 {isOwnStatus && (
-                                    <TouchableOpacity
-                                        onPress={handleOpenViewers}
-                                        style={[styles.viewCountFooter, { bottom: insets.bottom + 10 }]}
-                                        activeOpacity={0.7}
-                                    >
-                                        <Eye size={16} color="#fff" />
-                                        <Text style={styles.viewCountText}>
-                                            {viewCount} {viewCount === 1 ? 'view' : 'views'}
-                                        </Text>
-                                    </TouchableOpacity>
+                                    <GestureDetector gesture={swipeUpGesture}>
+                                        <View style={[styles.viewCountFooter, { bottom: insets.bottom + 10 }]}>
+                                            <TouchableOpacity
+                                                onPress={handleOpenViewers}
+                                                activeOpacity={0.7}
+                                                style={styles.viewCountTouchable}
+                                            >
+                                                <Eye size={16} color="#fff" />
+                                                <Text style={styles.viewCountText}>
+                                                    {viewCount} {viewCount === 1 ? 'view' : 'views'}
+                                                </Text>
+                                                <ChevronUp size={14} color="rgba(255,255,255,0.6)" style={{ marginLeft: 4 }} />
+                                            </TouchableOpacity>
+                                        </View>
+                                    </GestureDetector>
                                 )}
                             </View>
-                        </TouchableWithoutFeedback>
+                        </GestureDetector>
 
                         {/* Viewers Panel (overlay) */}
                         {showViewers && (
@@ -503,6 +716,7 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
                                                             source={{ uri: item.viewerAvatar }}
                                                             style={styles.viewerAvatarImg}
                                                             contentFit="cover"
+                                                            cachePolicy="memory-disk"
                                                         />
                                                     ) : (
                                                         <Text style={styles.viewerInitial}>
@@ -680,17 +894,37 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0,0,0,0.3)',
     },
 
+    // Pause indicator
+    pauseIndicator: {
+        position: 'absolute',
+        top: '50%',
+        alignSelf: 'center',
+        marginTop: -15,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        paddingHorizontal: 20,
+        paddingVertical: 8,
+        borderRadius: 20,
+        zIndex: 15,
+    },
+    pauseIndicatorText: {
+        color: '#fff',
+        fontSize: 14,
+        fontWeight: '600',
+    },
+
     // View count footer
     viewCountFooter: {
         position: 'absolute',
         left: 0,
         right: 0,
+        zIndex: 10,
+    },
+    viewCountTouchable: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         gap: 6,
         paddingVertical: 10,
-        zIndex: 10,
     },
     viewCountText: {
         color: '#fff',

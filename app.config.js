@@ -106,6 +106,13 @@ export default {
             "expo-router",
             "expo-secure-store",
             "expo-task-manager",
+            [
+                "expo-image-picker",
+                {
+                    "photosPermission": false,
+                    "microphonePermission": false
+                }
+            ],
             "./plugins/withProguardRules"
         ],
 

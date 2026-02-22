@@ -1,5 +1,5 @@
-import React, { memo, useCallback, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, FlatList, Dimensions, Animated as RNAnimated } from 'react-native';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, FlatList, Dimensions, Animated as RNAnimated, ActivityIndicator } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Plus } from 'lucide-react-native';
@@ -106,12 +106,37 @@ const getLatestStatus = (statuses) => {
 };
 
 /**
+ * Small shimmer that pulses inside avatar while thumbnail loads
+ */
+const AvatarShimmer = memo(() => {
+    const shimmer = useRef(new RNAnimated.Value(0)).current;
+
+    useEffect(() => {
+        const loop = RNAnimated.loop(
+            RNAnimated.sequence([
+                RNAnimated.timing(shimmer, { toValue: 1, duration: 600, useNativeDriver: true }),
+                RNAnimated.timing(shimmer, { toValue: 0, duration: 600, useNativeDriver: true }),
+            ])
+        );
+        loop.start();
+        return () => loop.stop();
+    }, []);
+
+    const opacity = shimmer.interpolate({ inputRange: [0, 1], outputRange: [0.15, 0.35] });
+
+    return (
+        <RNAnimated.View style={[styles.avatar, styles.avatarShimmer, { opacity }]} />
+    );
+});
+
+/**
  * Individual status avatar item
  */
 const StatusItem = memo(({ item, onPress, onAddPress, isMyStatus, canPost }) => {
     const hasUnseen = item.hasUnseen;
     const statusCount = item.statuses?.length || 0;
     const latestStatus = getLatestStatus(item.statuses);
+    const [thumbLoading, setThumbLoading] = useState(true);
 
     // Determine avatar content: show latest status thumbnail if available
     const renderAvatar = () => {
@@ -130,12 +155,18 @@ const StatusItem = memo(({ item, onPress, onAddPress, isMyStatus, canPost }) => 
         // If latest status has a thumbnail or media URL (image/video), show it
         if (latestStatus?.thumbnailUrl || (latestStatus?.type === 'image' && latestStatus?.mediaUrl)) {
             return (
-                <Image
-                    source={{ uri: latestStatus.thumbnailUrl || latestStatus.mediaUrl }}
-                    style={styles.avatar}
-                    contentFit="cover"
-                    transition={200}
-                />
+                <View style={styles.avatar}>
+                    {thumbLoading && <AvatarShimmer />}
+                    <Image
+                        source={{ uri: latestStatus.thumbnailUrl || latestStatus.mediaUrl }}
+                        style={StyleSheet.absoluteFill}
+                        contentFit="cover"
+                        transition={200}
+                        cachePolicy="memory-disk"
+                        onLoadStart={() => setThumbLoading(true)}
+                        onLoad={() => setThumbLoading(false)}
+                    />
+                </View>
             );
         }
 
@@ -147,6 +178,7 @@ const StatusItem = memo(({ item, onPress, onAddPress, isMyStatus, canPost }) => 
                     style={styles.avatar}
                     contentFit="cover"
                     transition={200}
+                    cachePolicy="memory-disk"
                 />
             );
         }
@@ -208,10 +240,13 @@ const StatusRow = ({ schoolId, userId, userRole, userName, userAvatar, onStatusP
             return res.data;
         },
         enabled: !!schoolId && !!userId,
-        staleTime: 1000 * 60 * 1,
-        refetchOnMount: false,
+        staleTime: 1000 * 30, // 30s — shorter so invalidation triggers a real refetch quickly
+        refetchOnMount: true, // Always refetch when component mounts (e.g., after upload)
         refetchOnWindowFocus: false,
     });
+
+    // Show if background re-fetching (not initial load)
+    const isRefreshing = isFetching && !isLoading;
 
     // ALL hooks must be called before any conditional returns
     const handlePress = useCallback((item) => {
@@ -284,6 +319,12 @@ const StatusRow = ({ schoolId, userId, userRole, userName, userAvatar, onStatusP
                     />
                 )}
             />
+            {/* Subtle refreshing indicator */}
+            {isRefreshing && (
+                <View style={styles.refreshIndicator}>
+                    <ActivityIndicator size="small" color="#0469ff" />
+                </View>
+            )}
         </View>
     );
 };
@@ -291,6 +332,12 @@ const StatusRow = ({ schoolId, userId, userRole, userName, userAvatar, onStatusP
 const styles = StyleSheet.create({
     container: {
         paddingVertical: 8,
+        position: 'relative',
+    },
+    refreshIndicator: {
+        position: 'absolute',
+        top: 2,
+        right: 16,
     },
     listContent: {
         paddingHorizontal: 16,
@@ -330,6 +377,12 @@ const styles = StyleSheet.create({
     avatar: {
         width: '100%',
         height: '100%',
+    },
+    avatarShimmer: {
+        position: 'absolute',
+        backgroundColor: '#ddd',
+        borderRadius: 999,
+        zIndex: 0,
     },
     avatarGradient: {
         width: '100%',

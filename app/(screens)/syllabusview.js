@@ -39,7 +39,6 @@ import * as SecureStore from 'expo-secure-store';
 // Use legacy API to avoid deprecation warnings
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
-import * as MediaLibrary from 'expo-media-library';
 
 import api from '../../lib/api';
 import HapticTouchable from '../components/HapticTouch';
@@ -186,29 +185,25 @@ export default function SyllabusScreen() {
                 );
 
             } else {
-                // For iOS: Use MediaLibrary
-                const { status } = await MediaLibrary.requestPermissionsAsync();
-                if (status !== 'granted') {
-                    Alert.alert(
-                        'Permission Required',
-                        'Please grant photo library access to save files'
-                    );
-                    setDownloading(false);
-                    return;
-                }
-
-                const fileUri = FileSystem.documentDirectory + fileName;
+                const fileUri = FileSystem.cacheDirectory + fileName;
                 await FileSystem.downloadAsync(syllabus.fileUrl, fileUri);
 
-                const asset = await MediaLibrary.createAssetAsync(fileUri);
-                await MediaLibrary.createAlbumAsync('School Syllabus', asset, false);
+                if (await Sharing.isAvailableAsync()) {
+                    await Sharing.shareAsync(fileUri, {
+                        mimeType: 'application/pdf',
+                        UTI: 'com.adobe.pdf',
+                        dialogTitle: 'Save Syllabus'
+                    });
+                } else {
+                    Alert.alert('Error', 'Sharing is not available on this device');
+                }
 
                 setDownloading(false);
                 setActionModalVisible(false);
 
                 Alert.alert(
                     'Success! 📁',
-                    'Syllabus saved to School Syllabus album',
+                    'Syllabus ready to save',
                     [
                         { text: 'OK' },
                         {

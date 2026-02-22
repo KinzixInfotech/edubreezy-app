@@ -34,8 +34,8 @@ import {
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as FileSystem from 'expo-file-system/legacy';
-import * as MediaLibrary from 'expo-media-library';
 import * as Haptics from 'expo-haptics';
+import * as Sharing from 'expo-sharing';
 
 import api from '../../lib/api';
 import HapticTouchable from '../components/HapticTouch';
@@ -242,20 +242,20 @@ export default function GalleryScreen() {
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                 Alert.alert('Saved! 📸', 'Image saved to your folder');
             } else {
-                const { status } = await MediaLibrary.requestPermissionsAsync();
-                if (status !== 'granted') {
-                    Alert.alert('Permission Required', 'Please grant photo library access');
-                    setDownloadingId(null);
-                    return;
+                const fileUri = FileSystem.cacheDirectory + fileName;
+                await FileSystem.downloadAsync(imageUrl, fileUri);
+
+                if (await Sharing.isAvailableAsync()) {
+                    await Sharing.shareAsync(fileUri, {
+                        mimeType: 'image/jpeg',
+                        UTI: 'public.jpeg',
+                        dialogTitle: 'Save Image'
+                    });
+                } else {
+                    Alert.alert('Error', 'Sharing is not available on this device');
                 }
 
-                const fileUri = FileSystem.documentDirectory + fileName;
-                await FileSystem.downloadAsync(imageUrl, fileUri);
-                const asset = await MediaLibrary.createAssetAsync(fileUri);
-                await MediaLibrary.createAlbumAsync('School Gallery', asset, false);
-
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                Alert.alert('Saved! 📸', 'Image saved to School Gallery album');
             }
         } catch (error) {
             console.error('Download error:', error);

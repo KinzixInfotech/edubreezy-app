@@ -28,7 +28,7 @@ import { BlurView } from 'expo-blur';
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const categories = ['All', 'Unread', 'GENERAL', 'EMERGENCY', 'EXAM', 'HOLIDAY'];
-const BROADCAST_ROLES = ['DIRECTOR', 'PRINCIPAL'];
+const BROADCAST_ROLES = ['DIRECTOR', 'PRINCIPAL', 'TEACHING_STAFF'];
 
 // Empty State Component
 const EmptyState = React.memo(({ isSentTab }) => (
@@ -143,7 +143,10 @@ const NoticeBoardScreen = () => {
 
       if (activeTab === 'sent' && canBroadcast) {
         const res = await api.get(`/schools/${schoolId}/broadcast?limit=50`);
-        return (res.data.broadcasts || []).map(b => ({
+        const allBroadcasts = res.data.broadcasts || [];
+        // Filter to only show current user's broadcasts
+        const mine = allBroadcasts.filter(b => b.senderId === userId);
+        return mine.map(b => ({
           ...b,
           read: true,
           isSent: true,

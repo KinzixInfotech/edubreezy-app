@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
     View,
     Text,
@@ -24,7 +24,12 @@ import {
     Clock,
     Image as ImageIcon,
     X,
+    Wifi,
+    WifiOff,
+    SignalHigh,
+    SignalLow,
 } from 'lucide-react-native';
+import NetInfo from "@react-native-community/netinfo";
 import { Image } from 'expo-image';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -38,6 +43,7 @@ import { StatusBar } from 'expo-status-bar';
 const AUDIENCE_OPTIONS = [
     { key: 'ALL', label: 'Everyone', icon: Users, color: '#0469ff', description: 'All staff, students & parents' },
     { key: 'STAFF', label: 'Staff Only', icon: UserCheck, color: '#8B5CF6', description: 'Teachers & non-teaching staff' },
+    { key: 'TEACHING_STAFF', label: 'Teaching Staff', icon: UserCheck, color: '#6366F1', description: 'Teaching staff only' },
     { key: 'STUDENTS', label: 'Students', icon: GraduationCap, color: '#10B981', description: 'Students & their parents' },
     { key: 'PARENTS', label: 'Parents Only', icon: Users, color: '#F59E0B', description: 'All parents' },
 ];
@@ -59,7 +65,62 @@ export default function BroadcastScreen() {
     const [isUploading, setIsUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
     const [refreshing, setRefreshing] = useState(false);
+    const [networkState, setNetworkState] = useState({
+        isConnected: true,
+        isInternetReachable: true,
+        type: 'unknown',
+        details: null
+    });
     const queryClient = useQueryClient();
+
+    // Monitor network status
+    useEffect(() => {
+        const unsubscribe = NetInfo.addEventListener(state => {
+            setNetworkState({
+                isConnected: state.isConnected,
+                isInternetReachable: state.isInternetReachable,
+                type: state.type,
+                details: state.details
+            });
+        });
+
+        return () => unsubscribe();
+    }, []);
+
+    const getNetworkQuality = () => {
+        if (!networkState.isConnected || networkState.isInternetReachable === false) {
+            return {
+                label: 'Disconnected',
+                color: '#EF4444',
+                icon: WifiOff,
+                quality: 'red',
+                description: 'Internet connection is required to send broadcasts.'
+            };
+        }
+
+        const isWeak = networkState.type === 'cellular' &&
+            (networkState.details?.generation === '2g' || networkState.details?.generation === '3g');
+
+        if (isWeak) {
+            return {
+                label: 'Weak Signal',
+                color: '#F59E0B',
+                icon: SignalLow,
+                quality: 'yellow',
+                description: 'Signal is weak. Your broadcast might fail or take longer.'
+            };
+        }
+
+        return {
+            label: 'Signal Strong',
+            color: '#10B981',
+            icon: Wifi,
+            quality: 'green',
+            description: 'Your connection is stable.'
+        };
+    };
+
+    const netQuality = getNetworkQuality();
 
     // Get user data
     const { data: userData } = useQuery({
@@ -74,14 +135,17 @@ export default function BroadcastScreen() {
     const schoolId = userData?.schoolId;
     const userId = userData?.id;
 
-    // Fetch recent broadcasts
+    // Fetch recent broadcasts (only current user's)
     const { data: recentBroadcasts, isLoading, refetch } = useQuery({
-        queryKey: ['broadcasts', schoolId],
+        queryKey: ['broadcasts', schoolId, userId],
         queryFn: async () => {
-            const res = await api.get(`/schools/${schoolId}/broadcast?limit=10`);
-            return res.data;
+            const res = await api.get(`/schools/${schoolId}/broadcast?limit=30`);
+            const all = res.data?.broadcasts || [];
+            // Filter to only show current user's broadcasts
+            const mine = all.filter(b => b.senderId === userId);
+            return { ...res.data, broadcasts: mine };
         },
-        enabled: !!schoolId,
+        enabled: !!schoolId && !!userId,
         staleTime: 60 * 1000,
     });
 
@@ -157,6 +221,16 @@ export default function BroadcastScreen() {
     }, [refetch]);
 
     const handleSend = async () => {
+        // Network Check
+        if (netQuality.quality === 'red') {
+            Alert.alert(
+                'No Connection 📡',
+                'Your internet connection is currently offline. Please connect to the internet to send broadcasts.',
+                [{ text: 'OK' }]
+            );
+            return;
+        }
+
         if (!title.trim()) {
             Alert.alert('Error', 'Please enter a title');
             return;
@@ -171,26 +245,29 @@ export default function BroadcastScreen() {
         }
 
         const isEmergency = category === 'EMERGENCY';
+        const isWeak = netQuality.quality === 'yellow';
+
+        const sendBroadcast = () => {
+            broadcastMutation.mutate({
+                title: title.trim(),
+                message: message.trim(),
+                audience,
+                category,
+                priority: isEmergency ? 'URGENT' : 'NORMAL',
+                senderId: userId,
+                imageUrl: uploadedImage?.url || null,
+            });
+        };
 
         Alert.alert(
             isEmergency ? '🚨 Send Emergency Broadcast?' : '📢 Send Broadcast?',
-            `This will send notifications to ${AUDIENCE_OPTIONS.find(a => a.key === audience)?.description}.`,
+            `${isWeak ? '⚠️ WARNING: Your signal is weak.\n\n' : ''}This will send notifications to ${AUDIENCE_OPTIONS.find(a => a.key === audience)?.description}.`,
             [
                 { text: 'Cancel', style: 'cancel' },
                 {
                     text: 'Send',
                     style: isEmergency ? 'destructive' : 'default',
-                    onPress: async () => {
-                        broadcastMutation.mutate({
-                            title: title.trim(),
-                            message: message.trim(),
-                            audience,
-                            category,
-                            priority: isEmergency ? 'URGENT' : 'NORMAL',
-                            senderId: userId,
-                            imageUrl: uploadedImage?.url || null,
-                        });
-                    },
+                    onPress: sendBroadcast,
                 },
             ]
         );
@@ -242,6 +319,17 @@ export default function BroadcastScreen() {
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
             >
+                {/* Network Quality Indicator */}
+                <View style={[styles.networkCard, { borderColor: netQuality.color + '30', backgroundColor: netQuality.color + '05' }]}>
+                    <View style={[styles.networkIcon, { backgroundColor: netQuality.color + '20' }]}>
+                        <netQuality.icon size={16} color={netQuality.color} />
+                    </View>
+                    <View style={styles.networkInfo}>
+                        <Text style={[styles.networkLabel, { color: netQuality.color }]}>{netQuality.label}</Text>
+                        <Text style={styles.networkDescription}>{netQuality.description}</Text>
+                    </View>
+                </View>
+
                 {/* Compose Section */}
                 <View style={styles.composeSection}>
                     <View style={styles.sectionHeader}>
@@ -372,10 +460,10 @@ export default function BroadcastScreen() {
                         style={[
                             styles.sendButton,
                             category === 'EMERGENCY' && styles.emergencyButton,
-                            isSending && styles.sendButtonDisabled,
+                            (isSending || netQuality.quality === 'red') && styles.sendButtonDisabled,
                         ]}
                         onPress={handleSend}
-                        disabled={isSending}
+                        disabled={isSending || netQuality.quality === 'red'}
                     >
                         {isSending ? (
                             <ActivityIndicator size="small" color="#fff" />
@@ -703,5 +791,34 @@ const styles = StyleSheet.create({
         fontSize: 11,
         color: '#10B981',
         fontWeight: '600',
+    },
+    // Network styles
+    networkCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 12,
+        borderRadius: 12,
+        borderWidth: 1,
+        marginBottom: 16,
+        gap: 12,
+    },
+    networkIcon: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    networkInfo: {
+        flex: 1,
+    },
+    networkLabel: {
+        fontSize: 13,
+        fontWeight: '700',
+        marginBottom: 2,
+    },
+    networkDescription: {
+        fontSize: 11,
+        color: '#6B7280',
     },
 });

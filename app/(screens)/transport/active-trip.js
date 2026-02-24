@@ -15,6 +15,7 @@ import {
     Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
     ArrowLeft,
@@ -48,6 +49,7 @@ import {
     flushLocationQueue,
     updateTripStops,
 } from '../../../lib/transport-location-task';
+import LocationDisclosureModal from '../../components/LocationDisclosureModal';
 import {
     getDistanceMeters,
     checkStopProximity,
@@ -63,9 +65,7 @@ import {
 import { fetchRouteDirections, checkRouteDeviation, clearCachedRoute } from '../../../lib/google-maps-service';
 import { calculateETA, resetETAState } from '../../../lib/eta-service';
 import { animateMarkerMovement, calculateBearing } from '../../../lib/map-utils';
-import { StatusBar } from 'expo-status-bar';
-
-const { height, width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 const STOP_GEOFENCE_RADIUS = 80;
 
 // Simple Bus Marker Component - matching bus-tracking.js exactly
@@ -128,6 +128,7 @@ export default function ActiveTripScreen() {
     const busMarkerRef = useRef(null); // For animated marker
     const prevLocationRef = useRef(null); // Previous location for animation
     const [busHeading, setBusHeading] = useState(0); // Bus heading for marker rotation
+    const [showLocationDisclosure, setShowLocationDisclosure] = useState(false);
 
     // Refs to keep location callback values current (avoids stale closure)
     const completedStopIdsRef = useRef([]);
@@ -234,13 +235,19 @@ export default function ActiveTripScreen() {
 
         const setupTracking = async () => {
             if (trip?.status === 'IN_PROGRESS' && !isTracking) {
-                await startLocationTracking();
-
-                // Permissions already granted by startBackgroundLocationTask — no need to re-request
-                locationSubscription = await Location.watchPositionAsync(
-                    { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 10 },
-                    handleLocationUpdate
-                );
+                // Check if background permission is already granted
+                const { status } = await Location.getBackgroundPermissionsAsync();
+                if (status === 'granted') {
+                    // Already have permission, start tracking directly
+                    await startLocationTracking();
+                    locationSubscription = await Location.watchPositionAsync(
+                        { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 10 },
+                        handleLocationUpdate
+                    );
+                } else {
+                    // Show disclosure first as per Google Play policy
+                    setShowLocationDisclosure(true);
+                }
             }
         };
         setupTracking();
@@ -251,6 +258,12 @@ export default function ActiveTripScreen() {
             subscription.remove();
         };
     }, [trip?.status, isTracking]);
+
+    const handleAcceptDisclosure = async () => {
+        setShowLocationDisclosure(false);
+        await startLocationTracking();
+        // Force a re-render or effect trigger if needed, but startLocationTracking sets isTracking
+    };
 
     const handleLocationUpdate = async (location) => {
         const { latitude, longitude, speed } = location.coords;
@@ -930,7 +943,14 @@ export default function ActiveTripScreen() {
                     </View>
                 </View>
             </Modal>
-        </View >
+
+            {/* Location Disclosure Modal for Google Play Compliance */}
+            <LocationDisclosureModal
+                visible={showLocationDisclosure}
+                onAccept={handleAcceptDisclosure}
+                onDecline={() => setShowLocationDisclosure(false)}
+            />
+        </View>
     );
 }
 

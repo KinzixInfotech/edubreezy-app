@@ -120,7 +120,8 @@ export default {
                     "microphonePermission": false
                 }
             ],
-            "./plugins/withProguardRules"
+            "./plugins/withProguardRules",
+            "./plugins/withRemoveMediaPermissions"
         ],
 
         extra: {

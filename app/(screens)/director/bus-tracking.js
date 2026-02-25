@@ -8,6 +8,7 @@ import { Bus, ChevronLeft, MapPin, Users, Navigation, Clock, Phone, User, Refres
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
+import { useRealtimeLocation } from '../../../hooks/useRealtimeLocation';
 import { StatusBar } from 'expo-status-bar';
 
 const { height, width } = Dimensions.get('window');
@@ -19,7 +20,7 @@ const BusMarkerView = ({ status }) => (
         status === 'IDLE' ? styles.busMarkerIdle :
             styles.busMarkerOffline
     ]}>
-        <Bus size={18} color="#fff" />
+        <Text style={{ fontSize: 18 }}>🚌</Text>
     </View>
 );
 
@@ -27,31 +28,48 @@ export default function DirectorBusTrackingScreen() {
     const params = useLocalSearchParams();
     const { vehicleId, schoolId, busData } = params;
     const [refreshing, setRefreshing] = useState(false);
+    const [tracksViewChanges, setTracksViewChanges] = useState(true);
     const mapRef = useRef(null);
+
+    // Optimization: Stop tracking view changes after initial render
+    useEffect(() => {
+        if (tracksViewChanges) {
+            const timer = setTimeout(() => setTracksViewChanges(false), 500);
+            return () => clearTimeout(timer);
+        }
+    }, [tracksViewChanges]);
 
     // Parse initial bus data if passed
     const initialBusData = busData ? JSON.parse(busData) : null;
 
-    // Fetch bus location with polling
+    // Fetch bus metadata once (no polling — Realtime handles live location)
     const { data, isLoading, refetch } = useQuery({
-        queryKey: ['director-bus-location', vehicleId],
+        queryKey: ['director-bus-location-meta', vehicleId],
         queryFn: async () => {
             const res = await api.get(`/schools/transport/location/${vehicleId}`);
             return res.data;
         },
         enabled: !!vehicleId,
-        staleTime: 10 * 1000,
-        refetchInterval: 10000, // Poll every 10 seconds
+        staleTime: 1000 * 60 * 5,
+        // NO refetchInterval — Supabase Realtime handles live location
     });
 
+    // 🔴 REALTIME: Subscribe to live vehicle location via Supabase
+    const {
+        location: realtimeLocation,
+        isConnected: isRealtimeConnected,
+        secondsAgo: realtimeSecondsAgo,
+    } = useRealtimeLocation(vehicleId, { enabled: !!vehicleId });
+
     const vehicle = data?.vehicle || initialBusData;
-    const location = data?.currentLocation;
+    // Use realtime location if available, fall back to API-fetched location
+    const location = realtimeLocation || data?.currentLocation;
     const activeTrip = data?.activeTrip;
     const driver = data?.driver;
     const conductor = data?.conductor;
     const stops = data?.stops || [];
-    const status = data?.status || 'OFFLINE';
-    const secondsAgo = data?.secondsAgo;
+    const status = isRealtimeConnected && realtimeLocation ? 'LIVE' : (data?.status || 'OFFLINE');
+    const secondsAgo = realtimeSecondsAgo ?? data?.secondsAgo;
     const routeName = data?.routeName || initialBusData?.routeName;
     const assignedStudents = data?.assignedStudents || 0;
 
@@ -175,6 +193,7 @@ export default function DirectorBusTrackingScreen() {
                         <MapView
                             ref={mapRef}
                             provider={PROVIDER_GOOGLE}
+                            googleRenderer={'LEGACY'}
                             style={styles.map}
                             mapType="standard"
                             initialRegion={{
@@ -194,6 +213,7 @@ export default function DirectorBusTrackingScreen() {
                                     latitude: location.latitude,
                                     longitude: location.longitude,
                                 }}
+                                tracksViewChanges={tracksViewChanges}
                                 title={vehicle?.licensePlate}
                             >
                                 <BusMarkerView status={status} />
@@ -217,6 +237,7 @@ export default function DirectorBusTrackingScreen() {
                                             latitude: stop.latitude,
                                             longitude: stop.longitude,
                                         }}
+                                        tracksViewChanges={false}
                                         title={stop.name}
                                         pinColor={index === 0 ? 'green' : index === stops.length - 1 ? 'red' : 'blue'}
                                     />

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
     Modal,
     View,
@@ -6,12 +6,18 @@ import {
     StyleSheet,
     Dimensions,
 } from 'react-native';
-import { MapPin, ShieldCheck, Info } from 'lucide-react-native';
+import { MapPin, ShieldCheck, Info, CheckSquare, Square } from 'lucide-react-native';
 import HapticTouchable from './HapticTouch';
 
 const { width } = Dimensions.get('window');
 
 const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
+    const [dontShowAgain, setDontShowAgain] = useState(false);
+
+    const handleAccept = () => {
+        onAccept(dontShowAgain); // pass preference up so parent can save it
+    };
+
     return (
         <Modal
             animationType="fade"
@@ -48,11 +54,25 @@ const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
                         This data is used solely for the purpose of bus tracking and student safety. We do not sell your personal or location data.
                     </Text>
 
+                    {/* Don't show again checkbox */}
+                    <HapticTouchable
+                        style={styles.checkboxRow}
+                        onPress={() => setDontShowAgain(prev => !prev)}
+                    >
+                        {dontShowAgain
+                            ? <CheckSquare size={20} color="#2563EB" />
+                            : <Square size={20} color="#94A3B8" />
+                        }
+                        <Text style={[styles.checkboxLabel, dontShowAgain && styles.checkboxLabelActive]}>
+                            Don't show again
+                        </Text>
+                    </HapticTouchable>
+
                     <View style={styles.buttonContainer}>
                         <HapticTouchable style={styles.declineButton} onPress={onDecline}>
                             <Text style={styles.declineText}>Not Now</Text>
                         </HapticTouchable>
-                        <HapticTouchable style={styles.acceptButton} onPress={onAccept}>
+                        <HapticTouchable style={styles.acceptButton} onPress={handleAccept}>
                             <Text style={styles.acceptText}>I Agree</Text>
                         </HapticTouchable>
                     </View>
@@ -134,8 +154,24 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: '#94A3B8',
         textAlign: 'center',
-        marginBottom: 24,
+        marginBottom: 16,
         lineHeight: 18,
+    },
+    checkboxRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        alignSelf: 'flex-start',
+        marginBottom: 20,
+        paddingHorizontal: 4,
+    },
+    checkboxLabel: {
+        fontSize: 14,
+        color: '#94A3B8',
+        fontWeight: '500',
+    },
+    checkboxLabelActive: {
+        color: '#2563EB',
     },
     buttonContainer: {
         flexDirection: 'row',

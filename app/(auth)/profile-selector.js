@@ -21,6 +21,8 @@ import { tryRestoreSession, initTokenSync } from '../../lib/tokenManager';
 import HapticTouchable from '../components/HapticTouch';
 import { supabase } from '../../lib/supabase';
 import { stopBackgroundLocationTask } from '../../lib/transport-location-task';
+import fcmService from '../../services/fcmService';
+import { onProfilePictureChange } from '../../lib/profileEvents';
 
 const { width } = Dimensions.get('window');
 const PROFILE_SIZE = 100;
@@ -70,6 +72,20 @@ export default function ProfileSelectorScreen() {
     useEffect(() => {
         initializeScreen();
     }, []);
+
+    // Subscribe to profile picture updates
+    useEffect(() => {
+        const unsubscribe = onProfilePictureChange((newUrl) => {
+            console.log('📸 ProfileSelector received picture update');
+            // Update the profile picture in our local list if any matches
+            // Note: In profileEvents, we don't pass userId, but we can assume the current 
+            // active user just updated it. Alternatively, since it's a global event, 
+            // we can just refresh the profiles from storage since we know it's been updated there too.
+            loadProfilesForCode(schoolCode);
+        });
+
+        return unsubscribe;
+    }, [schoolCode]);
 
     // Initialize screen - load school data if not provided via params
     const initializeScreen = async () => {
@@ -124,6 +140,32 @@ export default function ProfileSelectorScreen() {
     const handleProfileSelect = async (profile) => {
         try {
             setSelectingProfile(profile.id);
+
+            // ===== FCM TOKEN CLEANUP: Prevent cross-role notification leak =====
+            // Before switching, unregister the OLD user's FCM token so they
+            // don't keep receiving notifications on this device
+            try {
+                const oldUserStr = await SecureStore.getItemAsync('user');
+                if (oldUserStr) {
+                    const oldUser = JSON.parse(oldUserStr);
+                    if (oldUser?.id && oldUser.id !== profile.userData?.id) {
+                        console.log('[FCM] 🔄 Switching profile: clearing FCM token for old user:', oldUser.id);
+                        await fcmService.unregisterToken(oldUser.id);
+
+                        // Stop background location if old user was a driver
+                        const oldRole = await SecureStore.getItemAsync('userRole');
+                        if (oldRole) {
+                            const parsedRole = JSON.parse(oldRole);
+                            if (parsedRole === 'DRIVER' || parsedRole === 'CONDUCTOR') {
+                                console.log('[FCM] 🛑 Stopping background location for old driver/conductor profile');
+                                await stopBackgroundLocationTask();
+                            }
+                        }
+                    }
+                }
+            } catch (fcmErr) {
+                console.warn('[FCM] ⚠️ Error cleaning up old token (non-blocking):', fcmErr);
+            }
 
             // Clear any existing query cache to avoid data leaks between profiles
             queryClient.clear();
@@ -251,6 +293,18 @@ export default function ProfileSelectorScreen() {
                             console.log('⚠️ No background task to stop:', err);
                         }
 
+                        // Unregister FCM tokens for ALL profiles to prevent ghost notifications
+                        try {
+                            for (const p of profiles) {
+                                if (p.userData?.id) {
+                                    await fcmService.unregisterToken(p.userData.id);
+                                    console.log('[FCM] 🗑️ Unregistered token for:', p.name);
+                                }
+                            }
+                        } catch (fcmErr) {
+                            console.warn('[FCM] ⚠️ Error clearing tokens on logout:', fcmErr);
+                        }
+
                         await clearSchoolProfiles(schoolCode);
                         // After clearing all profiles, go to login for this school
                         router.replace({
@@ -273,6 +327,16 @@ export default function ProfileSelectorScreen() {
                     text: 'Remove',
                     style: 'destructive',
                     onPress: async () => {
+                        // Unregister FCM token for deleted profile
+                        try {
+                            if (profile.userData?.id) {
+                                await fcmService.unregisterToken(profile.userData.id);
+                                console.log('[FCM] 🗑️ Unregistered token for deleted profile:', profile.name);
+                            }
+                        } catch (fcmErr) {
+                            console.warn('[FCM] ⚠️ Error clearing token for deleted profile:', fcmErr);
+                        }
+
                         await removeProfile(schoolCode, profile.id);
 
                         // If this was the only profile, stop background tasks

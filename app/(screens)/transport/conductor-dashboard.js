@@ -15,6 +15,7 @@ import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
+import { stopBackgroundLocationTask } from '../../../lib/transport-location-task';
 
 export default function ConductorDashboard() {
     const [user, setUser] = useState(null);
@@ -34,7 +35,16 @@ export default function ConductorDashboard() {
 
             if (userData) setUser(JSON.parse(userData));
             if (staffData) setStaff(JSON.parse(staffData));
-            if (tripsData) setTrips(JSON.parse(tripsData));
+            if (tripsData) {
+                const parsedTrips = JSON.parse(tripsData);
+                // Filter to only today's trips + any IN_PROGRESS from past days
+                const today = new Date().toISOString().split('T')[0];
+                const todayTrips = parsedTrips.filter(t => {
+                    const tripDate = new Date(t.date || t.createdAt).toISOString().split('T')[0];
+                    return tripDate === today || t.status === 'IN_PROGRESS';
+                });
+                setTrips(todayTrips);
+            }
         } catch (err) {
             console.error('Error loading data:', err);
         }
@@ -53,6 +63,12 @@ export default function ConductorDashboard() {
                 text: 'Logout',
                 style: 'destructive',
                 onPress: async () => {
+                    // Stop background location tracking first
+                    try {
+                        await stopBackgroundLocationTask();
+                    } catch (e) {
+                        console.warn('Could not stop location task:', e.message);
+                    }
                     await SecureStore.deleteItemAsync('transportUser');
                     await SecureStore.deleteItemAsync('transportStaff');
                     await SecureStore.deleteItemAsync('transportToken');
@@ -89,6 +105,17 @@ export default function ConductorDashboard() {
                         <Ionicons name="car" size={16} color="#64748B" />
                         <Text style={styles.tripDetailText}>{trip.vehicle?.licensePlate}</Text>
                     </View>
+                    {(() => {
+                        const stops = trip.route?.busStops || [];
+                        const firstStop = stops[0];
+                        const tripTime = firstStop ? (trip.tripType === 'PICKUP' ? firstStop.pickupTime : firstStop.dropTime) : null;
+                        return tripTime ? (
+                            <View style={styles.tripDetail}>
+                                <Ionicons name="time" size={16} color="#64748B" />
+                                <Text style={styles.tripDetailText}>{tripTime}</Text>
+                            </View>
+                        ) : null;
+                    })()}
                     <View style={styles.tripDetail}>
                         <Ionicons name="person" size={16} color="#64748B" />
                         <Text style={styles.tripDetailText}>{trip.driver?.name}</Text>

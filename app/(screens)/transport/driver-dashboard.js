@@ -17,6 +17,7 @@ import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import * as Location from 'expo-location';
 import { API_BASE_URL } from '../../../lib/api';
+import { stopBackgroundLocationTask } from '../../../lib/transport-location-task';
 
 export default function DriverDashboard() {
     const [user, setUser] = useState(null);
@@ -41,9 +42,15 @@ export default function DriverDashboard() {
             if (staffData) setStaff(JSON.parse(staffData));
             if (tripsData) {
                 const parsedTrips = JSON.parse(tripsData);
-                setTrips(parsedTrips);
+                // Filter to only today's trips + any IN_PROGRESS from past days
+                const today = new Date().toISOString().split('T')[0];
+                const todayTrips = parsedTrips.filter(t => {
+                    const tripDate = new Date(t.date || t.createdAt).toISOString().split('T')[0];
+                    return tripDate === today || t.status === 'IN_PROGRESS';
+                });
+                setTrips(todayTrips);
                 // Check for active trip
-                const inProgress = parsedTrips.find(t => t.status === 'IN_PROGRESS');
+                const inProgress = todayTrips.find(t => t.status === 'IN_PROGRESS');
                 if (inProgress) setActiveTrip(inProgress);
             }
         } catch (err) {
@@ -108,6 +115,12 @@ export default function DriverDashboard() {
                 text: 'Logout',
                 style: 'destructive',
                 onPress: async () => {
+                    // Stop background location tracking first
+                    try {
+                        await stopBackgroundLocationTask();
+                    } catch (e) {
+                        console.warn('Could not stop location task:', e.message);
+                    }
                     await SecureStore.deleteItemAsync('transportUser');
                     await SecureStore.deleteItemAsync('transportStaff');
                     await SecureStore.deleteItemAsync('transportToken');
@@ -118,45 +131,58 @@ export default function DriverDashboard() {
         ]);
     };
 
-    const TripCard = ({ trip }) => (
-        <View style={styles.tripCard}>
-            <View style={styles.tripHeader}>
-                <View style={[styles.tripTypeBadge, trip.tripType === 'PICKUP' ? styles.pickupBadge : styles.dropBadge]}>
-                    <Ionicons name={trip.tripType === 'PICKUP' ? 'sunny' : 'moon'} size={14} color="#fff" />
-                    <Text style={styles.tripTypeBadgeText}>{trip.tripType}</Text>
-                </View>
-                <View style={[styles.statusBadge, styles[`status${trip.status}`]]}>
-                    <Text style={styles.statusText}>{trip.status}</Text>
-                </View>
-            </View>
-            <Text style={styles.routeName}>{trip.route?.name}</Text>
-            <View style={styles.tripDetails}>
-                <View style={styles.tripDetail}>
-                    <Ionicons name="car" size={16} color="#64748B" />
-                    <Text style={styles.tripDetailText}>{trip.vehicle?.licensePlate}</Text>
-                </View>
-                {trip.route?.busStops?.length > 0 && (
-                    <View style={styles.tripDetail}>
-                        <Ionicons name="location" size={16} color="#64748B" />
-                        <Text style={styles.tripDetailText}>{trip.route.busStops.length} stops</Text>
+    const TripCard = ({ trip }) => {
+        // Get first stop time for display
+        const stops = trip.route?.busStops || [];
+        const firstStop = stops[0];
+        const tripTime = firstStop ? (trip.tripType === 'PICKUP' ? firstStop.pickupTime : firstStop.dropTime) : null;
+
+        return (
+            <View style={styles.tripCard}>
+                <View style={styles.tripHeader}>
+                    <View style={[styles.tripTypeBadge, trip.tripType === 'PICKUP' ? styles.pickupBadge : styles.dropBadge]}>
+                        <Ionicons name={trip.tripType === 'PICKUP' ? 'sunny' : 'moon'} size={14} color="#fff" />
+                        <Text style={styles.tripTypeBadgeText}>{trip.tripType}</Text>
                     </View>
+                    <View style={[styles.statusBadge, styles[`status${trip.status}`]]}>
+                        <Text style={styles.statusText}>{trip.status}</Text>
+                    </View>
+                </View>
+                <Text style={styles.routeName}>{trip.route?.name}</Text>
+                <View style={styles.tripDetails}>
+                    <View style={styles.tripDetail}>
+                        <Ionicons name="car" size={16} color="#64748B" />
+                        <Text style={styles.tripDetailText}>{trip.vehicle?.licensePlate}</Text>
+                    </View>
+                    {tripTime && (
+                        <View style={styles.tripDetail}>
+                            <Ionicons name="time" size={16} color="#64748B" />
+                            <Text style={styles.tripDetailText}>{tripTime}</Text>
+                        </View>
+                    )}
+                    {trip.route?.busStops?.length > 0 && (
+                        <View style={styles.tripDetail}>
+                            <Ionicons name="location" size={16} color="#64748B" />
+                            <Text style={styles.tripDetailText}>{trip.route.busStops.length} stops</Text>
+                        </View>
+                    )}
+                </View>
+                {trip.status === 'SCHEDULED' && (
+                    <TouchableOpacity style={styles.startButton} onPress={() => handleStartTrip(trip)}>
+                        <LinearGradient colors={['#10b981', '#059669']} style={styles.startButtonGradient}>
+                            <Ionicons name="play" size={18} color="#fff" />
+                            <Text style={styles.startButtonText}>Start Trip</Text>
+                        </LinearGradient>
+                    </TouchableOpacity>
+                )}
+                {trip.status === 'IN_PROGRESS' && (
+                    <TouchableOpacity style={styles.continueButton} onPress={() => router.push({ pathname: '/(screens)/transport/active-trip', params: { tripId: trip.id } })}>
+                        <Text style={styles.continueButtonText}>Continue Trip →</Text>
+                    </TouchableOpacity>
                 )}
             </View>
-            {trip.status === 'SCHEDULED' && (
-                <TouchableOpacity style={styles.startButton} onPress={() => handleStartTrip(trip)}>
-                    <LinearGradient colors={['#10b981', '#059669']} style={styles.startButtonGradient}>
-                        <Ionicons name="play" size={18} color="#fff" />
-                        <Text style={styles.startButtonText}>Start Trip</Text>
-                    </LinearGradient>
-                </TouchableOpacity>
-            )}
-            {trip.status === 'IN_PROGRESS' && (
-                <TouchableOpacity style={styles.continueButton} onPress={() => router.push({ pathname: '/(screens)/transport/active-trip', params: { tripId: trip.id } })}>
-                    <Text style={styles.continueButtonText}>Continue Trip →</Text>
-                </TouchableOpacity>
-            )}
-        </View>
-    );
+        );
+    };
 
     return (
         <SafeAreaView style={styles.safeArea}>

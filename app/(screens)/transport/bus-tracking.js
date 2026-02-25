@@ -41,6 +41,7 @@ import api, { API_BASE_URL } from '../../../lib/api';
 import { fetchRouteDirections } from '../../../lib/google-maps-service';
 import { calculateETA, resetETAState } from '../../../lib/eta-service';
 import { getSchoolLocation } from '../../../lib/geofence-service';
+import { useRealtimeLocation } from '../../../hooks/useRealtimeLocation';
 import { StatusBar } from 'expo-status-bar';
 
 const { height, width } = Dimensions.get('window');
@@ -132,6 +133,8 @@ export default function BusTrackingScreen() {
     const [googleETA, setGoogleETA] = useState(null);
     const [zoomLevel, setZoomLevel] = useState(0.015);
     const [schoolLocation, setSchoolLocation] = useState(null); // Cost-optimized ETA result
+    // true on mount so marker renders, then false to stop flashing on every GPS tick
+    const [tracksViewChanges, setTracksViewChanges] = useState(true);
 
     // Parse child data from params
     const childData = params.childData ? JSON.parse(params.childData) : null;
@@ -179,25 +182,45 @@ export default function BusTrackingScreen() {
         }
     }, [schoolId]);
 
-    // Fetch bus location - poll every 10 seconds
+    // tracksViewChanges: true on mount → false after render to stop flashing.
+    // Re-enable briefly when status changes so color update is captured.
+    useEffect(() => {
+        const t = setTimeout(() => setTracksViewChanges(false), 500);
+        return () => clearTimeout(t);
+    }, []);
+
+    useEffect(() => {
+        setTracksViewChanges(true);
+        const t = setTimeout(() => setTracksViewChanges(false), 300);
+        return () => clearTimeout(t);
+    }, [status]);
+
+    // Fetch bus location metadata once (no polling — Realtime handles updates)
     const { data: locationData, isLoading: locationLoading, refetch } = useQuery({
-        queryKey: ['bus-location', vehicleId],
+        queryKey: ['bus-location-meta', vehicleId],
         queryFn: async () => {
             if (!vehicleId) return null;
-            // Also fetch history to smooth movement if needed
             const res = await api.get(`/schools/transport/location/${vehicleId}?history=false`);
             return res.data;
         },
         enabled: !!vehicleId && vehicleId !== 'undefined',
-        staleTime: 1000 * 10,
-        refetchInterval: vehicleId ? 10000 : false, // Poll every 10 seconds
+        staleTime: 1000 * 60 * 5, // Cache for 5 min (metadata doesn't change often)
+        // NO refetchInterval — Supabase Realtime handles live location
     });
 
+    // 🔴 REALTIME: Subscribe to live vehicle location via Supabase
+    const {
+        location: realtimeLocation,
+        isConnected: isRealtimeConnected,
+        secondsAgo: realtimeSecondsAgo,
+    } = useRealtimeLocation(vehicleId, { enabled: !!vehicleId && vehicleId !== 'undefined' });
+
     const vehicle = locationData?.vehicle || assignment?.vehicle || assignment?.route?.vehicle;
-    const location = locationData?.currentLocation;
+    // Use realtime location if available, fall back to API-fetched location
+    const location = realtimeLocation || locationData?.currentLocation;
     const activeTrip = locationData?.activeTrip;
-    const status = locationData?.status || 'OFFLINE';
-    const secondsAgo = locationData?.secondsAgo;
+    const status = isRealtimeConnected && realtimeLocation ? 'LIVE' : (locationData?.status || 'OFFLINE');
+    const secondsAgo = realtimeSecondsAgo ?? locationData?.secondsAgo;
     const stops = activeTrip?.route?.busStops || [];
 
     // EDGE CASE: Driver/Conductor from permanent assignment if no active trip
@@ -227,11 +250,15 @@ export default function BusTrackingScreen() {
         ? getDistanceKm(location.latitude, location.longitude, childStop.latitude, childStop.longitude)
         : null;
 
-    // Estimate arrival time (assume avg speed 25 km/h in city, use actual if available)
-    const speedKmh = location?.speed ? location.speed * 3.6 : 25; // Convert m/s to km/h or default
-    const etaMinutes = (distanceToStop && speedKmh > 0)
-        ? Math.round((distanceToStop / speedKmh) * 60)
+    // Estimate arrival time — prefer calculateETA result (googleETA), fall back to inline
+    const realtimeSpeed = location?.speed; // m/s from GPS / Realtime
+    const speedKmh = realtimeSpeed && realtimeSpeed > 0.5 ? realtimeSpeed * 3.6 : 25; // Default 25 km/h
+    const roadDistance = distanceToStop ? distanceToStop * 1.3 : null; // 1.3x road factor
+    const inlineEtaMinutes = (roadDistance && speedKmh > 0)
+        ? Math.round((roadDistance / speedKmh) * 60)
         : null;
+    // Use googleETA (from calculateETA with 3-tier logic) when available, else inline
+    const etaMinutes = googleETA?.etaMinutes ?? inlineEtaMinutes;
 
     // Calculate arrival time
     const arrivalTime = etaMinutes
@@ -408,8 +435,6 @@ export default function BusTrackingScreen() {
     }
 
 
-    // NOTE: tracksViewChanges is hardcoded to {true} on all markers.
-    // Android fails to render custom View markers if tracksViewChanges flips to false.
 
 
     return (
@@ -501,41 +526,31 @@ export default function BusTrackingScreen() {
                                                     longitude: location.longitude,
                                                 }}
                                                 anchor={{ x: 0.5, y: 0.5 }}
-                                                tracksViewChanges={true}
+                                                tracksViewChanges={tracksViewChanges}
                                                 title={`🚌 ${vehicle?.licensePlate || 'Bus'}`}
                                                 description={status === 'MOVING' ? 'On the way' : 'Idle'}
                                             >
                                                 <View style={{
-                                                    width: 40, height: 40, borderRadius: 20,
+                                                    width: 36, height: 36, borderRadius: 18,
                                                     backgroundColor: isStale ? '#F97316' : status === 'MOVING' ? '#22C55E' : status === 'IDLE' ? '#F59E0B' : '#EF4444',
                                                     alignItems: 'center', justifyContent: 'center',
-                                                    borderWidth: 3, borderColor: '#fff',
+                                                    borderWidth: 2, borderColor: '#fff',
                                                     elevation: 5,
                                                 }}>
-                                                    <Bus size={20} color="#fff" />
+                                                    <Text style={{ fontSize: 18, lineHeight: 22, textAlign: 'center', textAlignVertical: 'center' }}>🚌</Text>
                                                 </View>
                                             </Marker>
                                         )}
 
-                                        {/* ====== HOME / STOP MARKER ====== */}
+                                        {/* ====== HOME / STOP MARKER (native pin) ====== */}
                                         {childStop?.latitude && childStop?.longitude && (
                                             <Marker
                                                 coordinate={{ latitude: childStop.latitude, longitude: childStop.longitude }}
-                                                anchor={{ x: 0.5, y: 0.5 }}
-                                                tracksViewChanges={true}
+                                                tracksViewChanges={false}
+                                                pinColor="blue"
                                                 title={`🏠 ${childStop.name || 'Stop'}`}
                                                 description="Child's bus stop"
-                                            >
-                                                <View style={{
-                                                    width: 34, height: 34, borderRadius: 17,
-                                                    backgroundColor: '#3B82F6',
-                                                    alignItems: 'center', justifyContent: 'center',
-                                                    borderWidth: 3, borderColor: '#fff',
-                                                    elevation: 4,
-                                                }}>
-                                                    <Home size={17} color="#fff" />
-                                                </View>
-                                            </Marker>
+                                            />
                                         )}
 
                                         {/* ====== POLYLINES ====== */}
@@ -575,28 +590,18 @@ export default function BusTrackingScreen() {
                                             />
                                         )}
 
-                                        {/* ====== SCHOOL MARKER ====== */}
+                                        {/* ====== SCHOOL MARKER (native pin) ====== */}
                                         {schoolLocation?.latitude && schoolLocation?.longitude && (
                                             <Marker
                                                 coordinate={{
                                                     latitude: Number(schoolLocation.latitude),
                                                     longitude: Number(schoolLocation.longitude),
                                                 }}
-                                                anchor={{ x: 0.5, y: 0.5 }}
-                                                tracksViewChanges={true}
+                                                tracksViewChanges={false}
+                                                pinColor="black"
                                                 title={`🏫 ${userData?.school?.name || 'School'}`}
                                                 description="School location"
-                                            >
-                                                <View style={{
-                                                    width: 34, height: 34, borderRadius: 17,
-                                                    backgroundColor: '#10B981',
-                                                    alignItems: 'center', justifyContent: 'center',
-                                                    borderWidth: 3, borderColor: '#fff',
-                                                    elevation: 4,
-                                                }}>
-                                                    <School size={17} color="#fff" />
-                                                </View>
-                                            </Marker>
+                                            />
                                         )}
                                     </MapView>
                                 )}
@@ -1368,3 +1373,4 @@ const styles = StyleSheet.create({
         fontWeight: '500',
     },
 });
+

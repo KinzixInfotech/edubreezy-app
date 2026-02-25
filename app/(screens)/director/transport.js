@@ -18,7 +18,7 @@ const BusMarkerView = ({ status }) => (
         status === 'IDLE' ? styles.busMarkerIdle :
             styles.busMarkerOffline
     ]}>
-        <Bus size={16} color="#fff" />
+        <Text style={{ fontSize: 16 }}>🚌</Text>
     </View>
 );
 
@@ -36,8 +36,8 @@ export default function TransportScreen() {
             return res.data;
         },
         enabled: !!schoolId,
-        staleTime: 10 * 1000, // 10 seconds
-        refetchInterval: 15000, // Poll every 15 seconds for live updates
+        staleTime: 30 * 1000,
+        refetchInterval: 60000, // Light poll every 60s for overview stats; per-bus screens use Realtime
     });
 
     // Refetch when screen comes into focus
@@ -229,6 +229,7 @@ export default function TransportScreen() {
                                         latitude: bus.location.latitude,
                                         longitude: bus.location.longitude,
                                     }}
+                                    tracksViewChanges={false}
                                     title={bus.licensePlate}
                                     description={`${bus.status} • ${bus.routeName || 'No route'}`}
                                     onCalloutPress={() => router.push({

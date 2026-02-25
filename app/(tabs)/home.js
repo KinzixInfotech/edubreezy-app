@@ -5544,15 +5544,27 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
 
     // Filter: Show today's trips + any IN_PROGRESS trips from previous days
     const today = new Date().toISOString().split('T')[0];
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+    // Helper: get first stop time for a trip
+    const getTripTime = (trip) => {
+        const stops = trip.route?.busStops || trip.route?.stops || [];
+        if (stops.length === 0) return null;
+        const firstStop = stops[0];
+        return trip.tripType === 'PICKUP' ? firstStop.pickupTime : firstStop.dropTime;
+    };
+
     const relevantTrips = trips.filter(t => {
-        const tripDate = new Date(t.scheduledDate || t.createdAt).toISOString().split('T')[0];
+        const tripDate = new Date(t.scheduledDate || t.date || t.createdAt).toISOString().split('T')[0];
         // Include if: today's trip OR it's still IN_PROGRESS
         return tripDate === today || t.status === 'IN_PROGRESS';
     });
 
     // Detect stale trips (IN_PROGRESS from previous days)
     const staleTrips = trips.filter(t => {
-        const tripDate = new Date(t.scheduledDate || t.createdAt).toISOString().split('T')[0];
+        const tripDate = new Date(t.scheduledDate || t.date || t.createdAt).toISOString().split('T')[0];
         return t.status === 'IN_PROGRESS' && tripDate < today;
     });
 
@@ -5699,12 +5711,12 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
         { icon: MapPin, label: 'My Route', color: '#8B5CF6', bgColor: '#EDE9FE', href: '/(screens)/transport/my-route' },
         { icon: Calendar, label: 'Trip History', color: '#F59E0B', bgColor: '#FEF3C7', href: '/(screens)/transport/driver-attendance-history' },
     ];
-    // Get today's scheduled trips for this driver
-    const todaysScheduledTrips = trips.filter(t => t.status === 'SCHEDULED');
+    // Get today's scheduled trips for this driver (must also match today's date!)
+    const todaysScheduledTrips = relevantTrips.filter(t => t.status === 'SCHEDULED');
 
-    // Check what trip types are already done/in-progress today
-    const todaysPickupDone = trips.some(t => t.tripType === 'PICKUP' && (t.status === 'COMPLETED' || t.status === 'IN_PROGRESS'));
-    const todaysDropDone = trips.some(t => t.tripType === 'DROP' && (t.status === 'COMPLETED' || t.status === 'IN_PROGRESS'));
+    // Check what trip types are already done/in-progress today (use relevantTrips, not all trips)
+    const todaysPickupDone = relevantTrips.some(t => t.tripType === 'PICKUP' && (t.status === 'COMPLETED' || t.status === 'IN_PROGRESS'));
+    const todaysDropDone = relevantTrips.some(t => t.tripType === 'DROP' && (t.status === 'COMPLETED' || t.status === 'IN_PROGRESS'));
 
     // On-demand start trip function (creates trip on the fly)
     const handleStartOnDemand = async (tripType) => {
@@ -5893,18 +5905,21 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                             )}
                             {todaysScheduledTrips.length > 0 && (
                                 <View style={{ marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.15)' }}>
-                                    <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', marginBottom: 10 }}>Today's Tripr</Text>
-                                    {todaysScheduledTrips.map((trip, idx) => (
-                                        <View key={trip.id} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: idx < todaysScheduledTrips.length - 1 ? 8 : 0 }}>
-                                            <View style={{ width: 24, alignItems: 'flex-start' }}>
-                                                <Text style={{ fontSize: 14 }}>{trip.tripType === 'PICKUP' ? '🌅' : '🌆'}</Text>
+                                    <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)', marginBottom: 10 }}>Today's Trips — {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
+                                    {todaysScheduledTrips.map((trip, idx) => {
+                                        const tripTime = getTripTime(trip);
+                                        return (
+                                            <View key={trip.id} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: idx < todaysScheduledTrips.length - 1 ? 8 : 0 }}>
+                                                <View style={{ width: 24, alignItems: 'flex-start' }}>
+                                                    <Text style={{ fontSize: 14 }}>{trip.tripType === 'PICKUP' ? '🌅' : '🌆'}</Text>
+                                                </View>
+                                                <Text style={{ fontSize: 14, color: '#fff', marginLeft: 8, flex: 1 }}>{trip.tripType}{tripTime ? ` • ${tripTime}` : ''} • {trip.route?.name}</Text>
+                                                <View style={{ backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
+                                                    <Text style={{ fontSize: 11, color: '#fff', fontWeight: '600' }}>{trip.status}</Text>
+                                                </View>
                                             </View>
-                                            <Text style={{ fontSize: 14, color: '#fff', marginLeft: 8, flex: 1 }}>{trip.tripType} • {trip.route?.name}</Text>
-                                            <View style={{ backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
-                                                <Text style={{ fontSize: 11, color: '#fff', fontWeight: '600' }}>{trip.status}</Text>
-                                            </View>
-                                        </View>
-                                    ))}
+                                        );
+                                    })}
                                 </View>
                             )}
                         </View>
@@ -6048,7 +6063,7 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                                                     )}
                                                 </View>
                                                 <Text style={{ fontSize: 13, color: '#64748B', marginTop: 3 }}>
-                                                    {trip.tripType} Trip • {trip.route?.busStops?.length || 0} stops
+                                                    {trip.tripType} Trip{getTripTime(trip) ? ` • ${getTripTime(trip)}` : ''} • {trip.route?.busStops?.length || 0} stops
                                                 </Text>
                                             </View>
                                         </View>
@@ -6208,8 +6223,8 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                 );
             })()}
 
-            {/* All Trips Completed Widget - Shows when both PICKUP and DROP are done */}
-            {!activeTrip && assignment && todaysPickupDone && todaysDropDone && (
+            {/* All Trips Completed Widget - Shows when both PICKUP and DROP are done AND no new trips assigned */}
+            {!activeTrip && assignment && todaysPickupDone && todaysDropDone && todaysScheduledTrips.length === 0 && (
                 <Animated.View entering={FadeInDown.delay(150).duration(600)} style={styles.section}>
                     <View style={{ backgroundColor: '#F0FDF4', borderRadius: 20, padding: 24, borderWidth: 1, borderColor: '#86EFAC', alignItems: 'center' }}>
                         <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#DCFCE7', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
@@ -6287,7 +6302,7 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
             {/* Today's Schedule - Redesigned */}
             <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.section}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-                    <Text style={styles.sectionTitle}>Today's Schedule</Text>
+                    <Text style={styles.sectionTitle}>Today's Schedule — {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</Text>
                     {relevantTrips.length > 0 && (
                         <View style={{ backgroundColor: '#DBEAFE', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
                             <Text style={{ fontSize: 12, fontWeight: '600', color: '#0469ff' }}>{relevantTrips.length} trip{relevantTrips.length > 1 ? 's' : ''}</Text>
@@ -6355,7 +6370,7 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
                                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                                                     <Clock size={14} color="#64748B" />
-                                                    <Text style={{ fontSize: 13, color: '#64748B', fontWeight: '500' }}>{trip.tripType}</Text>
+                                                    <Text style={{ fontSize: 13, color: '#64748B', fontWeight: '500' }}>{trip.tripType}{getTripTime(trip) ? ` • ${getTripTime(trip)}` : ''}</Text>
                                                 </View>
                                                 {trip.vehicle && (
                                                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
@@ -6507,9 +6522,16 @@ const ConductorView = ({ refreshing, onRefresh, onScroll, paddingTop, refreshOff
         }
     }, [onRefresh]);
 
-    const activeTrip = trips.find(t => t.status === 'IN_PROGRESS');
+    // Filter to today's trips + any IN_PROGRESS from previous days
+    const today = new Date().toISOString().split('T')[0];
+    const relevantTrips = trips.filter(t => {
+        const tripDate = new Date(t.scheduledDate || t.date || t.createdAt).toISOString().split('T')[0];
+        return tripDate === today || t.status === 'IN_PROGRESS';
+    });
+
+    const activeTrip = relevantTrips.find(t => t.status === 'IN_PROGRESS');
     const totalStudents = activeTrip?.route?.busStops?.reduce((sum, stop) => sum + (stop.students?.length || 0), 0) || 0;
-    const completedTrips = trips.filter(t => t.status === 'COMPLETED').length;
+    const completedTrips = relevantTrips.filter(t => t.status === 'COMPLETED').length;
 
     // Fetch notices for conductor
     const { data: recentNotices } = useQuery({
@@ -6619,7 +6641,7 @@ const ConductorView = ({ refreshing, onRefresh, onScroll, paddingTop, refreshOff
                             <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
                             <View style={styles.statIcon}><Calendar size={22} color="#fff" /></View>
                             <View>
-                                <Text style={styles.statValue}>{trips.length}</Text>
+                                <Text style={styles.statValue}>{relevantTrips.length}</Text>
                                 <Text style={styles.statLabel}>Today's Trips</Text>
                             </View>
                         </LinearGradient>

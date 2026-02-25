@@ -12,10 +12,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../../lib/api';
-import { getCurrentSchool } from '../../lib/profileManager';
+import { getCurrentSchool, updateProfilePicture } from '../../lib/profileManager';
 import { pickAndUploadImage } from '../../lib/uploadthing';
 import Constants from 'expo-constants';
 import { emitProfilePictureChange } from '../../lib/profileEvents';
+import { stopBackgroundLocationTask } from '../../lib/transport-location-task';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const isSmallDevice = SCREEN_WIDTH < 375;
@@ -606,6 +607,14 @@ export default function ProfileScreen() {
               }
 
               // Clear in-memory session data (SecureStore)
+              // For transport roles, stop background location task first
+              if (role === 'DRIVER' || role === 'CONDUCTOR') {
+                try {
+                  await stopBackgroundLocationTask();
+                } catch (e) {
+                  console.warn('Could not stop location task:', e.message);
+                }
+              }
               await SecureStore.deleteItemAsync('user');
               await SecureStore.deleteItemAsync('userRole');
               await SecureStore.deleteItemAsync('token');
@@ -684,6 +693,9 @@ export default function ProfileScreen() {
 
                 // Refresh profile data
                 await refetch();
+
+                // Update in persistent storage for profile selector
+                await updateProfilePicture(user.id, photoUrl);
 
                 // Emit event to update tab bar and home header
                 emitProfilePictureChange(photoUrl);
@@ -1136,9 +1148,12 @@ export default function ProfileScreen() {
               </HapticTouchable>
             </View>
           </Animated.View>
-          {/* Footer Info */}
+          {/* Footer Info — Blinkit style */}
           <View style={styles.footer}>
-            <Text style={styles.footerText}>Developed by</Text>
+            <Text style={styles.footerTagline}>
+              India's smartest{"\n"}school ERP <Text style={{ color: '#EF4444' }}>❤️</Text>
+            </Text>
+            <View style={styles.footerDivider} />
             <Image
               source={require('../../assets/kinzix.png')}
               style={styles.kinzixLogo}
@@ -1792,24 +1807,34 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   footer: {
-    paddingVertical: 40,
-    alignItems: 'center',
+    paddingVertical: 48,
+    paddingHorizontal: 24,
+    alignItems: 'flex-start',
   },
-  footerText: {
-    fontSize: 14,
-    color: '#64748b',
-    fontWeight: '500',
-    marginBottom: 12,
+  footerTagline: {
+    fontSize: 46,
+    fontWeight: '900',
+    color: '#CBD5E1',
+    textAlign: 'left',
+    lineHeight: 52,
+    marginBottom: 20,
+  },
+  footerDivider: {
+    width: '100%',
+    height: 1,
+    backgroundColor: '#E2E8F0',
+    marginBottom: 20,
   },
   kinzixLogo: {
-    width: 160,
-    height: 45,
+    width: 100,
+    height: 30,
     resizeMode: 'contain',
-    marginBottom: 8,
+    marginBottom: 10,
+    opacity: 0.45,
   },
   footerVersion: {
-    fontSize: 13,
-    color: '#94a3b8',
+    fontSize: 16,
+    color: '#CBD5E1',
     marginTop: 4,
   },
 });

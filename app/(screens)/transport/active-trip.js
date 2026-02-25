@@ -68,39 +68,45 @@ import { animateMarkerMovement, calculateBearing } from '../../../lib/map-utils'
 const { width, height } = Dimensions.get('window');
 const STOP_GEOFENCE_RADIUS = 80;
 
-// Simple Bus Marker Component - matching bus-tracking.js exactly
-const BusMarkerView = ({ licensePlate, isTracking }) => (
-    <View style={{ alignItems: 'center' }}>
-        {/* License Plate Badge on top */}
+// Blinkit-inspired bus marker — uses Text for guaranteed Android rendering (same as bus-tracking.js)
+const BusMarkerView = ({ isTracking, licensePlate }) => (
+    <View style={{ width: 120, height: 85, alignItems: 'center', justifyContent: 'flex-end' }}>
+        {/* License Plate Badge */}
+        {licensePlate ? (
+            <View style={{
+                backgroundColor: '#1E293B',
+                paddingHorizontal: 8, paddingVertical: 3,
+                borderRadius: 8, borderWidth: 2, borderColor: '#fff',
+                marginBottom: 2, elevation: 5,
+            }}>
+                <Text style={{ color: '#fff', fontSize: 10, fontWeight: '900', letterSpacing: 0.5 }}>
+                    {licensePlate}
+                </Text>
+            </View>
+        ) : null}
+        {/* Pin Circle with emoji — guaranteed to render on Android LEGACY renderer */}
         <View style={{
-            backgroundColor: '#0F172A',
-            paddingHorizontal: 8,
-            paddingVertical: 4,
-            borderRadius: 6,
-            marginBottom: 4,
-            borderWidth: 1,
-            borderColor: '#fff',
+            width: 42, height: 42, borderRadius: 21,
+            backgroundColor: isTracking ? '#22C55E' : '#F59E0B',
+            alignItems: 'center', justifyContent: 'center',
+            borderWidth: 3, borderColor: '#fff',
+            elevation: 8,
         }}>
-            <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>{licensePlate || 'BUS'}</Text>
+            <Text style={{ fontSize: 20 }}>🚌</Text>
         </View>
-        {/* Simple Circle with Bus Icon - exactly like bus-tracking.js */}
+        {/* Pointer triangle */}
         <View style={{
-            width: 40,
-            height: 40,
-            borderRadius: 20,
-            backgroundColor: isTracking ? '#10B981' : '#EAB308',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderWidth: 3,
-            borderColor: '#fff',
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: 2 },
-            shadowOpacity: 0.25,
-            shadowRadius: 4,
-            elevation: 5,
-        }}>
-            <Bus size={20} color="#fff" />
-        </View>
+            width: 0, height: 0,
+            borderLeftWidth: 7, borderRightWidth: 7, borderTopWidth: 8,
+            borderLeftColor: 'transparent', borderRightColor: 'transparent',
+            borderTopColor: '#fff', marginTop: -2,
+        }} />
+        {/* Shadow dot */}
+        <View style={{
+            width: 14, height: 5, borderRadius: 7,
+            backgroundColor: 'rgba(0,0,0,0.15)',
+            marginTop: 1,
+        }} />
     </View>
 );
 
@@ -126,6 +132,8 @@ export default function ActiveTripScreen() {
     const [routePolyline, setRoutePolyline] = useState(null); // Google Directions polyline
     const [nextStopETA, setNextStopETA] = useState(null); // ETA to next stop
     const busMarkerRef = useRef(null); // For animated marker
+    const isTrackingRef = useRef(false); // Ref to avoid stale closure in effects
+    const isTripEndingRef = useRef(false); // Guard to prevent disclosure flash on trip end
     const prevLocationRef = useRef(null); // Previous location for animation
     const [busHeading, setBusHeading] = useState(0); // Bus heading for marker rotation
     const [showLocationDisclosure, setShowLocationDisclosure] = useState(false);
@@ -138,13 +146,19 @@ export default function ActiveTripScreen() {
     const isNearSchoolRef = useRef(false);
     const showStopModalRef = useRef(false);
 
-    // Optimization: Stop tracking view changes after render
+    // tracksViewChanges: true on mount so the bus marker renders correctly,
+    // then false to stop re-rendering on every GPS update (prevents flashing).
+    // Re-enables briefly when isTracking changes so the color update is captured.
     useEffect(() => {
-        if (tracksViewChanges) {
-            const timer = setTimeout(() => setTracksViewChanges(false), 500);
-            return () => clearTimeout(timer);
-        }
-    }, [tracksViewChanges]);
+        const t = setTimeout(() => setTracksViewChanges(false), 500);
+        return () => clearTimeout(t);
+    }, []);
+
+    useEffect(() => {
+        setTracksViewChanges(true);
+        const t = setTimeout(() => setTracksViewChanges(false), 300);
+        return () => clearTimeout(t);
+    }, [isTracking]);
 
     // Keep refs in sync with state
     useEffect(() => { completedStopIdsRef.current = completedStopIds; }, [completedStopIds]);
@@ -234,11 +248,24 @@ export default function ActiveTripScreen() {
         let locationSubscription = null;
 
         const setupTracking = async () => {
-            if (trip?.status === 'IN_PROGRESS' && !isTracking) {
-                // Check if background permission is already granted
-                const { status } = await Location.getBackgroundPermissionsAsync();
-                if (status === 'granted') {
-                    // Already have permission, start tracking directly
+            // Skip if already tracking, trip is ending, or trip isn't in progress
+            if (isTrackingRef.current || isTripEndingRef.current || trip?.status !== 'IN_PROGRESS') {
+                return;
+            }
+
+            // Check if background permission is already granted
+            const { status } = await Location.getBackgroundPermissionsAsync();
+            if (status === 'granted') {
+                // Already have permission, start tracking directly
+                await startLocationTracking();
+                locationSubscription = await Location.watchPositionAsync(
+                    { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 10 },
+                    handleLocationUpdate
+                );
+            } else {
+                // Check if driver already dismissed the disclosure permanently
+                const skipped = await SecureStore.getItemAsync('location_disclosure_dismissed');
+                if (skipped === 'true') {
                     await startLocationTracking();
                     locationSubscription = await Location.watchPositionAsync(
                         { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 10 },
@@ -257,12 +284,14 @@ export default function ActiveTripScreen() {
             if (locationSubscription) locationSubscription.remove();
             subscription.remove();
         };
-    }, [trip?.status, isTracking]);
+    }, [trip?.status]);
 
-    const handleAcceptDisclosure = async () => {
+    const handleAcceptDisclosure = async (dontShowAgain = false) => {
         setShowLocationDisclosure(false);
+        if (dontShowAgain) {
+            await SecureStore.setItemAsync('location_disclosure_dismissed', 'true');
+        }
         await startLocationTracking();
-        // Force a re-render or effect trigger if needed, but startLocationTracking sets isTracking
     };
 
     const handleLocationUpdate = async (location) => {
@@ -332,6 +361,7 @@ export default function ActiveTripScreen() {
                 stops,
             });
             setIsTracking(true);
+            isTrackingRef.current = true;
         } catch (err) {
             console.error('Error starting location tracking:', err);
         }
@@ -341,6 +371,7 @@ export default function ActiveTripScreen() {
         try {
             await stopBackgroundLocationTask();
             setIsTracking(false);
+            isTrackingRef.current = false;
         } catch (err) {
             console.error('Error stopping location tracking:', err);
         }
@@ -374,6 +405,8 @@ export default function ActiveTripScreen() {
         try {
             const updatedStops = await markStopCompleted(tripId, stop.id);
             setCompletedStopIds(updatedStops);
+            // Trigger marker re-render to show completion checkmark
+            setTracksViewChanges(true);
             setShowStopConfirmModal(false);
             setPendingStopCompletion(null);
 
@@ -397,13 +430,18 @@ export default function ActiveTripScreen() {
             return res.data;
         },
         onSuccess: async () => {
+            // Mark trip as ending BEFORE stopping tracking to prevent disclosure from re-showing
+            isTripEndingRef.current = true;
             // Fire-and-forget: stop tracking in background (trip is already completed server-side)
             stopLocationTracking().catch(err => console.error('Error stopping tracking:', err));
             clearCompletedStops(tripId).catch(err => console.error('Error clearing stops:', err));
 
-            // Invalidate queries (don't await — these are cache operations)
-            queryClient.invalidateQueries(['trip-details']);
-            queryClient.invalidateQueries(['transport-trips']);
+            // Force refetch home dashboard queries (MODERATE cache has refetchOnMount:false
+            // so invalidateQueries alone won't trigger a re-fetch — must use refetchQueries)
+            queryClient.refetchQueries({ queryKey: ['transport-trips-home'], exact: false });
+            queryClient.refetchQueries({ queryKey: ['transport-staff-home'], exact: false });
+            queryClient.invalidateQueries({ queryKey: ['trip-details'], exact: false });
+            queryClient.invalidateQueries({ queryKey: ['transport-trips'], exact: false });
 
             if (trip?.startedAt) {
                 const duration = Math.floor((Date.now() - new Date(trip.startedAt).getTime()) / 60000);
@@ -483,13 +521,31 @@ export default function ActiveTripScreen() {
             .catch(() => setNextStopETA(null));
     }, [currentLocation?.latitude, currentLocation?.longitude, nextStop?.id]);
 
-    // Initial map region
-    const initialRegion = currentLocation || (stops[0]?.latitude ? {
-        latitude: stops[0].latitude,
-        longitude: stops[0].longitude,
-        latitudeDelta: 0.02,
-        longitudeDelta: 0.02,
-    } : { latitude: 20.5937, longitude: 78.9629, latitudeDelta: 0.1, longitudeDelta: 0.1 });
+    // Auto-follow bus: animate map to bus position on every GPS update (if driver hasn't panned away)
+    useEffect(() => {
+        if (currentLocation?.latitude && currentLocation?.longitude && isFocusedOnBus) {
+            const timer = setTimeout(() => {
+                if (mapRef.current) {
+                    mapRef.current.animateToRegion({
+                        latitude: currentLocation.latitude,
+                        longitude: currentLocation.longitude,
+                        latitudeDelta: 0.008,
+                        longitudeDelta: 0.008,
+                    }, 400);
+                }
+            }, 300);
+            return () => clearTimeout(timer);
+        }
+    }, [currentLocation?.latitude, currentLocation?.longitude]);
+
+
+    // Initial map region — always include delta values (MapView requires them)
+    const initialRegion = {
+        latitude: currentLocation?.latitude ?? (stops[0]?.latitude ? parseFloat(stops[0].latitude) : 20.5937),
+        longitude: currentLocation?.longitude ?? (stops[0]?.longitude ? parseFloat(stops[0].longitude) : 78.9629),
+        latitudeDelta: 0.015,
+        longitudeDelta: 0.015,
+    };
 
     // Loading State
     if (isLoading) {
@@ -580,8 +636,8 @@ export default function ActiveTripScreen() {
                     googleRenderer={'LEGACY'}
                     style={styles.map}
                     initialRegion={initialRegion}
-                    showsUserLocation={true}
-                    showsMyLocationButton={true}
+                    showsUserLocation={false}
+                    showsMyLocationButton={false}
                     zoomEnabled={true}
                     zoomControlEnabled={true}
                     scrollEnabled={true}
@@ -595,77 +651,44 @@ export default function ActiveTripScreen() {
                         <Polyline coordinates={displayPolyline} strokeColor="#3B82F6" strokeWidth={4} />
                     )}
 
-                    {/* Stop Markers */}
+                    {/* Stop Markers — use native pinColor for guaranteed Android rendering */}
                     {stops.map((stop, index) => {
                         const isCompleted = completedStopIds.includes(stop.id);
                         const isNext = nextStop?.id === stop.id;
-                        return stop.latitude && stop.longitude && (
+                        if (!stop.latitude || !stop.longitude) return null;
+                        return (
                             <Marker
                                 key={stop.id}
-                                coordinate={{ latitude: stop.latitude, longitude: stop.longitude }}
-                                anchor={{ x: 0.5, y: 0.5 }}
-                                tracksViewChanges={true}
-                                title={`${isCompleted ? '✅' : '📍'} ${index + 1}. ${stop.name}`}
-                                description={isCompleted ? 'Completed' : isNext ? 'Next stop' : trip?.tripType === 'PICKUP' ? stop.pickupTime : stop.dropTime}
+                                coordinate={{ latitude: parseFloat(stop.latitude), longitude: parseFloat(stop.longitude) }}
+                                tracksViewChanges={false}
+                                title={`${isCompleted ? '✅' : isNext ? '⭐' : '📍'} ${index + 1}. ${stop.name}`}
+                                description={isCompleted ? 'Completed ✓' : isNext ? 'Next stop' : trip?.tripType === 'PICKUP' ? stop.pickupTime : stop.dropTime}
+                                pinColor={isCompleted ? 'green' : isNext ? 'yellow' : 'blue'}
                                 onPress={() => zoomToStop(stop)}
-                            >
-                                <View style={{ alignItems: 'center' }}>
-                                    <View style={{
-                                        backgroundColor: isCompleted ? '#10B981' : isNext ? '#F59E0B' : '#3B82F6',
-                                        paddingHorizontal: 6, paddingVertical: 2,
-                                        borderRadius: 6, marginBottom: 3,
-                                        maxWidth: 100,
-                                    }}>
-                                        <Text style={{ color: '#fff', fontSize: 9, fontWeight: '700' }} numberOfLines={1}>
-                                            {index + 1}. {stop.name}
-                                        </Text>
-                                    </View>
-                                    <View style={{
-                                        width: 34, height: 34, borderRadius: 17,
-                                        backgroundColor: isCompleted ? '#10B981' : isNext ? '#F59E0B' : '#3B82F6',
-                                        alignItems: 'center', justifyContent: 'center',
-                                        borderWidth: 3, borderColor: '#fff',
-                                        elevation: 4,
-                                    }}>
-                                        {isCompleted ? (
-                                            <Check size={17} color="#fff" />
-                                        ) : (
-                                            <Text style={{ color: '#fff', fontSize: 14, fontWeight: '800' }}>{index + 1}</Text>
-                                        )}
-                                    </View>
-                                </View>
-                            </Marker>
+                            />
                         );
                     })}
 
-                    {/* Bus Marker */}
+                    {/* Bus Marker — inline View, same as bus-tracking.js for guaranteed Android LEGACY rendering */}
                     {currentLocation && (
                         <Marker
-                            coordinate={currentLocation}
+                            coordinate={{
+                                latitude: currentLocation.latitude,
+                                longitude: currentLocation.longitude,
+                            }}
                             anchor={{ x: 0.5, y: 0.5 }}
-                            tracksViewChanges={tracksViewChanges}
+                            tracksViewChanges={true}
                             title={`🚌 ${vehicle?.licensePlate || 'Bus'}`}
                             description={isTracking ? 'Tracking live' : 'Idle'}
                         >
-                            <View style={{ alignItems: 'center' }}>
-                                <View style={{
-                                    backgroundColor: '#1E293B',
-                                    paddingHorizontal: 6, paddingVertical: 2,
-                                    borderRadius: 6, marginBottom: 3,
-                                }}>
-                                    <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800' }}>
-                                        {vehicle?.licensePlate || 'BUS'}
-                                    </Text>
-                                </View>
-                                <View style={{
-                                    width: 40, height: 40, borderRadius: 20,
-                                    backgroundColor: isTracking ? '#10B981' : '#EAB308',
-                                    alignItems: 'center', justifyContent: 'center',
-                                    borderWidth: 3, borderColor: '#fff',
-                                    elevation: 5,
-                                }}>
-                                    <Bus size={20} color="#fff" />
-                                </View>
+                            <View style={{
+                                width: 36, height: 36, borderRadius: 18,
+                                backgroundColor: isTracking ? '#22C55E' : '#F59E0B',
+                                alignItems: 'center', justifyContent: 'center',
+                                borderWidth: 2, borderColor: '#fff',
+                                elevation: 5,
+                            }}>
+                                <Text style={{ fontSize: 18, lineHeight: 22, textAlign: 'center', textAlignVertical: 'center' }}>🚌</Text>
                             </View>
                         </Marker>
                     )}
@@ -987,7 +1010,7 @@ const styles = StyleSheet.create({
     statLabel: { fontSize: 11, color: '#64748B' },
 
     // Map
-    mapContainer: { height: height * 0.35, width: '100%', position: 'relative' },
+    mapContainer: { height: height * 0.35, width: '100%', position: 'relative', marginBottom: 20, },
     map: { ...StyleSheet.absoluteFillObject },
     statusOverlay: { position: 'absolute', top: 16, left: 16, right: 16, flexDirection: 'row', justifyContent: 'space-between' },
     statusBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 },

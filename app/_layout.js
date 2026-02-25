@@ -226,6 +226,7 @@ function RootLayoutContent() {
     // TRACK LOGGED-IN USER ID - triggers FCM registration after login
     // ========================================================================
     const [loggedInUserId, setLoggedInUserId] = useState(null);
+    const previousUserIdRef = useRef(null);
     const tokenRefreshUnsubRef = useRef(null);
 
     // Detect user login/logout by watching SecureStore + route changes
@@ -270,6 +271,16 @@ function RootLayoutContent() {
 
         async function registerFcm() {
             try {
+                // Unregister FCM token from previous user to prevent cross-role notification leak
+                const previousUserId = previousUserIdRef.current;
+                if (previousUserId && previousUserId !== loggedInUserId) {
+                    console.log('[FCM Init] 🔄 User changed, clearing old token for:', previousUserId);
+                    await fcmService.unregisterToken(previousUserId).catch(e =>
+                        console.warn('[FCM Init] ⚠️ Old token cleanup failed (non-blocking):', e)
+                    );
+                }
+                previousUserIdRef.current = loggedInUserId;
+
                 console.log('[FCM Init] Registering token for user:', loggedInUserId);
                 const hasPermission = await fcmService.requestPermission();
                 if (hasPermission) {

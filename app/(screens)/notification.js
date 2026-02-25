@@ -145,22 +145,86 @@ export default function NotificationScreen() {
     // Mutations
     const markReadMutation = useMutation({
         mutationFn: (ids) => api.put('/notifications', { notificationIds: ids, userId }),
-        onSuccess: () => queryClient.invalidateQueries(['notifications'])
+        onMutate: async (ids) => {
+            // Cancel any outgoing refetches (so they don't overwrite our optimistic update)
+            await queryClient.cancelQueries({ queryKey: ['notifications', userId, schoolId] });
+
+            // Snapshot the previous value
+            const previousData = queryClient.getQueryData(['notifications', userId, schoolId]);
+
+            // Optimistically update to the new value
+            queryClient.setQueryData(['notifications', userId, schoolId], (old) => {
+                if (!old) return old;
+
+                const updateSection = (section) =>
+                    section.map((n) => (ids.includes(n.id) ? { ...n, isRead: true } : n));
+
+                return {
+                    ...old,
+                    notifications: {
+                        today: updateSection(old.notifications.today),
+                        yesterday: updateSection(old.notifications.yesterday),
+                        earlier: updateSection(old.notifications.earlier),
+                    },
+                    // We don't decrement unreadCount here because it's calculated from the filtered lists in the UI,
+                    // but we should technically update it if the API returns it.
+                    // For now, the UI calculates filteredUnreadCount which will reflect the change.
+                };
+            });
+
+            // Return a context object with the snapshotted value
+            return { previousData };
+        },
+        onError: (err, ids, context) => {
+            // If the mutation fails, use the context returned from onMutate to roll back
+            if (context?.previousData) {
+                queryClient.setQueryData(['notifications', userId, schoolId], context.previousData);
+            }
+        },
+        onSettled: () => {
+            // Always refetch after error or success to guarantee server sync
+            queryClient.invalidateQueries({ queryKey: ['notifications', userId, schoolId] });
+        }
     });
 
     const markAllReadMutation = useMutation({
         mutationFn: () => api.put('/notifications', { markAllAsRead: true, userId }),
-        onSuccess: () => queryClient.invalidateQueries(['notifications'])
+        onMutate: async () => {
+            await queryClient.cancelQueries({ queryKey: ['notifications', userId, schoolId] });
+            const previousData = queryClient.getQueryData(['notifications', userId, schoolId]);
+
+            queryClient.setQueryData(['notifications', userId, schoolId], (old) => {
+                if (!old) return old;
+
+                const markRead = (section) => section.map((n) => ({ ...n, isRead: true }));
+
+                return {
+                    ...old,
+                    unreadCount: 0,
+                    notifications: {
+                        today: markRead(old.notifications.today),
+                        yesterday: markRead(old.notifications.yesterday),
+                        earlier: markRead(old.notifications.earlier),
+                    },
+                };
+            });
+
+            return { previousData };
+        },
+        onError: (err, variables, context) => {
+            if (context?.previousData) {
+                queryClient.setQueryData(['notifications', userId, schoolId], context.previousData);
+            }
+        },
+        onSettled: () => {
+            queryClient.invalidateQueries({ queryKey: ['notifications', userId, schoolId] });
+        }
     });
 
     // Auto-mark all as read when screen opens
     useEffect(() => {
         if (userId && data?.unreadCount > 0) {
-            api.put('/notifications', { markAllAsRead: true, userId })
-                .then(() => {
-                    queryClient.invalidateQueries(['notifications']);
-                })
-                .catch(err => console.error('Failed to mark all as read:', err));
+            markAllReadMutation.mutate();
         }
     }, [userId, data?.unreadCount]);
 

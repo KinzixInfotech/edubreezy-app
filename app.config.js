@@ -19,7 +19,7 @@ export default {
         ios: {
             supportsTablet: true,
             bundleIdentifier: "com.kinzix.edubreezy",
-            googleServicesFile: "./GoogleService-Info.plist",
+            googleServicesFile: "./GoogleService-Info.plist" || process.env.GOOGLE_SERVICE_INFO_PLIST,
             config: {
                 googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY
             },

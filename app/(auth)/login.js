@@ -22,6 +22,10 @@ import Animated, {
     useAnimatedStyle,
     withTiming,
     withSequence,
+    withRepeat,
+    withDelay,
+    Easing,
+    interpolate,
     FadeIn,
     FadeInDown,
     FadeInUp,
@@ -64,6 +68,71 @@ const responsive = (small, normal, tablet) => {
     return normal;
 };
 
+// Animated Background Component
+const AnimatedBackground = () => {
+    const progress1 = useSharedValue(0);
+    const progress2 = useSharedValue(0);
+    const progress3 = useSharedValue(0);
+    const progress4 = useSharedValue(0);
+
+    useEffect(() => {
+        const easing = Easing.inOut(Easing.sin);
+        progress1.value = withRepeat(withTiming(1, { duration: 8000, easing }), -1, true);
+        progress2.value = withDelay(1000, withRepeat(withTiming(1, { duration: 10000, easing }), -1, true));
+        progress3.value = withDelay(2000, withRepeat(withTiming(1, { duration: 12000, easing }), -1, true));
+        progress4.value = withDelay(500, withRepeat(withTiming(1, { duration: 9000, easing }), -1, true));
+    }, []);
+
+    const orb1Style = useAnimatedStyle(() => ({
+        transform: [
+            { translateX: interpolate(progress1.value, [0, 1], [-30, 40]) },
+            { translateY: interpolate(progress1.value, [0, 1], [0, 50]) },
+            { scale: interpolate(progress1.value, [0, 0.5, 1], [1, 1.15, 1]) },
+        ],
+        opacity: interpolate(progress1.value, [0, 0.5, 1], [0.4, 0.6, 0.4]),
+    }));
+
+    const orb2Style = useAnimatedStyle(() => ({
+        transform: [
+            { translateX: interpolate(progress2.value, [0, 1], [30, -50]) },
+            { translateY: interpolate(progress2.value, [0, 1], [-20, 40]) },
+            { scale: interpolate(progress2.value, [0, 0.5, 1], [1, 1.2, 1]) },
+        ],
+        opacity: interpolate(progress2.value, [0, 0.5, 1], [0.3, 0.5, 0.3]),
+    }));
+
+    const orb3Style = useAnimatedStyle(() => ({
+        transform: [
+            { translateX: interpolate(progress3.value, [0, 1], [20, -30]) },
+            { translateY: interpolate(progress3.value, [0, 1], [30, -20]) },
+            { scale: interpolate(progress3.value, [0, 0.5, 1], [1, 1.1, 1]) },
+        ],
+        opacity: interpolate(progress3.value, [0, 0.5, 1], [0.25, 0.45, 0.25]),
+    }));
+
+    const orb4Style = useAnimatedStyle(() => ({
+        transform: [
+            { translateX: interpolate(progress4.value, [0, 1], [-20, 35]) },
+            { translateY: interpolate(progress4.value, [0, 1], [10, -40]) },
+            { scale: interpolate(progress4.value, [0, 0.5, 1], [1, 1.18, 1]) },
+        ],
+        opacity: interpolate(progress4.value, [0, 0.5, 1], [0.3, 0.55, 0.3]),
+    }));
+
+    return (
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            {/* Orb 1 - Top left, blue */}
+            <Animated.View style={[styles.bgOrb, styles.bgOrb1, orb1Style]} />
+            {/* Orb 2 - Top right, indigo */}
+            <Animated.View style={[styles.bgOrb, styles.bgOrb2, orb2Style]} />
+            {/* Orb 3 - Bottom left, purple */}
+            <Animated.View style={[styles.bgOrb, styles.bgOrb3, orb3Style]} />
+            {/* Orb 4 - Center, sky */}
+            <Animated.View style={[styles.bgOrb, styles.bgOrb4, orb4Style]} />
+        </View>
+    );
+};
+
 // Zod validation schemas
 const LoginSchema = z.object({
     email: z
@@ -76,211 +145,43 @@ const LoginSchema = z.object({
         .max(50, 'Password is too long'),
 });
 
-// School info card component - Enhanced Professional Design with collapse functionality
-const SchoolInfoCard = ({ schoolData, onSwitchSchool, keyboardVisible }) => {
-    const [isExpanded, setIsExpanded] = useState(true);
-
-    // Auto-minimize when keyboard opens
-    useEffect(() => {
-        if (keyboardVisible) {
-            setIsExpanded(false);
-        }
-    }, [keyboardVisible]);
-
+// School info card component - Compact: logo, name, code, switch
+const SchoolInfoCard = ({ schoolData, onSwitchSchool }) => {
     if (!schoolData) return null;
-
-    const publicProfile = schoolData.publicProfile;
-    const establishedYear = publicProfile?.establishedYear;
-    const totalStudents = publicProfile?.totalStudents;
-    const totalTeachers = publicProfile?.totalTeachers;
-    const tagline = publicProfile?.tagline;
-    const coverImage = publicProfile?.coverImage;
-
-    // Minimized view
-    if (!isExpanded) {
-        return (
-            <Animated.View
-                entering={FadeInDown.delay(200).duration(600).springify()}
-                style={styles.schoolCardMinimized}
-            >
-                {/* Banner in minimized state */}
-                {coverImage && (
-                    <View style={styles.minimizedBannerContainer}>
-                        <Image
-                            source={{ uri: coverImage }}
-                            style={styles.minimizedBannerImage}
-                            resizeMode="cover"
-                        />
-                        <View style={styles.minimizedBannerOverlay} />
-                    </View>
-                )}
-                <TouchableOpacity
-                    style={[styles.minimizedContent, coverImage && styles.minimizedContentWithBanner]}
-                    onPress={() => setIsExpanded(true)}
-                    activeOpacity={0.8}
-                >
-                    <View style={styles.minimizedLogoContainer}>
-                        <Image
-                            source={{ uri: schoolData.profilePicture }}
-                            style={styles.minimizedLogo}
-                            resizeMode="cover"
-                        />
-                    </View>
-                    <View style={styles.minimizedInfo}>
-                        <Text style={[styles.minimizedName, coverImage && styles.minimizedNameOnBanner]} numberOfLines={1}>
-                            {schoolData.name}
-                        </Text>
-                        <Text style={[styles.minimizedCode, coverImage && styles.minimizedCodeOnBanner]}>{schoolData.schoolCode}</Text>
-                    </View>
-                    <View style={[styles.expandButton, coverImage && styles.expandButtonOnBanner]}>
-                        <Ionicons name="chevron-down" size={20} color={coverImage ? '#FFFFFF' : PRIMARY_COLOR} />
-                    </View>
-                </TouchableOpacity>
-            </Animated.View>
-        );
-    }
 
     return (
         <Animated.View
             entering={FadeInDown.delay(200).duration(600).springify()}
-            style={styles.schoolCard}
+            style={styles.schoolCardCompact}
         >
-            {/* Banner Image if exists */}
-            {coverImage && (
-                <View style={styles.bannerContainer}>
-                    <Image
-                        source={{ uri: coverImage }}
-                        style={styles.bannerImage}
-                        resizeMode="cover"
-                    />
-                    <LinearGradient
-                        colors={['transparent', 'rgba(0,0,0,0.6)']}
-                        locations={[0.3, 1]}
-                        style={styles.bannerOverlay}
-                    />
+            <View style={styles.schoolCardCompactRow}>
+                <View style={styles.compactLogoContainer}>
+                    {schoolData.profilePicture ? (
+                        <Image
+                            source={{ uri: schoolData.profilePicture }}
+                            style={styles.compactLogo}
+                            resizeMode="cover"
+                        />
+                    ) : (
+                        <View style={styles.compactLogoPlaceholder}>
+                            <Text style={styles.compactLogoText}>
+                                {schoolData.name?.charAt(0)?.toUpperCase() || 'S'}
+                            </Text>
+                        </View>
+                    )}
                 </View>
-            )}
-
-            {/* Header - Translucent overlay when banner exists, gradient when no banner */}
-            {coverImage ? (
-                // Translucent smoky overlay when banner exists
-                <View style={[styles.schoolCardHeader, styles.schoolCardHeaderWithBanner]}>
-                    <View style={styles.smokyOverlay} />
-
-                    {/* Minimize Button */}
-                    <TouchableOpacity
-                        style={styles.minimizeButton}
-                        onPress={() => setIsExpanded(false)}
-                        activeOpacity={0.7}
-                    >
-                        <Ionicons name="chevron-up" size={18} color="#FFFFFF" />
-                    </TouchableOpacity>
-
-                    <View style={styles.schoolHeaderContent}>
-                        <View style={styles.schoolLogoWrapper}>
-                            <View style={styles.schoolLogoContainer}>
-                                <Image
-                                    source={{ uri: schoolData.profilePicture }}
-                                    style={styles.schoolLogo}
-                                    resizeMode="cover"
-                                />
-                            </View>
-                            <View style={styles.verifiedBadge}>
-                                <Ionicons name="checkmark-circle" size={18} color="#22C55E" />
-                            </View>
-                        </View>
-
-                        <View style={styles.schoolHeaderInfo}>
-                            <Text style={styles.schoolNameHeader} numberOfLines={2}>
-                                {schoolData.name}
-                            </Text>
-                            {tagline && (
-                                <Text style={styles.schoolTagline} numberOfLines={1}>
-                                    {tagline}
-                                </Text>
-                            )}
-                            <View style={styles.schoolCodeBadgeHeader}>
-                                <Ionicons name="qr-code-outline" size={12} color="#FFFFFF" />
-                                <Text style={styles.schoolCodeHeader}>{schoolData.schoolCode}</Text>
-                            </View>
-                        </View>
-                    </View>
+                <View style={styles.compactInfo}>
+                    <Text style={styles.compactName} numberOfLines={1}>
+                        {schoolData.name}
+                    </Text>
+                    <Text style={styles.compactCode}>{schoolData.schoolCode}</Text>
                 </View>
-            ) : (
-                // Blue gradient when no banner
-                <LinearGradient
-                    colors={[PRIMARY_COLOR, '#0847b3', '#063d99']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.schoolCardHeader}
-                >
-                    <View style={styles.headerCircle1} />
-                    <View style={styles.headerCircle2} />
-
-                    <TouchableOpacity
-                        style={styles.minimizeButton}
-                        onPress={() => setIsExpanded(false)}
-                        activeOpacity={0.7}
-                    >
-                        <Ionicons name="chevron-up" size={18} color="#FFFFFF" />
-                    </TouchableOpacity>
-
-                    <View style={styles.schoolHeaderContent}>
-                        <View style={styles.schoolLogoWrapper}>
-                            <View style={styles.schoolLogoContainer}>
-                                <Image
-                                    source={{ uri: schoolData.profilePicture }}
-                                    style={styles.schoolLogo}
-                                    resizeMode="cover"
-                                />
-                            </View>
-                            <View style={styles.verifiedBadge}>
-                                <Ionicons name="checkmark-circle" size={18} color="#22C55E" />
-                            </View>
-                        </View>
-
-                        <View style={styles.schoolHeaderInfo}>
-                            <Text style={styles.schoolNameHeader} numberOfLines={2}>
-                                {schoolData.name}
-                            </Text>
-                            {tagline && (
-                                <Text style={styles.schoolTagline} numberOfLines={1}>
-                                    {tagline}
-                                </Text>
-                            )}
-                            <View style={styles.schoolCodeBadgeHeader}>
-                                <Ionicons name="qr-code-outline" size={12} color="#FFFFFF" />
-                                <Text style={styles.schoolCodeHeader}>{schoolData.schoolCode}</Text>
-                            </View>
-                        </View>
-                    </View>
-                </LinearGradient>
-            )}
-
-            <View style={styles.schoolDetailsSection}>
-                {/* Location Row */}
-                {schoolData.location && (
-                    <View style={styles.detailsRow}>
-                        <View style={styles.detailItem}>
-                            <View style={styles.detailIconContainer}>
-                                <Ionicons name="location-outline" size={16} color={PRIMARY_COLOR} />
-                            </View>
-                            <Text style={styles.detailText} numberOfLines={1}>
-                                {schoolData.location}
-                            </Text>
-                        </View>
-                    </View>
-                )}
-
-                {/* Switch School Button */}
                 <TouchableOpacity
-                    style={styles.switchSchoolButtonEnhanced}
                     onPress={onSwitchSchool}
+                    style={styles.compactSwitchButton}
                     activeOpacity={0.7}
                 >
                     <Ionicons name="swap-horizontal" size={18} color={PRIMARY_COLOR} />
-                    <Text style={styles.switchSchoolTextEnhanced}>Switch to Different School</Text>
-                    <Ionicons name="chevron-forward" size={16} color="#94A3B8" />
                 </TouchableOpacity>
             </View>
         </Animated.View>
@@ -645,23 +546,22 @@ export default function LoginScreen() {
     return (
         <KeyboardAvoidingView
             style={styles.container}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
             keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
             <StatusBar style="dark" />
+            <AnimatedBackground />
 
             <ScrollView
                 ref={scrollViewRef}
                 contentContainerStyle={{
                     flexGrow: 1,
-                    backgroundColor: '#FFFFFF',
-                    paddingBottom: Platform.OS === 'android' && keyboardVisible ? keyboardHeight + 20 : 0,
                 }}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode="interactive"
                 bounces={false}
-                style={{ flex: 1, backgroundColor: '#FFFFFF' }}
+                style={{ flex: 1 }}
                 automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
             >
                 <View style={[styles.loginScreenWrapper, { paddingTop: insets.top + verticalScale(20), paddingBottom: Math.max(insets.bottom, 20) }]}>
@@ -685,7 +585,6 @@ export default function LoginScreen() {
                             <SchoolInfoCard
                                 schoolData={schoolConfig}
                                 onSwitchSchool={handleSwitchSchool}
-                                keyboardVisible={keyboardVisible}
                             />
                         )}
 
@@ -844,9 +743,41 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#FFFFFF',
     },
+    bgOrb: {
+        position: 'absolute',
+        borderRadius: 999,
+    },
+    bgOrb1: {
+        width: SCREEN_WIDTH * 0.65,
+        height: SCREEN_WIDTH * 0.65,
+        backgroundColor: 'rgba(59, 130, 246, 0.12)',
+        top: SCREEN_HEIGHT * 0.05,
+        left: -SCREEN_WIDTH * 0.15,
+    },
+    bgOrb2: {
+        width: SCREEN_WIDTH * 0.55,
+        height: SCREEN_WIDTH * 0.55,
+        backgroundColor: 'rgba(99, 102, 241, 0.10)',
+        top: SCREEN_HEIGHT * 0.12,
+        right: -SCREEN_WIDTH * 0.1,
+    },
+    bgOrb3: {
+        width: SCREEN_WIDTH * 0.5,
+        height: SCREEN_WIDTH * 0.5,
+        backgroundColor: 'rgba(139, 92, 246, 0.08)',
+        bottom: SCREEN_HEIGHT * 0.15,
+        left: -SCREEN_WIDTH * 0.05,
+    },
+    bgOrb4: {
+        width: SCREEN_WIDTH * 0.45,
+        height: SCREEN_WIDTH * 0.45,
+        backgroundColor: 'rgba(14, 165, 233, 0.09)',
+        bottom: SCREEN_HEIGHT * 0.3,
+        right: SCREEN_WIDTH * 0.05,
+    },
     loginScreenWrapper: {
         flexGrow: 1,
-        backgroundColor: '#FFFFFF',
+        justifyContent: 'center',
         paddingHorizontal: moderateScale(24),
     },
     loginHeader: {
@@ -1054,295 +985,66 @@ const styles = StyleSheet.create({
         flexGrow: 1,
     },
 
-    schoolCard: {
-        backgroundColor: '#FFFFFF',
-        borderRadius: moderateScale(20),
-        marginBottom: verticalScale(20),
-        overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: '#E2E8F0',
-    },
-    schoolCardMinimized: {
+    schoolCardCompact: {
         backgroundColor: '#FFFFFF',
         borderRadius: moderateScale(14),
-        marginBottom: verticalScale(20),
-        overflow: 'hidden',
+        marginBottom: verticalScale(16),
         borderWidth: 1,
         borderColor: '#E2E8F0',
-    },
-    minimizedContent: {
-        flexDirection: 'row',
-        alignItems: 'center',
         padding: moderateScale(12),
     },
-    minimizedLogoContainer: {
-        width: responsive(40, 44, 50),
-        height: responsive(40, 44, 50),
-        borderRadius: moderateScale(10),
+    schoolCardCompactRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    compactLogoContainer: {
+        width: responsive(42, 46, 52),
+        height: responsive(42, 46, 52),
+        borderRadius: moderateScale(11),
         overflow: 'hidden',
         backgroundColor: '#F1F5F9',
         borderWidth: 1,
         borderColor: '#E2E8F0',
     },
-    minimizedLogo: {
+    compactLogo: {
         width: '100%',
         height: '100%',
     },
-    minimizedInfo: {
+    compactLogoPlaceholder: {
+        width: '100%',
+        height: '100%',
+        backgroundColor: PRIMARY_COLOR,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    compactLogoText: {
+        fontSize: moderateScale(18, 0.3),
+        fontWeight: '700',
+        color: '#FFFFFF',
+    },
+    compactInfo: {
         flex: 1,
         marginLeft: moderateScale(12),
     },
-    minimizedName: {
+    compactName: {
         fontSize: moderateScale(14, 0.3),
         fontWeight: '700',
         color: '#1E293B',
     },
-    minimizedCode: {
+    compactCode: {
         fontSize: moderateScale(11, 0.3),
         fontWeight: '600',
         color: PRIMARY_COLOR,
         marginTop: 2,
     },
-    expandButton: {
-        width: responsive(32, 36, 40),
-        height: responsive(32, 36, 40),
-        borderRadius: responsive(16, 18, 20),
+    compactSwitchButton: {
+        width: responsive(36, 40, 44),
+        height: responsive(36, 40, 44),
+        borderRadius: responsive(18, 20, 22),
         backgroundColor: '#EFF6FF',
         alignItems: 'center',
         justifyContent: 'center',
-    },
-    expandButtonOnBanner: {
-        backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    },
-    minimizedBannerContainer: {
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-    },
-    minimizedBannerImage: {
-        width: '100%',
-        height: '100%',
-    },
-    minimizedBannerOverlay: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    },
-    minimizedContentWithBanner: {
-        position: 'relative',
-        zIndex: 1,
-    },
-    minimizedNameOnBanner: {
-        color: '#FFFFFF',
-    },
-    minimizedCodeOnBanner: {
-        color: 'rgba(255, 255, 255, 0.9)',
-    },
-    bannerContainer: {
-        width: '100%',
-        height: responsive(140, 160, 180),
-        position: 'relative',
-    },
-    bannerImage: {
-        width: '100%',
-        height: '100%',
-    },
-    bannerOverlay: {
-        ...StyleSheet.absoluteFillObject,
-    },
-    schoolCardHeader: {
-        paddingVertical: verticalScale(18),
-        paddingHorizontal: moderateScale(16),
-        position: 'relative',
-        overflow: 'hidden',
-    },
-    schoolCardHeaderWithBanner: {
-        marginTop: -verticalScale(50),
-        paddingTop: verticalScale(16),
-        borderTopLeftRadius: moderateScale(20),
-        borderTopRightRadius: moderateScale(20),
-        backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    },
-    smokyOverlay: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0, 0, 0, 0.1)',
-    },
-    minimizeButton: {
-        position: 'absolute',
-        top: moderateScale(10),
-        right: moderateScale(10),
-        width: responsive(28, 32, 36),
-        height: responsive(28, 32, 36),
-        borderRadius: responsive(14, 16, 18),
-        backgroundColor: 'rgba(255, 255, 255, 0.2)',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 10,
-    },
-    headerCircle1: {
-        position: 'absolute',
-        width: responsive(100, 120, 140),
-        height: responsive(100, 120, 140),
-        borderRadius: 100,
-        backgroundColor: 'rgba(255, 255, 255, 0.08)',
-        top: -responsive(40, 50, 60),
-        right: -responsive(20, 30, 40),
-    },
-    headerCircle2: {
-        position: 'absolute',
-        width: responsive(60, 80, 100),
-        height: responsive(60, 80, 100),
-        borderRadius: 100,
-        backgroundColor: 'rgba(255, 255, 255, 0.05)',
-        bottom: -responsive(20, 30, 40),
-        left: responsive(40, 60, 80),
-    },
-    schoolHeaderContent: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        zIndex: 1,
-    },
-    schoolLogoWrapper: {
-        position: 'relative',
-    },
-    schoolLogoContainer: {
-        width: responsive(60, 70, 85),
-        height: responsive(60, 70, 85),
-        borderRadius: moderateScale(14),
-        overflow: 'hidden',
-        backgroundColor: '#FFFFFF',
-        borderWidth: 3,
-        borderColor: 'rgba(255, 255, 255, 0.3)',
-    },
-    schoolLogo: {
-        width: '100%',
-        height: '100%',
-    },
-    verifiedBadge: {
-        position: 'absolute',
-        bottom: -4,
-        right: -4,
-        backgroundColor: '#FFFFFF',
-        borderRadius: 12,
-        padding: 2,
-        borderWidth: 1,
-        borderColor: '#E2E8F0',
-    },
-    schoolHeaderInfo: {
-        flex: 1,
-        marginLeft: moderateScale(14),
-    },
-    schoolNameHeader: {
-        fontSize: moderateScale(17, 0.3),
-        fontWeight: '800',
-        color: '#FFFFFF',
-        marginBottom: verticalScale(2),
-        lineHeight: moderateScale(22, 0.3),
-    },
-    schoolTagline: {
-        fontSize: moderateScale(12, 0.3),
-        fontWeight: '500',
-        color: 'rgba(255, 255, 255, 0.8)',
-        marginBottom: verticalScale(6),
-    },
-    schoolCodeBadgeHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'rgba(255, 255, 255, 0.2)',
-        paddingHorizontal: moderateScale(10),
-        paddingVertical: moderateScale(4),
-        borderRadius: 8,
-        gap: 6,
-        alignSelf: 'flex-start',
-    },
-    schoolCodeHeader: {
-        fontSize: moderateScale(11, 0.3),
-        fontWeight: '700',
-        color: '#FFFFFF',
-        letterSpacing: 0.5,
-    },
-    schoolDetailsSection: {
-        padding: moderateScale(16),
-        backgroundColor: '#FFFFFF',
-    },
-    detailsRow: {
-        flexDirection: 'column',
-        gap: verticalScale(8),
-        marginBottom: verticalScale(14),
-    },
-    detailItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    detailIconContainer: {
-        width: responsive(28, 32, 36),
-        height: responsive(28, 32, 36),
-        borderRadius: responsive(14, 16, 18),
-        backgroundColor: '#EFF6FF',
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginRight: moderateScale(10),
-    },
-    detailText: {
-        flex: 1,
-        fontSize: moderateScale(13, 0.3),
-        fontWeight: '600',
-        color: '#475569',
-    },
-    statsRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-around',
-        paddingVertical: verticalScale(12),
-        borderTopWidth: 1,
-        borderTopColor: '#F1F5F9',
-        borderBottomWidth: 1,
-        borderBottomColor: '#F1F5F9',
-        marginBottom: verticalScale(14),
-    },
-    statItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: moderateScale(8),
-    },
-    statIconBg: {
-        width: responsive(28, 32, 36),
-        height: responsive(28, 32, 36),
-        borderRadius: responsive(14, 16, 18),
-        backgroundColor: '#EFF6FF',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    statContent: {
-        alignItems: 'flex-start',
-    },
-    statValue: {
-        fontSize: moderateScale(13, 0.3),
-        fontWeight: '700',
-        color: '#1E293B',
-    },
-    statLabel: {
-        fontSize: moderateScale(10, 0.3),
-        fontWeight: '500',
-        color: '#94A3B8',
-    },
-    switchSchoolButtonEnhanced: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: '#F8FAFC',
-        paddingVertical: moderateScale(12),
-        paddingHorizontal: moderateScale(16),
-        borderRadius: moderateScale(12),
-        borderWidth: 1,
-        borderColor: '#E2E8F0',
-        gap: moderateScale(8),
-    },
-    switchSchoolTextEnhanced: {
-        flex: 1,
-        fontSize: moderateScale(13, 0.3),
-        fontWeight: '600',
-        color: PRIMARY_COLOR,
+        marginLeft: moderateScale(8),
     },
     generalError: {
         flexDirection: 'row',

@@ -44,8 +44,8 @@ import HapticTouchable from '../../components/HapticTouch';
 import Animated, { FadeInDown, ZoomIn, SlideInUp } from 'react-native-reanimated';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import {
-    startBackgroundLocationTask,
-    stopBackgroundLocationTask,
+    startForegroundLocationTracking,
+    stopForegroundLocationTracking,
     flushLocationQueue,
     updateTripStops,
 } from '../../../lib/transport-location-task';
@@ -145,6 +145,7 @@ export default function ActiveTripScreen() {
     const schoolLocationRef = useRef(null);
     const isNearSchoolRef = useRef(false);
     const showStopModalRef = useRef(false);
+    const locationSubRef = useRef(null); // Location watch subscription from disclosure flow
 
     // tracksViewChanges: true on mount so the bus marker renders correctly,
     // then false to stop re-rendering on every GPS update (prevents flashing).
@@ -253,27 +254,32 @@ export default function ActiveTripScreen() {
                 return;
             }
 
-            // Check if background permission is already granted
-            const { status } = await Location.getBackgroundPermissionsAsync();
-            if (status === 'granted') {
-                // Already have permission, start tracking directly
-                await startLocationTracking();
-                locationSubscription = await Location.watchPositionAsync(
-                    { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 10 },
-                    handleLocationUpdate
-                );
+            // Check if foreground permission is already granted
+            // Google Play policy: show disclosure before using fine location
+            // Show once per trip session (not permanently dismissed)
+            const shownThisSession = await SecureStore.getItemAsync(`disclosure_shown_trip_${tripId}`);
+            if (!shownThisSession) {
+                // Show disclosure first, tracking starts after user accepts
+                setShowLocationDisclosure(true);
             } else {
-                // Check if driver already dismissed the disclosure permanently
-                const skipped = await SecureStore.getItemAsync('location_disclosure_dismissed');
-                if (skipped === 'true') {
+                // Already shown this session, start tracking
+                const { status } = await Location.getForegroundPermissionsAsync();
+                if (status === 'granted') {
                     await startLocationTracking();
                     locationSubscription = await Location.watchPositionAsync(
                         { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 10 },
                         handleLocationUpdate
                     );
                 } else {
-                    // Show disclosure first as per Google Play policy
-                    setShowLocationDisclosure(true);
+                    // Request permission
+                    const { status: newStatus } = await Location.requestForegroundPermissionsAsync();
+                    if (newStatus === 'granted') {
+                        await startLocationTracking();
+                        locationSubscription = await Location.watchPositionAsync(
+                            { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 10 },
+                            handleLocationUpdate
+                        );
+                    }
                 }
             }
         };
@@ -282,22 +288,34 @@ export default function ActiveTripScreen() {
         const subscription = AppState.addEventListener('change', handleAppStateChange);
         return () => {
             if (locationSubscription) locationSubscription.remove();
+            if (locationSubRef.current) locationSubRef.current.remove();
             subscription.remove();
         };
     }, [trip?.status]);
 
-    const handleAcceptDisclosure = async (dontShowAgain = false) => {
+    const handleAcceptDisclosure = async () => {
         setShowLocationDisclosure(false);
-        if (dontShowAgain) {
-            await SecureStore.setItemAsync('location_disclosure_dismissed', 'true');
+        // Mark disclosure as shown for this trip
+        await SecureStore.setItemAsync(`disclosure_shown_trip_${tripId}`, 'true');
+        // Request permission if not already granted
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== 'granted') {
+            const { status: newStatus } = await Location.requestForegroundPermissionsAsync();
+            if (newStatus !== 'granted') return;
         }
         await startLocationTracking();
+        // Start watching location
+        const sub = await Location.watchPositionAsync(
+            { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 10 },
+            handleLocationUpdate
+        );
+        // Store subscription ref for cleanup
+        locationSubRef.current = sub;
     };
 
     const handleLocationUpdate = async (location) => {
         const { latitude, longitude, speed } = location.coords;
         setCurrentLocation({ latitude, longitude, speed });
-        setTracksViewChanges(true);
 
         // Use refs for current values (avoids stale closure)
         const currentCompletedStops = completedStopIdsRef.current;
@@ -334,10 +352,7 @@ export default function ActiveTripScreen() {
             }
         }
 
-        // Animate map
-        if (mapRef.current) {
-            mapRef.current.animateCamera({ center: { latitude, longitude }, zoom: 16 }, { duration: 500 });
-        }
+        // Map animation handled by auto-follow useEffect
     };
 
     const handleAppStateChange = async (nextAppState) => {
@@ -354,7 +369,7 @@ export default function ActiveTripScreen() {
             const vehicleId = trip?.vehicleId;
             if (!vehicleId) return;
 
-            await startBackgroundLocationTask(tripId, vehicleId, routeName, API_BASE_URL, {
+            await startForegroundLocationTracking(tripId, vehicleId, routeName, API_BASE_URL, {
                 schoolId: currentUser?.schoolId,
                 licensePlate: vehicle?.licensePlate,
                 tripType: trip?.tripType,
@@ -369,7 +384,7 @@ export default function ActiveTripScreen() {
 
     const stopLocationTracking = async () => {
         try {
-            await stopBackgroundLocationTask();
+            await stopForegroundLocationTracking();
             setIsTracking(false);
             isTrackingRef.current = false;
         } catch (err) {
@@ -677,7 +692,7 @@ export default function ActiveTripScreen() {
                                 longitude: currentLocation.longitude,
                             }}
                             anchor={{ x: 0.5, y: 0.5 }}
-                            tracksViewChanges={true}
+                            tracksViewChanges={Platform.OS === 'android' ? true : tracksViewChanges}
                             title={`🚌 ${vehicle?.licensePlate || 'Bus'}`}
                             description={isTracking ? 'Tracking live' : 'Idle'}
                         >

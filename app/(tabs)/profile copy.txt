@@ -5,10 +5,9 @@ import { Settings, Edit, LogOut, Mail, Phone, Calendar, MapPin, Award, BookOpen,
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../components/HapticTouch';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Animated } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabase';
-import Animated2, { FadeInDown, FadeInUp, FadeInRight } from 'react-native-reanimated';
+import Animated, { FadeInDown, FadeInUp, FadeInRight } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -23,295 +22,7 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const isSmallDevice = SCREEN_WIDTH < 375;
 const isTablet = SCREEN_WIDTH >= 768;
 
-// ==================== SKELETON COMPONENTS ====================
-
-function useShimmer() {
-  const anim = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.timing(anim, {
-        toValue: 1,
-        duration: 1200,
-        useNativeDriver: true,
-      })
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [anim]);
-  return anim;
-}
-
-function Bone({ width, height, borderRadius = 8, style, animValue }) {
-  const translateX = animValue.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-SCREEN_WIDTH, SCREEN_WIDTH],
-  });
-  return (
-    <View style={[{ width, height, borderRadius, backgroundColor: '#E8EDF5', overflow: 'hidden' }, style]}>
-      <Animated.View style={{ ...StyleSheet.absoluteFillObject, transform: [{ translateX }] }}>
-        <LinearGradient
-          colors={['transparent', 'rgba(255,255,255,0.55)', 'transparent']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={StyleSheet.absoluteFillObject}
-        />
-      </Animated.View>
-    </View>
-  );
-}
-
-function SkeletonSection({ anim, rows = 3, title = true }) {
-  return (
-    <View style={styles.section}>
-      {title && <Bone animValue={anim} width={140} height={18} borderRadius={6} style={{ marginBottom: 14 }} />}
-      <View style={styles.infoCard}>
-        {Array.from({ length: rows }).map((_, i) => (
-          <View key={i}>
-            {i > 0 && <View style={styles.divider} />}
-            <View style={skStyles.row}>
-              <Bone animValue={anim} width={40} height={40} borderRadius={20} />
-              <View style={{ flex: 1, marginLeft: 12, gap: 6 }}>
-                <Bone animValue={anim} width={80} height={11} borderRadius={5} />
-                <Bone animValue={anim} width={160} height={14} borderRadius={5} />
-              </View>
-            </View>
-          </View>
-        ))}
-      </View>
-    </View>
-  );
-}
-
-function SkeletonAdditional({ anim, rows = 6 }) {
-  return (
-    <View style={styles.section}>
-      <Bone animValue={anim} width={180} height={18} borderRadius={6} style={{ marginBottom: 14 }} />
-      <View style={styles.infoCard}>
-        {Array.from({ length: rows }).map((_, i) => (
-          <View key={i}>
-            {i > 0 && <View style={styles.divider} />}
-            <View style={[skStyles.row, { justifyContent: 'space-between' }]}>
-              <Bone animValue={anim} width={100} height={13} borderRadius={5} />
-              <Bone animValue={anim} width={120} height={13} borderRadius={5} />
-            </View>
-          </View>
-        ))}
-      </View>
-    </View>
-  );
-}
-
-function SkeletonMenu({ anim, items = 4 }) {
-  return (
-    <View style={styles.section}>
-      <Bone animValue={anim} width={130} height={18} borderRadius={6} style={{ marginBottom: 14 }} />
-      <View style={styles.menuContainer}>
-        {Array.from({ length: items }).map((_, i) => (
-          <View key={i}>
-            {i > 0 && <View style={styles.divider} />}
-            <View style={skStyles.row}>
-              <Bone animValue={anim} width={40} height={40} borderRadius={20} />
-              <View style={{ flex: 1, marginLeft: 12 }}>
-                <Bone animValue={anim} width={130} height={14} borderRadius={5} />
-              </View>
-              <Bone animValue={anim} width={20} height={20} borderRadius={5} />
-            </View>
-          </View>
-        ))}
-      </View>
-    </View>
-  );
-}
-
-function SkeletonVehicleCard({ anim }) {
-  return (
-    <View style={styles.section}>
-      <Bone animValue={anim} width={150} height={18} borderRadius={6} style={{ marginBottom: 14 }} />
-      <View style={[styles.vehicleCard, { gap: 16 }]}>
-        <View style={skStyles.row}>
-          <Bone animValue={anim} width={56} height={56} borderRadius={28} />
-          <View style={{ flex: 1, marginLeft: 12, gap: 8 }}>
-            <Bone animValue={anim} width={120} height={18} borderRadius={5} />
-            <Bone animValue={anim} width={90} height={13} borderRadius={5} />
-          </View>
-          <Bone animValue={anim} width={56} height={24} borderRadius={8} />
-        </View>
-        <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
-          {[0, 1, 2].map((i) => (
-            <View key={i} style={{ alignItems: 'center', gap: 6 }}>
-              <Bone animValue={anim} width={24} height={24} borderRadius={12} />
-              <Bone animValue={anim} width={50} height={11} borderRadius={4} />
-              <Bone animValue={anim} width={40} height={14} borderRadius={4} />
-            </View>
-          ))}
-        </View>
-        <Bone animValue={anim} width={180} height={13} borderRadius={5} />
-      </View>
-    </View>
-  );
-}
-
-function SkeletonHeader({ anim }) {
-  const avatarSize = isTablet ? 140 : isSmallDevice ? 80 : 100;
-  const avatarRadius = avatarSize / 2;
-  const shimmerTranslate = anim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [-SCREEN_WIDTH, SCREEN_WIDTH],
-  });
-  return (
-    <LinearGradient
-      colors={['#0469ff', '#0256d0']}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={[
-        styles.profileHeader,
-        isTablet && styles.profileHeaderTablet,
-        {
-          borderBottomLeftRadius: 32,
-          borderBottomRightRadius: 32,
-          marginHorizontal: isTablet ? -32 : -16,
-          paddingHorizontal: isTablet ? 32 : 16,
-          marginTop: -16,
-          overflow: 'hidden',
-          alignItems: 'center',
-        },
-      ]}
-    >
-      {/* same background pattern as real header */}
-      <Text style={{ position: 'absolute', top: 10, right: 80, fontSize: 40, color: 'rgba(255,255,255,0.1)', fontWeight: 'bold' }}>+</Text>
-      <Text style={{ position: 'absolute', top: 60, right: 30, fontSize: 24, color: 'rgba(255,255,255,0.08)', fontWeight: 'bold' }}>×</Text>
-      <Text style={{ position: 'absolute', bottom: 40, right: 100, fontSize: 32, color: 'rgba(255,255,255,0.08)', fontWeight: 'bold' }}>÷</Text>
-      <Text style={{ position: 'absolute', top: 30, left: '25%', fontSize: 22, color: 'rgba(255,255,255,0.08)', fontWeight: 'bold' }}>△</Text>
-      <Text style={{ position: 'absolute', bottom: 30, left: '60%', fontSize: 28, color: 'rgba(255,255,255,0.1)', fontWeight: 'bold' }}>○</Text>
-      <View style={{ position: 'absolute', top: -50, right: -50, width: 220, height: 220, borderRadius: 110, backgroundColor: 'rgba(255,255,255,0.05)' }} />
-      <View style={{ position: 'absolute', bottom: -60, left: -40, width: 180, height: 180, borderRadius: 90, backgroundColor: 'rgba(255,255,255,0.05)' }} />
-
-      {/* Avatar skeleton */}
-      <View style={{ position: 'relative', marginBottom: 16 }}>
-        <View style={{
-          width: avatarSize, height: avatarSize, borderRadius: avatarRadius,
-          backgroundColor: 'rgba(255,255,255,0.25)',
-          borderWidth: isTablet ? 5 : isSmallDevice ? 3 : 4,
-          borderColor: 'rgba(255,255,255,0.5)',
-          overflow: 'hidden',
-        }}>
-          <Animated.View style={{ ...StyleSheet.absoluteFillObject, transform: [{ translateX: shimmerTranslate }] }}>
-            <LinearGradient
-              colors={['transparent', 'rgba(255,255,255,0.2)', 'transparent']}
-              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-              style={StyleSheet.absoluteFillObject}
-            />
-          </Animated.View>
-        </View>
-        {/* status dot */}
-        <View style={{
-          position: 'absolute',
-          bottom: isSmallDevice ? 2 : 4, right: isSmallDevice ? 2 : 4,
-          width: isSmallDevice ? 16 : 20, height: isSmallDevice ? 16 : 20,
-          borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.3)',
-        }} />
-      </View>
-
-      {/* Name */}
-      <View style={{ height: isTablet ? 32 : isSmallDevice ? 20 : 24, width: 180, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.25)', marginBottom: 10, overflow: 'hidden' }}>
-        <Animated.View style={{ ...StyleSheet.absoluteFillObject, transform: [{ translateX: shimmerTranslate }] }}>
-          <LinearGradient colors={['transparent', 'rgba(255,255,255,0.2)', 'transparent']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={StyleSheet.absoluteFillObject} />
-        </Animated.View>
-      </View>
-
-      {/* Role badge */}
-      <View style={{ height: 32, width: 100, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.18)', marginBottom: 12 }} />
-
-      {/* School badge */}
-      <View style={{ height: 34, width: 220, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)', marginBottom: 8 }} />
-    </LinearGradient>
-  );
-}
-
-function ProfileSkeleton({ role = 'STUDENT' }) {
-  const anim = useShimmer();
-
-  const cfg = {
-    STUDENT: { contact: 4, additional: 8, showVehicle: false, showChildren: false, showActions: false },
-    TEACHING_STAFF: { contact: 4, additional: 8, showVehicle: false, showChildren: false, showActions: false },
-    PARENT: { contact: 4, additional: 5, showVehicle: false, showChildren: true, showActions: false },
-    ADMIN: { contact: 3, additional: 2, showVehicle: false, showChildren: false, showActions: false },
-    DRIVER: { contact: 4, additional: 6, showVehicle: true, showChildren: false, showActions: false },
-    CONDUCTOR: { contact: 4, additional: 5, showVehicle: true, showChildren: false, showActions: false },
-    DIRECTOR: { contact: 1, additional: 2, showVehicle: false, showChildren: false, showActions: true, menuItems: 6 },
-    PRINCIPAL: { contact: 1, additional: 2, showVehicle: false, showChildren: false, showActions: true, menuItems: 4 },
-    ACCOUNTANT: { contact: 1, additional: 3, showVehicle: false, showChildren: false, showActions: true, menuItems: 2 },
-  }[role] ?? { contact: 3, additional: 4, showVehicle: false, showChildren: false, showActions: false };
-
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: '#0469ff' }} edges={['top']}>
-      <View style={[styles.safeArea, { paddingBottom: 90 }]}>
-        <StatusBar barStyle="light-content" backgroundColor="#0469ff" translucent={false} />
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={[styles.content, isTablet && styles.contentTablet]}
-          showsVerticalScrollIndicator={false}
-          scrollEnabled={false}
-        >
-          <SkeletonHeader anim={anim} />
-
-          {cfg.showVehicle && <SkeletonVehicleCard anim={anim} />}
-
-          <SkeletonSection anim={anim} rows={cfg.contact} />
-
-          <SkeletonAdditional anim={anim} rows={cfg.additional} />
-
-          {cfg.showChildren && (
-            <View style={styles.section}>
-              <Bone animValue={anim} width={120} height={18} borderRadius={6} style={{ marginBottom: 14 }} />
-              <View style={styles.menuContainer}>
-                {[0, 1].map((i) => (
-                  <View key={i}>
-                    {i > 0 && <View style={styles.divider} />}
-                    <View style={skStyles.menuRow}>
-                      <Bone animValue={anim} width={40} height={40} borderRadius={20} />
-                      <View style={{ flex: 1, marginLeft: 12, gap: 6 }}>
-                        <Bone animValue={anim} width={130} height={15} borderRadius={5} />
-                        <Bone animValue={anim} width={180} height={12} borderRadius={5} />
-                      </View>
-                      <Bone animValue={anim} width={48} height={24} borderRadius={12} />
-                    </View>
-                  </View>
-                ))}
-              </View>
-            </View>
-          )}
-
-          {cfg.showActions && <SkeletonMenu anim={anim} items={cfg.menuItems ?? 4} />}
-
-          {/* Logout row */}
-          <View style={styles.section}>
-            <View style={styles.menuContainer}>
-              <View style={skStyles.menuRow}>
-                <Bone animValue={anim} width={40} height={40} borderRadius={20} />
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Bone animValue={anim} width={80} height={14} borderRadius={5} />
-                </View>
-                <Bone animValue={anim} width={20} height={20} borderRadius={5} />
-              </View>
-            </View>
-          </View>
-
-          {/* Footer */}
-          <View style={styles.footer}>
-            <Bone animValue={anim} width={200} height={52} borderRadius={8} style={{ marginBottom: 20 }} />
-            <View style={styles.footerDivider} />
-            <Bone animValue={anim} width={100} height={28} borderRadius={6} style={{ marginBottom: 10 }} />
-            <Bone animValue={anim} width={60} height={16} borderRadius={5} />
-          </View>
-        </ScrollView>
-      </View>
-    </SafeAreaView>
-  );
-}
-
-// ==================== ROLE CONFIG ====================
-
+// Role-based colors for avatar backgrounds
 const ROLE_COLORS = {
   STUDENT: '#10B981',
   PARENT: '#0469ff',
@@ -326,6 +37,7 @@ const ROLE_COLORS = {
   PRINCIPAL: '#DC2626',
 };
 
+// User-friendly role display names
 const ROLE_DISPLAY_NAMES = {
   STUDENT: 'Student',
   PARENT: 'Parent',
@@ -340,6 +52,7 @@ const ROLE_DISPLAY_NAMES = {
   PRINCIPAL: 'Principal',
 };
 
+// ==================== ROLE-BASED CONFIGURATION ====================
 const PROFILE_CONFIG = {
   STUDENT: {
     fieldMappings: {
@@ -381,6 +94,7 @@ const PROFILE_CONFIG = {
   },
 
   TEACHING_STAFF: {
+    // Field mappings - customize these paths based on your API response structure
     fieldMappings: {
       name: 'teacherData.name',
       email: 'teacherData.email',
@@ -402,7 +116,7 @@ const PROFILE_CONFIG = {
       postalCode: 'teacherData.PostalCode',
       department: 'teacherData.department.name',
     },
-    stats: [],
+    stats: [], // Will be fetched dynamically - remove static stats
     contactInfo: [
       { key: 'email', label: 'Email', icon: Mail, color: '#0469ff', dataPath: 'teacherData.email' },
       { key: 'phone', label: 'Phone', icon: Phone, color: '#10b981', dataPath: 'teacherData.contactNumber' },
@@ -440,6 +154,7 @@ const PROFILE_CONFIG = {
       role: 'role.name',
       school: 'school.name',
       profilePicture: 'profilePicture',
+      // Parent-specific fields from schema
       parentId: 'parentData.id',
       occupation: 'parentData.occupation',
       qualification: 'parentData.qualification',
@@ -451,8 +166,8 @@ const PROFILE_CONFIG = {
       emergencyContactName: 'parentData.emergencyContactName',
       emergencyContactNumber: 'parentData.emergencyContactNumber',
     },
-    childrenSection: true,
-    stats: [],
+    childrenSection: true, // Show linked children section
+    stats: [], // Stats will be fetched dynamically if needed
     contactInfo: [
       { key: 'email', label: 'Email', icon: Mail, color: '#0469ff', dataPath: 'parentData.email' },
       { key: 'phone', label: 'Phone', icon: Phone, color: '#10b981', dataPath: 'parentData.contactNumber' },
@@ -481,14 +196,36 @@ const PROFILE_CONFIG = {
       role: 'role.name',
       school: 'school.name',
       profilePicture: 'profilePicture',
+      // Admin-specific fields
       adminId: 'adminId',
       department: 'department',
       permissions: 'permissions',
     },
     stats: [
-      { key: 'totalUsers', label: 'Total Users', value: '1250', color: '#0469ff', icon: '👥', dataPath: 'stats.totalUsers' },
-      { key: 'activeClasses', label: 'Active Classes', value: '45', color: '#10b981', icon: '🏫', dataPath: 'stats.activeClasses' },
-      { key: 'pendingTasks', label: 'Pending Tasks', value: '12', color: '#f59e0b', icon: '📋', dataPath: 'stats.pendingTasks' },
+      {
+        key: 'totalUsers',
+        label: 'Total Users',
+        value: '1250',
+        color: '#0469ff',
+        icon: '👥',
+        dataPath: 'stats.totalUsers'
+      },
+      {
+        key: 'activeClasses',
+        label: 'Active Classes',
+        value: '45',
+        color: '#10b981',
+        icon: '🏫',
+        dataPath: 'stats.activeClasses'
+      },
+      {
+        key: 'pendingTasks',
+        label: 'Pending Tasks',
+        value: '12',
+        color: '#f59e0b',
+        icon: '📋',
+        dataPath: 'stats.pendingTasks'
+      },
     ],
     contactInfo: [
       { key: 'email', label: 'Email', icon: Mail, color: '#0469ff', dataPath: 'email' },
@@ -502,12 +239,13 @@ const PROFILE_CONFIG = {
     menuItems: [
       { id: 1, label: 'User Management', icon: Users, route: '/user-management', color: '#0469ff' },
       { id: 2, label: 'School Analytics', icon: Award, route: '/analytics', color: '#10b981' },
+
       { id: 4, label: 'Announcements', icon: Bell, route: '/admin-announcements', color: '#8b5cf6' },
       { id: 5, label: 'Reports', icon: FileText, route: '/reports', color: '#ec4899' },
+
       { id: 7, label: 'Edit Profile', icon: Edit, route: '/edit-profile', color: '#ef4444' },
     ],
   },
-
   DRIVER: {
     fieldMappings: {
       name: 'transportStaffData.name',
@@ -580,14 +318,14 @@ const PROFILE_CONFIG = {
 
   DIRECTOR: {
     fieldMappings: {
-      name: 'name',
+      name: 'name', // Name is on User table, returned at top level
       email: 'email',
-      phone: 'directorData.department',
+      phone: 'directorData.department', // Using department as placeholder since contactNumber doesn't exist
       role: 'role.name',
       school: 'school.name',
       profilePicture: 'profilePicture',
     },
-    allowNameEdit: true,
+    allowNameEdit: true, // Directors can edit their name
     stats: [],
     contactInfo: [
       { key: 'email', label: 'Email', icon: Mail, color: '#0469ff', dataPath: 'email' },
@@ -603,19 +341,20 @@ const PROFILE_CONFIG = {
       { id: 4, label: 'Approvals', icon: ClipboardCheck, route: '/(screens)/principal/approvals', color: '#8B5CF6' },
       { id: 5, label: 'School Profile', icon: School, action: 'viewSchoolProfile', color: '#10B981' },
       { id: 6, label: 'Payroll', icon: FileText, route: '/(screens)/director/payroll', color: '#F59E0B' },
+
     ],
   },
 
   PRINCIPAL: {
     fieldMappings: {
-      name: 'name',
+      name: 'name', // Name is on User table, returned at top level
       email: 'email',
-      phone: 'principalData.department',
+      phone: 'principalData.department', // Using department as placeholder
       role: 'role.name',
       school: 'school.name',
       profilePicture: 'profilePicture',
     },
-    allowNameEdit: true,
+    allowNameEdit: true, // Principals can edit their name
     stats: [],
     contactInfo: [
       { key: 'email', label: 'Email', icon: Mail, color: '#0469ff', dataPath: 'email' },
@@ -631,7 +370,6 @@ const PROFILE_CONFIG = {
       { id: 4, label: 'School Profile', icon: School, action: 'viewSchoolProfile', color: '#10B981' },
     ],
   },
-
   ACCOUNTANT: {
     fieldMappings: {
       name: 'name',
@@ -662,13 +400,13 @@ const PROFILE_CONFIG = {
 };
 
 // ==================== HELPER FUNCTIONS ====================
+// Get nested value from object using path (e.g., 'user.name' or 'school.name')
 const getNestedValue = (obj, path, defaultValue = 'N/A') => {
   if (!path) return defaultValue;
   const value = path.split('.').reduce((acc, part) => acc?.[part], obj);
   return value !== undefined && value !== null ? value : defaultValue;
 };
 
-// ==================== MAIN SCREEN ====================
 export default function ProfileScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const { schoolConfig: schoolConfigParam } = useLocalSearchParams();
@@ -676,7 +414,6 @@ export default function ProfileScreen() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [fadeAnim] = useState(new RNAnimated.Value(0));
   const [storedUserId, setStoredUserId] = useState(null);
-  const [cachedRole, setCachedRole] = useState(null);
   const [editNameModalVisible, setEditNameModalVisible] = useState(false);
   const [editNameValue, setEditNameValue] = useState('');
   const [savingName, setSavingName] = useState(false);
@@ -685,8 +422,10 @@ export default function ProfileScreen() {
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
 
+  // Handle scroll to change status bar style
   const handleScroll = (event) => {
     const scrollY = event.nativeEvent.contentOffset.y;
+    // Change status bar style when scrolled past the header (approximately 200px)
     const shouldBeDark = scrollY > 250;
     if (shouldBeDark !== isScrolledPastHeader) {
       setIsScrolledPastHeader(shouldBeDark);
@@ -701,35 +440,37 @@ export default function ProfileScreen() {
     return parts[0][0] + parts[parts.length - 1][0];
   }, []);
 
-  // Get stored userId on mount — also grab cached role for skeleton
+  // Get stored userId on mount
   useEffect(() => {
     (async () => {
+      // Check regular user first
       let stored = await SecureStore.getItemAsync('user');
       if (stored) {
         const parsed = JSON.parse(stored);
         setStoredUserId(parsed.id);
-        if (parsed.role?.name) setCachedRole(parsed.role.name);
         return;
       }
+
+      // Fallback: check transport user (Driver/Conductor)
       stored = await SecureStore.getItemAsync('transportUser');
       if (stored) {
         const parsed = JSON.parse(stored);
         setStoredUserId(parsed.id);
-        if (parsed.role?.name) setCachedRole(parsed.role.name);
       }
-      // Also try cached userRole key
-      const cachedRoleStr = await SecureStore.getItemAsync('userRole');
-      if (cachedRoleStr) setCachedRole(cachedRoleStr);
     })();
   }, []);
 
+  // Fetch user data with TanStack Query
   const { data: userData, isLoading: loading, refetch } = useQuery({
     queryKey: ['user-profile', storedUserId],
     queryFn: async () => {
       console.log('🔄 Profile - Fetching user data via Mobile API...');
+      // Use mobile-friendly endpoint (no session check required)
       const res = await api.get(`/mobile/user/${storedUserId}`);
       console.log('🔄 Profile - User data received:', res.data ? 'YES' : 'NO');
 
+      // Update SecureStore with minimal data to avoid size warning
+      // SecureStore has a 2048 byte limit, so we only store essential fields
       if (res.data) {
         const minimalUser = {
           id: res.data.id,
@@ -738,6 +479,7 @@ export default function ProfileScreen() {
           profilePicture: res.data.profilePicture,
           role: res.data.role,
           schoolId: res.data.schoolId,
+          // Store minimal nested data
           ...(res.data.studentData && {
             studentData: {
               name: res.data.studentData.name,
@@ -778,18 +520,20 @@ export default function ProfileScreen() {
       return res.data;
     },
     enabled: !!storedUserId,
-    staleTime: 1000 * 60 * 2,
+    staleTime: 1000 * 60 * 2, // Cache for 2 minutes
     refetchOnMount: true,
+    // Use stored data as initial data for instant display
     initialData: async () => {
       const stored = await SecureStore.getItemAsync('user');
       if (stored) return JSON.parse(stored);
       return undefined;
     },
-    initialDataUpdatedAt: 0,
+    initialDataUpdatedAt: 0, // Force refetch even with initialData
   });
 
+
   const user = userData;
-  console.warn(user, 'user here');
+  console.warn(user, 'user here')
   const role = user?.role?.name;
 
   const handleRefresh = async () => {
@@ -799,38 +543,35 @@ export default function ProfileScreen() {
       await refetch();
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      console.error('Refresh failed:', error);
+      console.error("Refresh failed:", error);
     } finally {
       setRefreshing(false);
     }
   };
 
-  // Show skeleton during manual refresh as well
-  if (refreshing) {
-    return <ProfileSkeleton role={role || cachedRole} />;
-  }
-
   const handleMenuPress = async (item) => {
     if (item.action === 'editName') {
+      // Get current name and show modal
       const currentName = getNestedValue(user, config.fieldMappings.name, '');
       setEditNameValue(currentName);
       setEditNameModalVisible(true);
     } else if (item.action === 'viewSchoolProfile') {
       if (user?.schoolId) {
+        // Construct URL - update base URL as per your environment
         const url = `https://school.edubreezy.com/explore/schools/${user.schoolId}?ref=com.kinzix.edubreezy`;
         try {
           const supported = await Linking.canOpenURL(url);
           if (supported) {
             await Linking.openURL(url);
           } else {
-            Alert.alert('Error', 'Cannot open school profile URL.');
+            Alert.alert("Error", "Cannot open school profile URL.");
           }
         } catch (err) {
-          console.error('Link error:', err);
-          Alert.alert('Error', 'Failed to open link.');
+          console.error("Link error:", err);
+          Alert.alert("Error", "Failed to open link.");
         }
       } else {
-        Alert.alert('Info', 'School information is missing.');
+        Alert.alert("Info", "School information is missing.");
       }
     } else if (item.route) {
       router.push(item.route);
@@ -846,13 +587,17 @@ export default function ProfileScreen() {
         style: 'destructive',
         onPress: async () => {
           setIsLoggingOut(true);
+          // Simulate delay for better UX
           setTimeout(async () => {
             try {
+              // CRITICAL: Before soft logout, capture the LATEST refresh token
+              // Supabase rotates refresh tokens, so we need to save the current one
               const { data: { session } } = await supabase.auth.getSession();
               const currentSchool = await getCurrentSchool();
 
               if (session?.refresh_token && currentSchool?.schoolCode && user?.id) {
                 console.log('💾 Saving latest refresh token before logout...');
+                // Import dynamically to avoid circular deps
                 const { updateProfileSession } = await import('../../lib/profileManager');
                 await updateProfileSession(currentSchool.schoolCode, user.id, {
                   access_token: session.access_token,
@@ -861,6 +606,8 @@ export default function ProfileScreen() {
                 console.log('✅ Latest refresh token saved to profile');
               }
 
+              // Clear in-memory session data (SecureStore)
+              // For transport roles, stop background location task first
               if (role === 'DRIVER' || role === 'CONDUCTOR') {
                 try {
                   await stopForegroundLocationTracking();
@@ -872,11 +619,16 @@ export default function ProfileScreen() {
               await SecureStore.deleteItemAsync('userRole');
               await SecureStore.deleteItemAsync('token');
 
+              // DO NOT call supabase.auth.signOut() - this is a soft logout
+              // The refresh token in the saved profile remains valid
+
               if (currentSchool?.schoolCode) {
+                // Check if there are other saved profiles for this school
                 const { getProfilesForSchool } = await import('../../lib/profileManager');
                 const savedProfiles = await getProfilesForSchool(currentSchool.schoolCode);
 
                 if (savedProfiles && savedProfiles.length > 0) {
+                  // Redirect to profile-selector with school data
                   router.replace({
                     pathname: '/(auth)/profile-selector',
                     params: {
@@ -887,9 +639,11 @@ export default function ProfileScreen() {
                     },
                   });
                 } else {
+                  // No saved profiles, go to schoolcode
                   router.replace('/(auth)/schoolcode');
                 }
               } else {
+                // Fallback to schoolcode if no saved school data
                 router.replace('/(auth)/schoolcode');
               }
             } catch (error) {
@@ -912,6 +666,7 @@ export default function ProfileScreen() {
     setImageViewerVisible(false);
   };
 
+  // Handle profile photo upload (only for non-students)
   const handleProfilePhotoUpload = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
@@ -931,12 +686,20 @@ export default function ProfileScreen() {
             if (uploadedFiles?.[0]?.url || uploadedFiles?.url) {
               const photoUrl = uploadedFiles?.[0]?.url || uploadedFiles?.url;
               try {
+                // Update user's profile picture in database using mobile endpoint
                 await api.put(`/mobile/user/${user.id}`, {
-                  profilePicture: photoUrl,
+                  profilePicture: photoUrl
                 });
+
+                // Refresh profile data
                 await refetch();
+
+                // Update in persistent storage for profile selector
                 await updateProfilePicture(user.id, photoUrl);
+
+                // Emit event to update tab bar and home header
                 emitProfilePictureChange(photoUrl);
+
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
                 Alert.alert('Success', 'Profile photo updated successfully!');
               } catch (updateError) {
@@ -954,6 +717,7 @@ export default function ProfileScreen() {
         }
       );
 
+      // Handle case where user cancelled picker
       if (result === null) {
         setIsUploadingPhoto(false);
       }
@@ -964,68 +728,84 @@ export default function ProfileScreen() {
     }
   };
 
-  // ── Show skeleton instead of spinner ──
-  if (loading || !storedUserId || !user || !role) {
-    return <ProfileSkeleton role={cachedRole} />;
+
+  if (loading || !storedUserId) {
+    return (
+      <View style={styles.loaderContainer}>
+        <ActivityIndicator size="large" color="#0469ff" />
+        <Text style={{ marginTop: 12, color: '#666', fontSize: 14 }}>Loading profile...</Text>
+      </View>
+    );
+  }
+
+  if (!user || !role) {
+    return (
+      <View style={styles.loaderContainer}>
+        <ActivityIndicator size="large" color="#0469ff" />
+      </View>
+    );
   }
 
   // Get configuration for current role
   const config = PROFILE_CONFIG[role] || PROFILE_CONFIG.STUDENT;
 
+  // Get mapped values
   const userName = getNestedValue(user, config.fieldMappings.name);
   const userRole = ROLE_DISPLAY_NAMES[role] || getNestedValue(user, config.fieldMappings.role);
-  const schoolName =
-    getNestedValue(user, config.fieldMappings.school) !== 'N/A'
-      ? getNestedValue(user, config.fieldMappings.school)
-      : getNestedValue(user, 'school.name');
+  const schoolName = getNestedValue(user, config.fieldMappings.school) !== 'N/A'
+    ? getNestedValue(user, config.fieldMappings.school)
+    : getNestedValue(user, 'school.name'); // Fallback to top-level school.name
   const profilePicture = getNestedValue(user, config.fieldMappings.profilePicture, 'https://via.placeholder.com/150');
+
+  // Get role color for avatar
   const roleColor = ROLE_COLORS[role] || '#0469ff';
 
   return (
     <View style={styles.safeArea}>
       <StatusBar
-        barStyle={isScrolledPastHeader ? 'dark-content' : 'light-content'}
-        backgroundColor={isScrolledPastHeader ? '#fff' : '#0469ff'}
+        barStyle={isScrolledPastHeader ? "dark-content" : "light-content"}
+
+        backgroundColor={isScrolledPastHeader ? "#fff" : "#0469ff"}
         translucent={false}
       />
 
       <View style={styles.container}>
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={[styles.content, isTablet && styles.contentTablet]}
+          contentContainerStyle={[
+            styles.content,
+            isTablet && styles.contentTablet
+          ]}
           showsVerticalScrollIndicator={false}
           onScroll={handleScroll}
           scrollEventThrottle={16}
           refreshControl={
             <RefreshControl
-              refreshing={false}
+              refreshing={refreshing}
               onRefresh={handleRefresh}
               tintColor="#0469ff"
-              colors={['#0469ff']}
-              title="Refreshing..."
+              colors={['#0469ff']} // For Android
+              title="Refreshing..." // Optional: adds text on iOS
             />
           }
         >
-          {/* Profile Header */}
-          <Animated2.View entering={FadeInUp.duration(600)}>
+          {/* Profile Header with Gradient - Matching Homepage */}
+          <Animated.View entering={FadeInUp.duration(600)}>
             <LinearGradient
               colors={['#0469ff', '#0256d0']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
-              style={[
-                styles.profileHeader,
-                isTablet && styles.profileHeaderTablet,
-                {
-                  borderBottomLeftRadius: 32,
-                  borderBottomRightRadius: 32,
-                  marginHorizontal: isTablet ? -32 : -16,
-                  paddingHorizontal: isTablet ? 32 : 16,
-                  marginTop: -16,
-                  paddingTop: insets.top + 16,
-                  overflow: 'hidden',
-                },
-              ]}
+              style={[styles.profileHeader, isTablet && styles.profileHeaderTablet, {
+                borderBottomLeftRadius: 32,
+                borderBottomRightRadius: 32,
+                marginHorizontal: isTablet ? -32 : -16,
+                paddingHorizontal: isTablet ? 32 : 16,
+                marginTop: -16,
+                paddingTop: insets.top + 16,
+                overflow: 'hidden',
+              }]}
             >
+              {/* Background Pattern - Matching Homepage */}
               <Text style={{ position: 'absolute', top: 10, right: 80, fontSize: 40, color: 'rgba(255,255,255,0.1)', fontWeight: 'bold' }}>+</Text>
               <Text style={{ position: 'absolute', top: 60, right: 30, fontSize: 24, color: 'rgba(255,255,255,0.08)', fontWeight: 'bold' }}>×</Text>
               <Text style={{ position: 'absolute', bottom: 40, right: 100, fontSize: 32, color: 'rgba(255,255,255,0.08)', fontWeight: 'bold' }}>÷</Text>
@@ -1033,7 +813,6 @@ export default function ProfileScreen() {
               <Text style={{ position: 'absolute', bottom: 30, left: '60%', fontSize: 28, color: 'rgba(255,255,255,0.1)', fontWeight: 'bold' }}>○</Text>
               <View style={{ position: 'absolute', top: -50, right: -50, width: 220, height: 220, borderRadius: 110, backgroundColor: 'rgba(255,255,255,0.05)' }} />
               <View style={{ position: 'absolute', bottom: -60, left: -40, width: 180, height: 180, borderRadius: 90, backgroundColor: 'rgba(255,255,255,0.05)' }} />
-
               <HapticTouchable
                 onPress={role === 'STUDENT' ? openImageViewer : handleProfilePhotoUpload}
                 onLongPress={openImageViewer}
@@ -1048,6 +827,7 @@ export default function ProfileScreen() {
                     ) : (
                       <Image source={{ uri: profilePicture }} style={[styles.avatar, isTablet && styles.avatarTablet, { borderColor: '#fff' }]} />
                     )}
+                    {/* Camera badge for non-students */}
                     {role !== 'STUDENT' && !isUploadingPhoto && (
                       <View style={styles.cameraBadge}>
                         <Camera size={14} color="#0469ff" />
@@ -1056,18 +836,28 @@ export default function ProfileScreen() {
                     {!isUploadingPhoto && <View style={[styles.statusDot, isTablet && styles.statusDotTablet]} />}
                   </View>
                 ) : (
-                  <View style={[styles.avatarContainer, { marginBottom: 16 }, isTablet && styles.avatarContainerTablet]}>
+                  <View style={[
+                    styles.avatarContainer,
+                    { marginBottom: 16 },
+                    isTablet && styles.avatarContainerTablet
+                  ]}>
                     {isUploadingPhoto ? (
                       <View style={[styles.avatar, styles.avatarFallback, isTablet && styles.avatarTablet, { backgroundColor: 'rgba(255,255,255,0.8)', justifyContent: 'center', alignItems: 'center' }]}>
                         <ActivityIndicator size="large" color="#0469ff" />
                       </View>
                     ) : (
-                      <View style={[styles.avatar, styles.avatarFallback, isTablet && styles.avatarTablet, { backgroundColor: '#fff' }]}>
+                      <View style={[
+                        styles.avatar,
+                        styles.avatarFallback,
+                        isTablet && styles.avatarTablet,
+                        { backgroundColor: '#fff' }
+                      ]}>
                         <Text style={[styles.fallbackText, isTablet && styles.fallbackTextTablet, { color: roleColor }]}>
                           {userName ? getInitials(userName) : 'U'}
                         </Text>
                       </View>
                     )}
+                    {/* Camera badge for non-students */}
                     {role !== 'STUDENT' && !isUploadingPhoto && (
                       <View style={styles.cameraBadge}>
                         <Camera size={14} color="#0469ff" />
@@ -1077,7 +867,6 @@ export default function ProfileScreen() {
                   </View>
                 )}
               </HapticTouchable>
-
               <Text style={[styles.userName, isSmallDevice && styles.userNameSmall, isTablet && styles.userNameTablet, { color: '#fff' }]}>{userName}</Text>
               <View style={[styles.roleBadge, { backgroundColor: 'rgba(255,255,255,0.2)' }]}>
                 <Text style={[styles.userRole, { color: '#fff' }]}>{userRole}</Text>
@@ -1089,15 +878,15 @@ export default function ProfileScreen() {
                 </Text>
               </View>
             </LinearGradient>
-          </Animated2.View>
+          </Animated.View>
 
-          {/* Stats Cards */}
+          {/* Stats Cards - only show if stats exist */}
           {config.stats && config.stats.length > 0 && (
             <View style={styles.statsContainer}>
               {config.stats.map((stat, index) => {
                 const value = stat.dataPath ? getNestedValue(user, stat.dataPath, stat.value) : stat.value;
                 return (
-                  <Animated2.View
+                  <Animated.View
                     key={stat.key}
                     entering={FadeInDown.delay(100 + index * 100).duration(600)}
                     style={[styles.statCard, { backgroundColor: stat.color + '15' }]}
@@ -1105,24 +894,30 @@ export default function ProfileScreen() {
                     <Text style={styles.statEmoji}>{stat.icon}</Text>
                     <Text style={[styles.statValue, { color: stat.color }]}>{value}</Text>
                     <Text style={styles.statLabel}>{stat.label}</Text>
-                  </Animated2.View>
+                  </Animated.View>
                 );
               })}
             </View>
           )}
 
-          {/* Assigned Vehicle Card */}
+          {/* Assigned Vehicle Card - for Driver/Conductor */}
           {config.showVehicleCard && user?.transportStaffData && (() => {
-            const routeAssignment =
-              user.transportStaffData.driverRouteAssignments?.[0] ||
+            // Get vehicle from route assignments or vehicle assignments
+            const routeAssignment = user.transportStaffData.driverRouteAssignments?.[0] ||
               user.transportStaffData.conductorRouteAssignments?.[0];
             const vehicle = routeAssignment?.vehicle || user.transportStaffData.vehicleAssignments?.[0]?.vehicle;
             const route = routeAssignment?.route;
 
+            console.log('🚌 Profile - showVehicleCard:', config.showVehicleCard);
+            console.log('🚌 Profile - transportStaffData:', user.transportStaffData);
+            console.log('🚌 Profile - driverRouteAssignments:', user.transportStaffData.driverRouteAssignments);
+            console.log('🚌 Profile - routeAssignment:', routeAssignment);
+            console.log('🚌 Profile - vehicle:', vehicle);
+
             if (!vehicle) return null;
 
             return (
-              <Animated2.View entering={FadeInDown.delay(350).duration(600)} style={styles.section}>
+              <Animated.View entering={FadeInDown.delay(350).duration(600)} style={styles.section}>
                 <Text style={styles.sectionTitle}>Assigned Vehicle</Text>
                 <HapticTouchable onPress={() => router.push('/(screens)/transport/my-vehicle')}>
                   <View style={styles.vehicleCard}>
@@ -1167,12 +962,12 @@ export default function ProfileScreen() {
                     )}
                   </View>
                 </HapticTouchable>
-              </Animated2.View>
+              </Animated.View>
             );
           })()}
 
           {/* Contact Info */}
-          <Animated2.View entering={FadeInDown.delay(400).duration(600)} style={styles.section}>
+          <Animated.View entering={FadeInDown.delay(400).duration(600)} style={styles.section}>
             <Text style={styles.sectionTitle}>Contact Information</Text>
             <View style={styles.infoCard}>
               {config.contactInfo.map((info, index) => {
@@ -1195,37 +990,47 @@ export default function ProfileScreen() {
                 );
               })}
             </View>
-          </Animated2.View>
+          </Animated.View>
 
-          {/* Additional Info */}
+          {/* Additional Info Section */}
           {config.additionalInfo && config.additionalInfo.length > 0 && (() => {
+            // Filter to only show items with actual values (exclude null, N/A, empty, and 0)
             const validItems = config.additionalInfo.filter((info) => {
               const value = getNestedValue(user, info.dataPath, null);
+              // Exclude null, N/A, empty string, and 0 (which is often a placeholder)
               return value !== null && value !== 'N/A' && value !== '' && value !== 0;
             });
 
             if (validItems.length === 0) return null;
 
             return (
-              <Animated2.View entering={FadeInDown.delay(450).duration(600)} style={styles.section}>
+              <Animated.View entering={FadeInDown.delay(450).duration(600)} style={styles.section}>
                 <Text style={styles.sectionTitle}>Additional Information</Text>
                 <View style={styles.infoCard}>
                   {validItems.map((info, index) => {
                     let value = getNestedValue(user, info.dataPath);
 
+                    // Handle array values
                     if (info.isArray && Array.isArray(value)) {
-                      value = info.displayKey ? value.map((item) => item[info.displayKey]).join(', ') : value.join(', ');
+                      if (info.displayKey) {
+                        value = value.map(item => item[info.displayKey]).join(', ');
+                      } else {
+                        value = value.join(', ');
+                      }
                     }
 
-                    if (
-                      (info.isDate || info.key === 'dob' || info.key === 'licenseExpiry' || info.key === 'joiningDate' || info.key === 'admissionDate') &&
-                      value &&
-                      value !== 'N/A'
-                    ) {
+                    // Format date fields
+                    if ((info.isDate || info.key === 'dob' || info.key === 'licenseExpiry' || info.key === 'joiningDate' || info.key === 'admissionDate') && value && value !== 'N/A') {
                       try {
                         const date = new Date(value);
-                        value = date.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
-                      } catch (e) { }
+                        value = date.toLocaleDateString('en-IN', {
+                          day: 'numeric',
+                          month: 'long',
+                          year: 'numeric'
+                        });
+                      } catch (e) {
+                        // Keep original value if parsing fails
+                      }
                     }
 
                     return (
@@ -1239,19 +1044,22 @@ export default function ProfileScreen() {
                     );
                   })}
                 </View>
-              </Animated2.View>
+              </Animated.View>
             );
           })()}
 
-          {/* Linked Children */}
+          {/* Linked Children Section */}
           {config.childrenSection && user?.parentData?.studentLinks?.length > 0 && (
-            <Animated2.View entering={FadeInDown.delay(480).duration(600)} style={styles.section}>
+            <Animated.View entering={FadeInDown.delay(480).duration(600)} style={styles.section}>
               <Text style={styles.sectionTitle}>My Children</Text>
               <View style={styles.menuContainer}>
                 {user.parentData.studentLinks.map((link, index) => (
                   <View
                     key={link.id}
-                    style={[styles.menuItem, index === user.parentData.studentLinks.length - 1 && styles.lastMenuItem]}
+                    style={[
+                      styles.menuItem,
+                      index === user.parentData.studentLinks.length - 1 && styles.lastMenuItem
+                    ]}
                   >
                     <View style={styles.avatarContainer}>
                       {link.student?.user?.profilePicture &&
@@ -1262,7 +1070,14 @@ export default function ProfileScreen() {
                           style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#eee' }}
                         />
                       ) : (
-                        <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#E3F2FD', alignItems: 'center', justifyContent: 'center' }}>
+                        <View style={{
+                          width: 40,
+                          height: 40,
+                          borderRadius: 20,
+                          backgroundColor: '#E3F2FD',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}>
                           <Text style={{ fontSize: 16, fontWeight: '600', color: '#0469ff' }}>
                             {link.student?.name ? getInitials(link.student.name) : 'S'}
                           </Text>
@@ -1270,30 +1085,39 @@ export default function ProfileScreen() {
                       )}
                     </View>
                     <View style={{ flex: 1, marginLeft: 12 }}>
-                      <Text style={{ fontSize: 16, fontWeight: '600', color: '#111' }}>{link.student?.name || 'Loading...'}</Text>
+                      <Text style={{ fontSize: 16, fontWeight: '600', color: '#111' }}>
+                        {link.student?.name || 'Loading...'}
+                      </Text>
                       <Text style={{ fontSize: 13, color: '#666' }}>
-                        {link.student?.class ? `Class ${link.student.class.className} - ${link.student.section?.name} • ` : ''}
-                        {link.relation}
+                        {link.student?.class ? `Class ${link.student.class.className} - ${link.student.section?.name} • ` : ''}{link.relation}
                       </Text>
                     </View>
                     <View style={{ backgroundColor: '#E0F2FE', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
-                      <Text style={{ fontSize: 11, fontWeight: '600', color: '#0284C7' }}>{link.student?.admissionNo || 'ID'}</Text>
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: '#0284C7' }}>
+                        {link.student?.admissionNo || 'ID'}
+                      </Text>
                     </View>
                   </View>
                 ))}
               </View>
-            </Animated2.View>
+            </Animated.View>
           )}
 
-          {/* Quick Actions - Director / Principal / Accountant */}
-          {(role === 'DIRECTOR' || role === 'PRINCIPAL' || role === 'ACCOUNTANT') && (
-            <Animated2.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
+          {/* Menu Items - Only for DIRECTOR and PRINCIPAL */}
+          {(role === 'DIRECTOR' || role === 'PRINCIPAL') && (
+            <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
               <Text style={styles.sectionTitle}>Quick Actions</Text>
               <View style={styles.menuContainer}>
                 {config.menuItems.map((item, index) => (
-                  <Animated2.View key={item.id} entering={FadeInRight.delay(600 + index * 80).duration(500)}>
+                  <Animated.View
+                    key={item.id}
+                    entering={FadeInRight.delay(600 + index * 80).duration(500)}
+                  >
                     <HapticTouchable onPress={() => handleMenuPress(item)}>
-                      <View style={[styles.menuItem, index === config.menuItems.length - 1 && styles.lastMenuItem]}>
+                      <View style={[
+                        styles.menuItem,
+                        index === config.menuItems.length - 1 && styles.lastMenuItem
+                      ]}>
                         <View style={[styles.menuIconContainer, { backgroundColor: item.color + '15' }]}>
                           <item.icon size={20} color={item.color} />
                         </View>
@@ -1303,14 +1127,14 @@ export default function ProfileScreen() {
                         </View>
                       </View>
                     </HapticTouchable>
-                  </Animated2.View>
+                  </Animated.View>
                 ))}
               </View>
-            </Animated2.View>
+            </Animated.View>
           )}
 
-          {/* Logout */}
-          <Animated2.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
+          {/* Logout Section */}
+          <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
             <View style={styles.menuContainer}>
               <HapticTouchable onPress={handleLogout}>
                 <View style={[styles.menuItem, styles.lastMenuItem]}>
@@ -1324,15 +1148,17 @@ export default function ProfileScreen() {
                 </View>
               </HapticTouchable>
             </View>
-          </Animated2.View>
-
-          {/* Footer */}
+          </Animated.View>
+          {/* Footer Info — Blinkit style */}
           <View style={styles.footer}>
             <Text style={styles.footerTagline}>
-              India's smartest{'\n'}school ERP <Text style={{ color: '#EF4444' }}>❤️</Text>
+              India's smartest{"\n"}school ERP <Text style={{ color: '#EF4444' }}>❤️</Text>
             </Text>
             <View style={styles.footerDivider} />
-            <Image source={require('../../assets/kinzix.png')} style={styles.kinzixLogo} />
+            <Image
+              source={require('../../assets/kinzix.png')}
+              style={styles.kinzixLogo}
+            />
             <Text style={styles.footerVersion}>
               v{Constants.expoConfig?.version || Constants.manifest?.version || '1.0.0'}
             </Text>
@@ -1340,11 +1166,18 @@ export default function ProfileScreen() {
         </ScrollView>
 
         {/* Image Viewer Modal */}
-        <Modal visible={imageViewerVisible} transparent={true} animationType="fade" onRequestClose={closeImageViewer} statusBarTranslucent>
+        <Modal
+          visible={imageViewerVisible}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={closeImageViewer}
+          statusBarTranslucent
+        >
           <TouchableWithoutFeedback onPress={closeImageViewer}>
             <View style={styles.modalOverlay}>
               <TouchableWithoutFeedback>
                 <View style={styles.modalContent}>
+                  {/* Close Button */}
                   <View style={styles.closeButton}>
                     <HapticTouchable onPress={closeImageViewer}>
                       <View style={styles.closeButtonInner}>
@@ -1352,9 +1185,17 @@ export default function ProfileScreen() {
                       </View>
                     </HapticTouchable>
                   </View>
+
+                  {/* Profile Image - Circular */}
                   <View style={styles.imageContainer}>
-                    <Image source={{ uri: profilePicture }} style={styles.fullImage} contentFit="cover" />
+                    <Image
+                      source={{ uri: profilePicture }}
+                      style={styles.fullImage}
+                      contentFit="cover"
+                    />
                   </View>
+
+                  {/* User Info Overlay */}
                   <View style={styles.userInfoOverlay}>
                     <Text style={styles.overlayName}>{userName}</Text>
                     <Text style={styles.overlayRole}>{userRole}</Text>
@@ -1365,14 +1206,20 @@ export default function ProfileScreen() {
           </TouchableWithoutFeedback>
         </Modal>
 
-        {/* Edit Name Modal */}
-        <Modal visible={editNameModalVisible} transparent={true} animationType="fade" onRequestClose={() => setEditNameModalVisible(false)}>
+        {/* Edit Name Modal - Cross platform replacement for Alert.prompt */}
+        <Modal
+          visible={editNameModalVisible}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={() => setEditNameModalVisible(false)}
+        >
           <TouchableWithoutFeedback onPress={() => setEditNameModalVisible(false)}>
             <View style={styles.editNameModalOverlay}>
               <TouchableWithoutFeedback>
                 <View style={styles.editNameModalContent}>
                   <Text style={styles.editNameModalTitle}>Edit Name</Text>
                   <Text style={styles.editNameModalSubtitle}>Enter your full name</Text>
+
                   <TextInput
                     style={styles.editNameInput}
                     value={editNameValue}
@@ -1381,10 +1228,15 @@ export default function ProfileScreen() {
                     placeholderTextColor="#9CA3AF"
                     autoFocus={true}
                   />
+
                   <View style={styles.editNameModalButtons}>
-                    <HapticTouchable onPress={() => setEditNameModalVisible(false)} style={styles.editNameCancelButton}>
+                    <HapticTouchable
+                      onPress={() => setEditNameModalVisible(false)}
+                      style={styles.editNameCancelButton}
+                    >
                       <Text style={styles.editNameCancelText}>Cancel</Text>
                     </HapticTouchable>
+
                     <HapticTouchable
                       onPress={async () => {
                         if (!editNameValue || editNameValue.trim().length < 2) {
@@ -1393,7 +1245,11 @@ export default function ProfileScreen() {
                         }
                         setSavingName(true);
                         try {
-                          const updateData = { id: user.id, role: role, updates: { name: editNameValue.trim() } };
+                          const updateData = {
+                            id: user.id,
+                            role: role,
+                            updates: { name: editNameValue.trim() }
+                          };
                           await api.put('/auth/user', updateData);
                           setEditNameModalVisible(false);
                           Alert.alert('Success', 'Name updated successfully!');
@@ -1409,7 +1265,11 @@ export default function ProfileScreen() {
                       style={styles.editNameSaveButton}
                       disabled={savingName}
                     >
-                      {savingName ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.editNameSaveText}>Save</Text>}
+                      {savingName ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <Text style={styles.editNameSaveText}>Save</Text>
+                      )}
                     </HapticTouchable>
                   </View>
                 </View>
@@ -1419,7 +1279,11 @@ export default function ProfileScreen() {
         </Modal>
 
         {/* Logout Modal */}
-        <Modal visible={isLoggingOut} transparent={true} animationType="fade">
+        <Modal
+          visible={isLoggingOut}
+          transparent={true}
+          animationType="fade"
+        >
           <View style={styles.logoutModalOverlay}>
             <View style={styles.logoutContent}>
               <ActivityIndicator size="large" color="#ffffff" />
@@ -1431,20 +1295,6 @@ export default function ProfileScreen() {
     </View>
   );
 }
-
-// ==================== STYLES ====================
-const skStyles = StyleSheet.create({
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 4,
-  },
-  menuRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-  },
-});
 
 const styles = StyleSheet.create({
   safeArea: {
@@ -1475,6 +1325,7 @@ const styles = StyleSheet.create({
   },
   avatarContainer: {
     position: 'relative',
+    // marginBottom: 16,
   },
   avatar: {
     width: isSmallDevice ? 80 : 100,
@@ -1527,6 +1378,7 @@ const styles = StyleSheet.create({
   userRole: {
     fontSize: 15,
     color: '#666',
+    // marginBottom: 8,
   },
   schoolBadge: {
     flexDirection: 'row',
@@ -1666,6 +1518,7 @@ const styles = StyleSheet.create({
     color: '#999',
     fontWeight: '300',
   },
+  // Modal Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.9)',
@@ -1693,10 +1546,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#0469ff',
   },
   fallbackText: { color: '#fff', fontSize: 50, fontWeight: 'bold' },
+
   imageContainer: {
     width: SCREEN_WIDTH * 0.85,
     height: SCREEN_WIDTH * 0.85,
-    borderRadius: (SCREEN_WIDTH * 0.85) / 2,
+    borderRadius: SCREEN_WIDTH * 0.85 / 2,
     overflow: 'hidden',
     backgroundColor: '#222',
     borderWidth: 5,
@@ -1720,8 +1574,11 @@ const styles = StyleSheet.create({
   overlayRole: {
     fontSize: 16,
     color: '#fff',
+    color: '#fff',
     opacity: 0.9,
   },
+
+  // Logout Modal Styles
   logoutModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
@@ -1739,6 +1596,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 12,
   },
+  // Vehicle Card Styles
   vehicleCard: {
     backgroundColor: '#fff',
     borderRadius: 16,
@@ -1788,13 +1646,13 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderTopWidth: 1,
     borderTopColor: '#f1f5f9',
-    flexWrap: 'wrap',
+    flexWrap: 'wrap', // Allow wrapping on small screens
   },
   vehicleStatItem: {
     alignItems: 'center',
     flex: 1,
     gap: 4,
-    minWidth: isSmallDevice ? 70 : 80,
+    minWidth: isSmallDevice ? 70 : 80, // Ensure minimum width on small devices
   },
   vehicleStatDivider: {
     width: 1,
@@ -1826,6 +1684,7 @@ const styles = StyleSheet.create({
     color: '#10b981',
     fontWeight: '600',
   },
+  // Responsive styles
   contentTablet: {
     paddingHorizontal: 32,
     width: '100%',
@@ -1881,6 +1740,7 @@ const styles = StyleSheet.create({
   fallbackTextTablet: {
     fontSize: 36,
   },
+  // Edit Name Modal styles
   editNameModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',

@@ -36,6 +36,7 @@ import * as SecureStore from 'expo-secure-store';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as Location from 'expo-location';
+import { MapPin } from 'lucide-react-native';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('screen');
 
@@ -153,7 +154,7 @@ const SchoolSearchItem = ({ school, onPress }) => (
         {school.name}
       </Text>
       <Text style={styles.searchResultLocation} numberOfLines={1}>
-        📍 {school.location || 'Location not available'}
+        {school.location || 'Location not available'}
       </Text>
       <Text style={styles.searchResultCode} numberOfLines={1}>
         Code: {school.schoolCode}
@@ -164,6 +165,42 @@ const SchoolSearchItem = ({ school, onPress }) => (
     </View>
   </TouchableOpacity>
 );
+
+// ─── Skeleton Loading Item ───
+const SkeletonSchoolItem = ({ index = 0 }) => {
+  const shimmer = useSharedValue(0);
+
+  useEffect(() => {
+    shimmer.value = withRepeat(
+      withTiming(1, { duration: 1200 }),
+      -1,
+      true
+    );
+  }, []);
+
+  const shimmerStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(shimmer.value, [0, 0.5, 1], [0.3, 0.6, 0.3], Extrapolate.CLAMP),
+  }));
+
+  return (
+    <Animated.View
+      entering={FadeIn.delay(index * 100).duration(300)}
+      style={styles.searchResultItem}
+    >
+      <View style={styles.searchResultIcon}>
+        <Animated.View style={[styles.skeletonThumb, shimmerStyle]} />
+      </View>
+      <View style={styles.searchResultInfo}>
+        <Animated.View style={[styles.skeletonLine, styles.skeletonLineName, shimmerStyle]} />
+        <Animated.View style={[styles.skeletonLine, styles.skeletonLineLocation, shimmerStyle]} />
+        <Animated.View style={[styles.skeletonLine, styles.skeletonLineCode, shimmerStyle]} />
+      </View>
+      <View style={styles.searchResultArrow}>
+        <Animated.View style={[styles.skeletonArrow, shimmerStyle]} />
+      </View>
+    </Animated.View>
+  );
+};
 
 export default function SchoolCodePage() {
   const router = useRouter();
@@ -185,7 +222,8 @@ export default function SchoolCodePage() {
   // ─── Geolocation state ───
   const [nearbySchools, setNearbySchools] = useState([]);
   const [userCity, setUserCity] = useState('');
-  const [locationLoading, setLocationLoading] = useState(true);
+  const [locationLoading, setLocationLoading] = useState(false);
+  const [locationPermissionGranted, setLocationPermissionGranted] = useState(null); // null = unknown, true/false
 
   const fadeIn = useSharedValue(0);
   const cardScale = useSharedValue(0.95);
@@ -207,68 +245,88 @@ export default function SchoolCodePage() {
     loadSavedCode();
   }, []);
 
-  // ─── Fetch nearby schools via geolocation on mount ───
+  // ─── Check if location permission is already granted on mount ───
   useEffect(() => {
-    const fetchNearbySchools = async () => {
+    const checkPermission = async () => {
       try {
-        setLocationLoading(true);
+        const { status } = await Location.getForegroundPermissionsAsync();
+        const granted = status === 'granted';
+        setLocationPermissionGranted(granted);
+        if (granted) {
+          // Permission already granted — auto-fetch nearby schools
+          fetchNearbySchools(true);
+        }
+      } catch (err) {
+        console.log('⚠️ Could not check location permission:', err);
+        setLocationPermissionGranted(false);
+      }
+    };
+    checkPermission();
+  }, []);
+
+  // ─── Fetch nearby schools (auto or on-demand via button) ───
+  const fetchNearbySchools = async (skipPermissionRequest = false) => {
+    try {
+      setLocationLoading(true);
+      if (!skipPermissionRequest) {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
           console.log('📍 Location permission denied');
           setLocationLoading(false);
+          setLocationPermissionGranted(false);
           return;
         }
-
-        const loc = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Low,
-        });
-
-        const [place] = await Location.reverseGeocodeAsync({
-          latitude: loc.coords.latitude,
-          longitude: loc.coords.longitude,
-        });
-
-        console.log('📍 Reverse geocode result:', JSON.stringify(place));
-
-        // Try multiple location levels: city, subregion (district), region (state)
-        const searchTerms = [
-          place?.city,
-          place?.subregion,
-          place?.region,
-        ].filter(Boolean);
-
-        const displayCity = place?.city || place?.subregion || place?.region || '';
-        setUserCity(displayCity);
-
-        if (searchTerms.length === 0) {
-          setLocationLoading(false);
-          return;
-        }
-
-        // Search with each term and merge unique results
-        const allSchools = new Map();
-        for (const term of searchTerms) {
-          try {
-            console.log('🔍 Searching schools with term:', term);
-            const res = await api.get(`/schools/search?q=${encodeURIComponent(term)}`);
-            const schools = res.data?.schools || [];
-            console.log(`✅ Found ${schools.length} schools for "${term}"`);
-            schools.forEach((s) => allSchools.set(s.id, s));
-          } catch (err) {
-            console.log(`⚠️ Search failed for "${term}":`, err.message);
-          }
-        }
-
-        setNearbySchools(Array.from(allSchools.values()));
-      } catch (err) {
-        console.log('❌ Location fetch error:', err);
-      } finally {
-        setLocationLoading(false);
+        setLocationPermissionGranted(true);
       }
-    };
 
-    fetchNearbySchools();
-  }, []);
+
+      const loc = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Low,
+      });
+
+      const [place] = await Location.reverseGeocodeAsync({
+        latitude: loc.coords.latitude,
+        longitude: loc.coords.longitude,
+      });
+
+      console.log('📍 Reverse geocode result:', JSON.stringify(place));
+
+      // Try multiple location levels: city, subregion (district), region (state)
+      const searchTerms = [
+        place?.city,
+        place?.subregion,
+        place?.region,
+      ].filter(Boolean);
+
+      const displayCity = place?.city || place?.subregion || place?.region || '';
+      setUserCity(displayCity);
+
+      if (searchTerms.length === 0) {
+        setLocationLoading(false);
+        return;
+      }
+
+      // Search with each term and merge unique results
+      const allSchools = new Map();
+      for (const term of searchTerms) {
+        try {
+          console.log('🔍 Searching schools with term:', term);
+          const res = await api.get(`/schools/search?q=${encodeURIComponent(term)}`);
+          const schools = res.data?.schools || [];
+          console.log(`✅ Found ${schools.length} schools for "${term}"`);
+          schools.forEach((s) => allSchools.set(s.id, s));
+        } catch (err) {
+          console.log(`⚠️ Search failed for "${term}":`, err.message);
+        }
+      }
+
+      setNearbySchools(Array.from(allSchools.values()));
+    } catch (err) {
+      console.log('❌ Location fetch error:', err);
+    } finally {
+      setLocationLoading(false);
+    }
+  };
 
   useEffect(() => {
     fadeIn.value = withTiming(1, { duration: 800 });
@@ -468,9 +526,8 @@ export default function SchoolCodePage() {
   const renderSearchContent = () => {
     if (searching) {
       return (
-        <View style={styles.searchStateContainer}>
-          <ActivityIndicator size="small" color="#2563EB" />
-          <Text style={styles.searchStateText}>Searching schools...</Text>
+        <View>
+          <SkeletonSchoolItem index={0} />
         </View>
       );
     }
@@ -522,9 +579,12 @@ export default function SchoolCodePage() {
     // Default state — show nearby schools from geolocation
     if (locationLoading) {
       return (
-        <View style={styles.searchStateContainer}>
-          <ActivityIndicator size="small" color="#2563EB" />
-          <Text style={styles.searchStateText}>Finding schools near you...</Text>
+        <View>
+          <View style={styles.nearbyHeader}>
+            <Animated.View entering={FadeIn.duration(300)} style={[styles.skeletonLine, { width: '50%', height: 14, marginBottom: 6 }]} />
+            <Animated.View entering={FadeIn.delay(100).duration(300)} style={[styles.skeletonLine, { width: '30%', height: 12 }]} />
+          </View>
+          <SkeletonSchoolItem index={0} />
         </View>
       );
     }
@@ -534,7 +594,7 @@ export default function SchoolCodePage() {
         <View>
           <View style={styles.nearbyHeader}>
             <Text style={styles.nearbyHeaderText}>
-              📍 Schools in {userCity}
+              Schools in {userCity}
             </Text>
             <Text style={styles.nearbySubtext}>
               {nearbySchools.length} school{nearbySchools.length !== 1 ? 's' : ''} found
@@ -647,27 +707,38 @@ export default function SchoolCodePage() {
                     {/* ─── Find School Tab ─── */}
                     {activeTab === 'find' && (
                       <View>
-                        <View style={[styles.searchInputWrapper, searchError && styles.inputWrapperError]}>
-                          <Text style={styles.searchIcon}>🔍</Text>
-                          <TextInput
-                            style={styles.searchInput}
-                            placeholder="Search by school name or city..."
-                            placeholderTextColor="#94A3B8"
-                            value={searchQuery}
-                            onChangeText={handleSearch}
-                            autoCorrect={false}
-                            autoCapitalize="none"
-                          />
-                          {searchQuery.length > 0 && (
+                        <View style={styles.searchRow}>
+                          <View style={[styles.searchInputWrapper, searchError && styles.inputWrapperError, { flex: 1 }]}>
+                            <Text style={styles.searchIcon}>🔍</Text>
+                            <TextInput
+                              style={styles.searchInput}
+                              placeholder="Search by school name or city..."
+                              placeholderTextColor="#94A3B8"
+                              value={searchQuery}
+                              onChangeText={handleSearch}
+                              autoCorrect={false}
+                              autoCapitalize="none"
+                            />
+                            {searchQuery.length > 0 && (
+                              <TouchableOpacity
+                                onPress={() => {
+                                  setSearchQuery('');
+                                  setSearchResults([]);
+                                  setSearchError('');
+                                }}
+                                style={styles.clearButton}
+                              >
+                                <Text style={styles.clearButtonText}>✕</Text>
+                              </TouchableOpacity>
+                            )}
+                          </View>
+                          {locationPermissionGranted === false && (
                             <TouchableOpacity
-                              onPress={() => {
-                                setSearchQuery('');
-                                setSearchResults([]);
-                                setSearchError('');
-                              }}
-                              style={styles.clearButton}
+                              onPress={() => fetchNearbySchools(false)}
+                              style={styles.gpsButton}
+                              activeOpacity={0.7}
                             >
-                              <Text style={styles.clearButtonText}>✕</Text>
+                              <MapPin size={18} color="#FFFFFF" />
                             </TouchableOpacity>
                           )}
                         </View>
@@ -920,7 +991,6 @@ const styles = StyleSheet.create({
     borderRadius: moderateScale(14),
     backgroundColor: '#F8FAFC',
     paddingHorizontal: moderateScale(12),
-    marginBottom: verticalScale(12),
   },
   searchIcon: {
     fontSize: moderateScale(16),
@@ -1235,5 +1305,53 @@ const styles = StyleSheet.create({
   kinzixLogo: {
     width: '100%',
     height: '100%',
+  },
+
+  // ─── Skeleton Loading ───
+  skeletonThumb: {
+    width: moderateScale(40),
+    height: moderateScale(40),
+    borderRadius: moderateScale(10),
+    backgroundColor: '#E2E8F0',
+  },
+  skeletonLine: {
+    height: moderateScale(10),
+    borderRadius: moderateScale(5),
+    backgroundColor: '#E2E8F0',
+    marginBottom: moderateScale(6),
+  },
+  skeletonLineName: {
+    width: '70%',
+    height: moderateScale(12),
+  },
+  skeletonLineLocation: {
+    width: '50%',
+    height: moderateScale(10),
+  },
+  skeletonLineCode: {
+    width: '35%',
+    height: moderateScale(9),
+  },
+  skeletonArrow: {
+    width: moderateScale(18),
+    height: moderateScale(18),
+    borderRadius: moderateScale(9),
+    backgroundColor: '#E2E8F0',
+  },
+
+  // ─── Search Row + GPS Button ───
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: moderateScale(8),
+    marginBottom: verticalScale(12),
+  },
+  gpsButton: {
+    width: moderateScale(44),
+    height: moderateScale(44),
+    borderRadius: moderateScale(12),
+    backgroundColor: '#2563EB',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

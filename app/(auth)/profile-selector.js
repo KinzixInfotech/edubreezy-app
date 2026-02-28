@@ -20,7 +20,7 @@ import { getProfilesForSchool, removeProfile, updateLastUsed, clearSchoolProfile
 import { tryRestoreSession, initTokenSync } from '../../lib/tokenManager';
 import HapticTouchable from '../components/HapticTouch';
 import { supabase } from '../../lib/supabase';
-import { stopBackgroundLocationTask } from '../../lib/transport-location-task';
+import { stopForegroundLocationTracking } from '../../lib/transport-location-task';
 import fcmService from '../../services/fcmService';
 import { onProfilePictureChange } from '../../lib/profileEvents';
 
@@ -158,7 +158,7 @@ export default function ProfileSelectorScreen() {
                             const parsedRole = JSON.parse(oldRole);
                             if (parsedRole === 'DRIVER' || parsedRole === 'CONDUCTOR') {
                                 console.log('[FCM] 🛑 Stopping background location for old driver/conductor profile');
-                                await stopBackgroundLocationTask();
+                                await stopForegroundLocationTracking();
                             }
                         }
                     }
@@ -260,8 +260,8 @@ export default function ProfileSelectorScreen() {
                     onPress: async () => {
                         // Stop background location tracking if running
                         try {
-                            await stopBackgroundLocationTask();
-                            console.log('✅ Background location task stopped on school switch');
+                            await stopForegroundLocationTracking();
+                            console.log('✅ Foreground location tracking stopped on school switch');
                         } catch (err) {
                             console.log('⚠️ No background task to stop:', err);
                         }
@@ -287,8 +287,8 @@ export default function ProfileSelectorScreen() {
                     onPress: async () => {
                         // Stop background location tracking if running
                         try {
-                            await stopBackgroundLocationTask();
-                            console.log('✅ Background location task stopped on logout');
+                            await stopForegroundLocationTracking();
+                            console.log('✅ Foreground location tracking stopped on logout');
                         } catch (err) {
                             console.log('⚠️ No background task to stop:', err);
                         }
@@ -342,7 +342,7 @@ export default function ProfileSelectorScreen() {
                         // If this was the only profile, stop background tasks
                         if (profiles.length === 1) {
                             try {
-                                await stopBackgroundLocationTask();
+                                await stopForegroundLocationTracking();
                                 console.log('✅ Last profile removed, background task stopped');
                             } catch (err) {
                                 console.log('⚠️ Error stopping background task:', err);

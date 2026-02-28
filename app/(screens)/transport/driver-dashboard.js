@@ -17,7 +17,7 @@ import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import * as Location from 'expo-location';
 import { API_BASE_URL } from '../../../lib/api';
-import { stopBackgroundLocationTask } from '../../../lib/transport-location-task';
+import { stopForegroundLocationTracking } from '../../../lib/transport-location-task';
 
 export default function DriverDashboard() {
     const [user, setUser] = useState(null);
@@ -117,7 +117,7 @@ export default function DriverDashboard() {
                 onPress: async () => {
                     // Stop background location tracking first
                     try {
-                        await stopBackgroundLocationTask();
+                        await stopForegroundLocationTracking();
                     } catch (e) {
                         console.warn('Could not stop location task:', e.message);
                     }

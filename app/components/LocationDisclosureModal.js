@@ -36,7 +36,7 @@ const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
                     <Text style={styles.title}>Location Tracking Disclosure</Text>
 
                     <Text style={styles.description}>
-                        EduBreezy collects location data to enable <Text style={styles.bold}>real-time tracking of school buses</Text> even when the app is <Text style={styles.bold}>closed or not in use</Text>.
+                        EduBreezy collects location data to enable <Text style={styles.bold}>real-time tracking of school buses</Text> while you are <Text style={styles.bold}>actively using the app</Text>.
                     </Text>
 
                     <View style={styles.infoBox}>

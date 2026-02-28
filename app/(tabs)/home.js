@@ -52,7 +52,7 @@ import StatusRow from '../components/StatusRow';
 import StatusViewer from '../components/StatusViewer';
 import StatusUpload from '../components/StatusUpload';
 import { useActiveTrip } from '../../hooks/useActiveTrip';
-import { stopBackgroundLocationTask, isBackgroundTaskRunning } from '../../lib/transport-location-task';
+import { stopForegroundLocationTracking, isForegroundTrackingActive } from '../../lib/transport-location-task';
 import ProfileAvatar from '../components/ProfileAvatar';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -5465,7 +5465,6 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                     )}
                 </View>
             </Animated.View>
-
             {/* Recent Notices */}
             <Animated.View entering={FadeInDown.delay(800).duration(600)} style={[styles.section, { marginBottom: 30 }]}>
                 <View style={styles.sectionHeader}>
@@ -5570,7 +5569,10 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
 
     const activeTrip = relevantTrips.find(t => t.status === 'IN_PROGRESS');
     const completedTrips = relevantTrips.filter(t => t.status === 'COMPLETED').length;
-    const totalTrips = relevantTrips.length;
+
+    // When driver has an assignment, they always have 2 trips (PICKUP + DROP) for the day
+    // Use max of actual trips vs expected trips from assignment
+    const totalTrips = assignment ? Math.max(relevantTrips.length, 2) : relevantTrips.length;
 
 
     // Force-complete mutation for stale trips
@@ -5649,15 +5651,15 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
         }
         setIsPollingLocation(false);
 
-        // Also stop background task if it's running
+        // Also stop foreground tracking if it's running
         try {
-            const isRunning = await isBackgroundTaskRunning();
+            const isRunning = isForegroundTrackingActive();
             if (isRunning) {
-                console.log('🧹 DriverView: Stopping background location task');
-                await stopBackgroundLocationTask();
+                console.log('🧹 DriverView: Stopping foreground location tracking');
+                await stopForegroundLocationTracking();
             }
         } catch (err) {
-            console.error('Error stopping background task:', err);
+            console.error('Error stopping foreground tracking:', err);
         }
     }, []);
 
@@ -5673,22 +5675,22 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
     }, [activeTrip?.id, vehicle?.id]);
 
     // Proactive cleanup: When DriverView mounts/updates with no active trip, 
-    // ensure background location task is stopped (handles coming back from active-trip screen)
+    // ensure foreground location tracking is stopped (handles coming back from active-trip screen)
     useEffect(() => {
-        const cleanupStaleBackgroundTask = async () => {
+        const cleanupStaleForegroundTracking = async () => {
             if (!activeTrip) {
                 try {
-                    const isRunning = await isBackgroundTaskRunning();
+                    const isRunning = isForegroundTrackingActive();
                     if (isRunning) {
-                        console.log('🧹 DriverView: No active trip but background task running - cleaning up');
-                        await stopBackgroundLocationTask();
+                        console.log('🧹 DriverView: No active trip but foreground tracking running - cleaning up');
+                        await stopForegroundLocationTracking();
                     }
                 } catch (err) {
                     console.error('Error in proactive cleanup:', err);
                 }
             }
         };
-        cleanupStaleBackgroundTask();
+        cleanupStaleForegroundTracking();
     }, [activeTrip]);
 
     // Handle app state changes - only restart location tracking, don't refetch (parent handles refresh)
@@ -6171,8 +6173,8 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                                             </>
                                         ) : (
                                             <>
-                                                <Text style={{ fontSize: 22 }}>🌅</Text>
-                                                <Text style={{ fontSize: 17, fontWeight: '800', color: '#fff' }}>Start PICKUP Trip</Text>
+
+                                                <Text style={{ fontSize: 17, fontWeight: '800', color: '#fff' }}>START PICK-UP TRIP</Text>
                                             </>
                                         )}
                                     </View>
@@ -6201,9 +6203,8 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                                             </>
                                         ) : (
                                             <>
-                                                <Text style={{ fontSize: 22 }}>🌆</Text>
                                                 <Text style={{ fontSize: 17, fontWeight: '800', color: '#fff' }}>
-                                                    {todaysPickupDone ? 'Start DROP Trip' : 'Start DROP (PICKUP pending)'}
+                                                    {todaysPickupDone ? 'START DROP Trip' : 'START DROP (PICKUP pending)'}
                                                 </Text>
                                             </>
                                         )}

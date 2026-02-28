@@ -25,18 +25,13 @@ export default {
             infoPlist: {
                 UIBackgroundModes: [
                     "fetch",
-                    "location",
                     "remote-notification"
                 ],
                 LSApplicationQueriesSchemes: [
                     "itms-apps"
                 ],
-                NSLocationAlwaysAndWhenInUseUsageDescription:
-                    "EduBreezy needs access to your location to track bus routes and provide real-time updates to parents.",
                 NSLocationWhenInUseUsageDescription:
-                    "EduBreezy needs access to your location to show your position on the map.",
-                NSLocationAlwaysUsageDescription:
-                    "EduBreezy needs background location access to track bus routes even when the app is closed."
+                    "EduBreezy needs access to your location to show your position on the map and track bus routes while the app is in use."
             }
         },
 
@@ -68,7 +63,6 @@ export default {
                 "WAKE_LOCK",
                 "android.permission.ACCESS_COARSE_LOCATION",
                 "android.permission.ACCESS_FINE_LOCATION",
-                "android.permission.ACCESS_BACKGROUND_LOCATION",
                 "android.permission.FOREGROUND_SERVICE",
                 "android.permission.FOREGROUND_SERVICE_LOCATION",
                 "android.permission.VIBRATE"
@@ -103,8 +97,8 @@ export default {
             [
                 "expo-location",
                 {
-                    locationAlwaysAndWhenInUsePermission: "EduBreezy needs access to your location to track bus routes.",
-                    isAndroidBackgroundLocationEnabled: true,
+                    locationWhenInUsePermission: "EduBreezy needs access to your location to track bus routes while the app is in use.",
+                    isAndroidBackgroundLocationEnabled: false,
                     isAndroidForegroundServiceEnabled: true
                 }
             ],

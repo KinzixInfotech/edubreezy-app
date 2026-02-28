@@ -59,8 +59,6 @@ export default {
                 }
             },
             permissions: [
-                "RECEIVE_BOOT_COMPLETED",
-                "WAKE_LOCK",
                 "android.permission.ACCESS_COARSE_LOCATION",
                 "android.permission.ACCESS_FINE_LOCATION",
                 "android.permission.FOREGROUND_SERVICE",
@@ -68,6 +66,7 @@ export default {
                 "android.permission.VIBRATE"
             ],
             blockedPermissions: [
+                "android.permission.ACCESS_BACKGROUND_LOCATION",
                 "android.permission.READ_MEDIA_IMAGES",
                 "android.permission.READ_MEDIA_VIDEO",
                 "android.permission.READ_MEDIA_AUDIO",

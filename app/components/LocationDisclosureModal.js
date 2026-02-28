@@ -1,79 +1,71 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
     Modal,
     View,
     Text,
     StyleSheet,
-    Dimensions,
+    Platform,
 } from 'react-native';
-import { MapPin, ShieldCheck, Info, CheckSquare, Square } from 'lucide-react-native';
+import { MapPin, ShieldCheck, Bell, Clock } from 'lucide-react-native';
 import HapticTouchable from './HapticTouch';
 
-const { width } = Dimensions.get('window');
-
+/**
+ * Bottom-sheet style disclosure modal.
+ * Explains foreground location tracking before permissions are requested.
+ * Required for Google Play compliance.
+ */
 const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
-    const [dontShowAgain, setDontShowAgain] = useState(false);
-
-    const handleAccept = () => {
-        onAccept(dontShowAgain); // pass preference up so parent can save it
-    };
-
     return (
         <Modal
-            animationType="fade"
+            animationType="slide"
             transparent={true}
             visible={visible}
             onRequestClose={onDecline}
         >
             <View style={styles.overlay}>
-                <View style={styles.modalContainer}>
-                    <View style={styles.iconContainer}>
-                        <View style={styles.iconBackground}>
-                            <MapPin size={32} color="#2563EB" />
+                <View style={styles.sheet}>
+                    {/* Handle */}
+                    <View style={styles.handle} />
+
+                    {/* Header */}
+                    <View style={styles.headerRow}>
+                        <View style={styles.iconBg}>
+                            <MapPin size={24} color="#2563EB" />
+                        </View>
+                        <View>
+                            <Text style={styles.title}>Location Tracking</Text>
+                            <Text style={styles.subtitle}>Foreground only</Text>
                         </View>
                     </View>
 
-                    <Text style={styles.title}>Location Tracking Disclosure</Text>
-
+                    {/* Explanation */}
                     <Text style={styles.description}>
-                        EduBreezy collects location data to enable <Text style={styles.bold}>real-time tracking of school buses</Text> while you are <Text style={styles.bold}>actively using the app</Text>.
+                        This app uses your device's GPS to share <Text style={styles.bold}>real-time bus location</Text> with parents while a trip is active. Tracking runs only in the <Text style={styles.bold}>foreground</Text> — it stops when you close the app or end the trip.
                     </Text>
 
+                    {/* Info items */}
                     <View style={styles.infoBox}>
                         <View style={styles.infoRow}>
-                            <ShieldCheck size={18} color="#10B981" />
-                            <Text style={styles.infoText}>Required for Bus Driver role safety services.</Text>
+                            <Bell size={16} color="#F59E0B" />
+                            <Text style={styles.infoText}>A notification will be shown while tracking is active.</Text>
                         </View>
                         <View style={styles.infoRow}>
-                            <Info size={18} color="#64748B" />
-                            <Text style={styles.infoText}>Ensures parents get accurate arrival updates.</Text>
+                            <ShieldCheck size={16} color="#10B981" />
+                            <Text style={styles.infoText}>Location data is used only for bus tracking and student safety.</Text>
+                        </View>
+                        <View style={styles.infoRow}>
+                            <Clock size={16} color="#64748B" />
+                            <Text style={styles.infoText}>Tracking stops automatically when the trip ends.</Text>
                         </View>
                     </View>
 
-                    <Text style={styles.disclosureText}>
-                        This data is used solely for the purpose of bus tracking and student safety. We do not sell your personal or location data.
-                    </Text>
-
-                    {/* Don't show again checkbox */}
-                    <HapticTouchable
-                        style={styles.checkboxRow}
-                        onPress={() => setDontShowAgain(prev => !prev)}
-                    >
-                        {dontShowAgain
-                            ? <CheckSquare size={20} color="#2563EB" />
-                            : <Square size={20} color="#94A3B8" />
-                        }
-                        <Text style={[styles.checkboxLabel, dontShowAgain && styles.checkboxLabelActive]}>
-                            Don't show again
-                        </Text>
-                    </HapticTouchable>
-
-                    <View style={styles.buttonContainer}>
-                        <HapticTouchable style={styles.declineButton} onPress={onDecline}>
+                    {/* Buttons */}
+                    <View style={styles.buttonRow}>
+                        <HapticTouchable style={styles.declineBtn} onPress={onDecline}>
                             <Text style={styles.declineText}>Not Now</Text>
                         </HapticTouchable>
-                        <HapticTouchable style={styles.acceptButton} onPress={handleAccept}>
-                            <Text style={styles.acceptText}>I Agree</Text>
+                        <HapticTouchable style={styles.acceptBtn} onPress={onAccept}>
+                            <Text style={styles.acceptText}>I Understand & Agree</Text>
                         </HapticTouchable>
                     </View>
                 </View>
@@ -85,124 +77,106 @@ const LocationDisclosureModal = ({ visible, onAccept, onDecline }) => {
 const styles = StyleSheet.create({
     overlay: {
         flex: 1,
-        backgroundColor: 'rgba(0, 0, 0, 0.6)',
-        justifyContent: 'center',
-        alignItems: 'center',
-        padding: 20,
+        backgroundColor: 'rgba(0,0,0,0.4)',
+        justifyContent: 'flex-end',
     },
-    modalContainer: {
-        width: '100%',
-        maxWidth: 400,
-        backgroundColor: '#FFFFFF',
-        borderRadius: 24,
+    sheet: {
+        backgroundColor: '#fff',
+        borderTopLeftRadius: 28,
+        borderTopRightRadius: 28,
         padding: 24,
-        alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.25,
-        shadowRadius: 10,
-        elevation: 5,
+        paddingTop: 12,
+        paddingBottom: Platform.OS === 'ios' ? 40 : 28,
     },
-    iconContainer: {
+    handle: {
+        width: 40,
+        height: 5,
+        borderRadius: 3,
+        backgroundColor: '#D1D5DB',
+        alignSelf: 'center',
         marginBottom: 20,
     },
-    iconBackground: {
-        width: 64,
-        height: 64,
-        borderRadius: 32,
+    headerRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 14,
+        marginBottom: 16,
+    },
+    iconBg: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
         backgroundColor: '#EFF6FF',
         justifyContent: 'center',
         alignItems: 'center',
     },
     title: {
         fontSize: 20,
-        fontWeight: '700',
-        color: '#1E293B',
-        textAlign: 'center',
-        marginBottom: 16,
+        fontWeight: '800',
+        color: '#0F172A',
+    },
+    subtitle: {
+        fontSize: 13,
+        color: '#64748B',
+        marginTop: 1,
     },
     description: {
         fontSize: 15,
         color: '#475569',
-        textAlign: 'center',
-        lineHeight: 22,
-        marginBottom: 20,
+        lineHeight: 23,
+        marginBottom: 18,
     },
     bold: {
         fontWeight: '700',
         color: '#1E293B',
     },
     infoBox: {
-        width: '100%',
         backgroundColor: '#F8FAFC',
         borderRadius: 16,
         padding: 16,
-        marginBottom: 20,
-        gap: 12,
+        gap: 14,
+        marginBottom: 24,
     },
     infoRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
+        gap: 12,
     },
     infoText: {
-        fontSize: 13,
+        fontSize: 14,
         color: '#475569',
         flex: 1,
+        lineHeight: 20,
     },
-    disclosureText: {
-        fontSize: 12,
-        color: '#94A3B8',
-        textAlign: 'center',
-        marginBottom: 16,
-        lineHeight: 18,
-    },
-    checkboxRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
-        alignSelf: 'flex-start',
-        marginBottom: 20,
-        paddingHorizontal: 4,
-    },
-    checkboxLabel: {
-        fontSize: 14,
-        color: '#94A3B8',
-        fontWeight: '500',
-    },
-    checkboxLabelActive: {
-        color: '#2563EB',
-    },
-    buttonContainer: {
+    buttonRow: {
         flexDirection: 'row',
         gap: 12,
-        width: '100%',
     },
-    declineButton: {
+    declineBtn: {
         flex: 1,
-        height: 52,
-        borderRadius: 14,
+        height: 54,
+        borderRadius: 16,
         justifyContent: 'center',
         alignItems: 'center',
         backgroundColor: '#F1F5F9',
     },
     declineText: {
-        fontSize: 15,
-        fontWeight: '600',
+        fontSize: 16,
+        fontWeight: '700',
         color: '#64748B',
     },
-    acceptButton: {
+    acceptBtn: {
         flex: 2,
-        height: 52,
-        borderRadius: 14,
+        height: 54,
+        borderRadius: 16,
         justifyContent: 'center',
         alignItems: 'center',
         backgroundColor: '#2563EB',
     },
     acceptText: {
-        fontSize: 15,
-        fontWeight: '600',
-        color: '#FFFFFF',
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#fff',
     },
 });
 

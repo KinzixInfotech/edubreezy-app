@@ -38,6 +38,7 @@ import {
 import { router, useLocalSearchParams } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api, { API_BASE_URL } from '../../../lib/api';
 import HapticTouchable from '../../components/HapticTouch';
@@ -49,7 +50,7 @@ import {
     flushLocationQueue,
     updateTripStops,
 } from '../../../lib/transport-location-task';
-import LocationDisclosureModal from '../../components/LocationDisclosureModal';
+
 import {
     getDistanceMeters,
     checkStopProximity,
@@ -136,7 +137,6 @@ export default function ActiveTripScreen() {
     const isTripEndingRef = useRef(false); // Guard to prevent disclosure flash on trip end
     const prevLocationRef = useRef(null); // Previous location for animation
     const [busHeading, setBusHeading] = useState(0); // Bus heading for marker rotation
-    const [showLocationDisclosure, setShowLocationDisclosure] = useState(false);
 
     // Refs to keep location callback values current (avoids stale closure)
     const completedStopIdsRef = useRef([]);
@@ -254,32 +254,37 @@ export default function ActiveTripScreen() {
                 return;
             }
 
-            // Check if foreground permission is already granted
-            // Google Play policy: show disclosure before using fine location
-            // Show once per trip session (not permanently dismissed)
-            const shownThisSession = await SecureStore.getItemAsync(`disclosure_shown_trip_${tripId}`);
-            if (!shownThisSession) {
-                // Show disclosure first, tracking starts after user accepts
-                setShowLocationDisclosure(true);
+
+            // Disclosure already accepted — request permissions and start tracking
+            // 1. Check notification permission first (needed for tracking notification)
+            const { status: notifStatus } = await Notifications.getPermissionsAsync();
+            if (notifStatus !== 'granted') {
+                const { status: newNotifStatus } = await Notifications.requestPermissionsAsync();
+                if (newNotifStatus !== 'granted') {
+                    Alert.alert(
+                        'Notifications Required',
+                        'Notification permission is needed to show the tracking indicator while location is active. Please enable it in Settings.',
+                        [{ text: 'OK' }]
+                    );
+                }
+            }
+
+            // 2. Check location permission
+            const { status } = await Location.getForegroundPermissionsAsync();
+            if (status === 'granted') {
+                await startLocationTracking();
+                locationSubscription = await Location.watchPositionAsync(
+                    { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 10 },
+                    handleLocationUpdate
+                );
             } else {
-                // Already shown this session, start tracking
-                const { status } = await Location.getForegroundPermissionsAsync();
-                if (status === 'granted') {
+                const { status: newStatus } = await Location.requestForegroundPermissionsAsync();
+                if (newStatus === 'granted') {
                     await startLocationTracking();
                     locationSubscription = await Location.watchPositionAsync(
                         { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 10 },
                         handleLocationUpdate
                     );
-                } else {
-                    // Request permission
-                    const { status: newStatus } = await Location.requestForegroundPermissionsAsync();
-                    if (newStatus === 'granted') {
-                        await startLocationTracking();
-                        locationSubscription = await Location.watchPositionAsync(
-                            { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 10 },
-                            handleLocationUpdate
-                        );
-                    }
                 }
             }
         };
@@ -293,25 +298,6 @@ export default function ActiveTripScreen() {
         };
     }, [trip?.status]);
 
-    const handleAcceptDisclosure = async () => {
-        setShowLocationDisclosure(false);
-        // Mark disclosure as shown for this trip
-        await SecureStore.setItemAsync(`disclosure_shown_trip_${tripId}`, 'true');
-        // Request permission if not already granted
-        const { status } = await Location.getForegroundPermissionsAsync();
-        if (status !== 'granted') {
-            const { status: newStatus } = await Location.requestForegroundPermissionsAsync();
-            if (newStatus !== 'granted') return;
-        }
-        await startLocationTracking();
-        // Start watching location
-        const sub = await Location.watchPositionAsync(
-            { accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 10 },
-            handleLocationUpdate
-        );
-        // Store subscription ref for cleanup
-        locationSubRef.current = sub;
-    };
 
     const handleLocationUpdate = async (location) => {
         const { latitude, longitude, speed } = location.coords;
@@ -638,7 +624,7 @@ export default function ActiveTripScreen() {
                 </View>
                 <View style={styles.statItem}>
                     <Users size={18} color="#64748B" />
-                    <Text style={styles.statValue}>{trip?._count?.attendanceRecords || 0}</Text>
+                    <Text style={styles.statValue}>{trip?.route?._count?.studentAssignments || 0}</Text>
                     <Text style={styles.statLabel}>Students</Text>
                 </View>
             </View>
@@ -982,12 +968,7 @@ export default function ActiveTripScreen() {
                 </View>
             </Modal>
 
-            {/* Location Disclosure Modal for Google Play Compliance */}
-            <LocationDisclosureModal
-                visible={showLocationDisclosure}
-                onAccept={handleAcceptDisclosure}
-                onDecline={() => setShowLocationDisclosure(false)}
-            />
+
         </View>
     );
 }

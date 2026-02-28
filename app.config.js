@@ -2,6 +2,7 @@ import 'dotenv/config';
 
 export default {
     expo: {
+        owner: "kinzix",
         name: "EduBreezy",
         slug: "EduBreezy",
         scheme: "edubreezy",
@@ -121,7 +122,8 @@ export default {
             router: {},
             googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY,
             eas: {
-                projectId: "705e829d-f67a-48d6-b0aa-654cb5ae901d"
+                projectId: "591b9e71-8be3-44cd-a787-b75f228b49ac"
+                // projectId: "705e829d-f67a-48d6-b0aa-654cb5ae901d"
             }
         }
     }

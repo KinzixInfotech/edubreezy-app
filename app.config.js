@@ -42,7 +42,7 @@ export default {
                 resizeMode: "contain",
                 backgroundColor: "#ffffff"
             },
-
+            versionCode: 20,
             package: "com.kinzix.edubreezy",
             googleServicesFile: process.env.GOOGLE_SERVICES_JSON || "./google-services.json",
             edgeToEdgeEnabled: true,

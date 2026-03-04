@@ -9,6 +9,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { X, ChevronLeft, ChevronRight, Eye, Trash2, ChevronUp } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import HapticTouchable from './HapticTouch';
+import { useShimmer, Bone } from './ScreenSkeleton';
 import Animated, {
     useSharedValue, useAnimatedStyle, withTiming,
     runOnJS, withSpring, cancelAnimation
@@ -16,7 +17,7 @@ import Animated, {
 import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as FileSystem from 'expo-file-system';
 import api from '../../lib/api';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const PROGRESS_BAR_HEIGHT = 3;
@@ -53,12 +54,7 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
 
     // Viewer details state
     const [showViewers, setShowViewers] = useState(false);
-    const [viewers, setViewers] = useState([]);
-    const [viewersLoading, setViewersLoading] = useState(false);
-    const [viewCount, setViewCount] = useState(0);
-
-    // Deleting state
-    const [deleting, setDeleting] = useState(false);
+    const shimmerAnim = useShimmer();
 
     const isOwnStatus = viewerId === statusGroup?.userId;
     const posterName = statusGroup?.userName || 'Unknown';
@@ -75,52 +71,48 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
             progressAnim.value = 0;
             translateY.value = 0;
             setShowViewers(false);
-            setViewers([]);
             setLongPressing(false);
             setMediaReady(false);
             setCachedVideoUri(null);
-            // Initialize viewCount from feed data (comes from _count in API)
-            const firstStatus = statusGroup.statuses[0];
-            setViewCount(firstStatus?.viewCount || 0);
         }
     }, [visible, statusGroup]);
 
-    // Record view
-    const recordView = useCallback(async (statusId) => {
-        try {
-            await api.post(`/schools/${schoolId}/status/${statusId}/view`, { viewerId });
-        } catch (err) {
-            console.warn('Failed to record status view:', err?.message || err);
-        }
-    }, [schoolId, viewerId]);
+    // ── TanStack Query: Record view mutation ──
+    const recordViewMutation = useMutation({
+        mutationFn: (statusId) => api.post(`/schools/${schoolId}/status/${statusId}/view`, { viewerId }),
+        onError: (err) => console.warn('Failed to record status view:', err?.message || err),
+    });
 
-    // Fetch view count for own statuses
-    const fetchViewCount = useCallback(async (statusId) => {
-        if (!isOwnStatus || !statusId) return;
-        try {
-            const res = await api.get(`/schools/${schoolId}/status/${statusId}/view`);
-            const count = res.data?.count;
-            if (count != null) setViewCount(count);
-        } catch (err) {
-            console.warn('Failed to fetch view count:', err?.message || err);
-            // Don't reset to 0 on error — keep the feed-provided value
-        }
-    }, [schoolId, isOwnStatus]);
+    // ── TanStack Query: View data (count + viewers) ──
+    const {
+        data: viewData,
+        isFetching: viewDataFetching,
+        refetch: refetchViewData,
+    } = useQuery({
+        queryKey: ['statusViews', schoolId, currentStatus?.id],
+        queryFn: async () => {
+            const res = await api.get(`/schools/${schoolId}/status/${currentStatus.id}/view`);
+            return { count: res.data?.count ?? 0, viewers: res.data?.viewers ?? [] };
+        },
+        enabled: isOwnStatus && !!currentStatus?.id && visible,
+        placeholderData: { count: currentStatus?.viewCount || 0, viewers: [] },
+        staleTime: 15000,
+    });
 
-    // Fetch viewer details
-    const fetchViewers = useCallback(async (statusId) => {
-        if (!statusId) return;
-        setViewersLoading(true);
-        try {
-            const res = await api.get(`/schools/${schoolId}/status/${statusId}/view`);
-            setViewers(res.data?.viewers || []);
-            setViewCount(res.data?.count || 0);
-        } catch (err) {
-            setViewers([]);
-        } finally {
-            setViewersLoading(false);
-        }
-    }, [schoolId]);
+    // ── TanStack Query: Delete status mutation ──
+    const deleteStatusMutation = useMutation({
+        mutationFn: (statusId) => api.delete(`/schools/${schoolId}/status/${statusId}?userId=${viewerId}`),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['statusFeed'] });
+            queryClient.invalidateQueries({ queryKey: ['statusViews'] });
+        },
+    });
+
+    // Derived values from query
+    const viewCount = viewData?.count ?? currentStatus?.viewCount ?? 0;
+    const viewers = viewData?.viewers ?? [];
+    const viewersLoading = showViewers && viewDataFetching && !viewers.length;
+    const deleting = deleteStatusMutation.isPending;
 
     // Pre-cache video to local disk so re-views don't re-download
     useEffect(() => {
@@ -195,13 +187,7 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
 
         // Record view (not for own statuses)
         if (!isOwnStatus) {
-            recordView(currentStatus.id);
-        }
-
-        // For own statuses: set count from feed data, then fetch latest from API
-        if (isOwnStatus) {
-            setViewCount(currentStatus.viewCount || 0); // immediate from feed
-            fetchViewCount(currentStatus.id); // then fetch latest
+            recordViewMutation.mutate(currentStatus.id);
         }
 
         // Determine duration — respect trim boundaries for video
@@ -309,8 +295,15 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
     // Long press takes priority over tap
     const composedTapGesture = Gesture.Exclusive(longPressGesture, tapGesture);
 
-    // Swipe down gesture to dismiss
+    // Safe dismiss handler — guards against onClose being undefined
+    const safeDismiss = useCallback(() => {
+        onClose?.();
+    }, [onClose]);
+
+    // Swipe down gesture to dismiss — only activate on clear downward drags
     const panGesture = Gesture.Pan()
+        .activeOffsetY(15)   // require 15px downward before activating
+        .failOffsetY(-5)     // immediately fail if user drags upward
         .onUpdate((e) => {
             if (e.translationY > 0) {
                 translateY.value = e.translationY;
@@ -318,7 +311,7 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
         })
         .onEnd((e) => {
             if (e.translationY > 100) {
-                runOnJS(onClose)();
+                runOnJS(safeDismiss)();
             } else {
                 translateY.value = withSpring(0);
             }
@@ -326,6 +319,7 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
 
     // Swipe-up gesture on the view count footer area to open viewers
     const swipeUpGesture = Gesture.Pan()
+        .activeOffsetY(-30)  // require clear upward swipe before activating
         .onEnd((e) => {
             if (e.translationY < -60) {
                 runOnJS(handleOpenViewers)();
@@ -339,7 +333,7 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
 
     // Handle delete status
     const handleDelete = useCallback(() => {
-        if (!currentStatus || deleting) return;
+        if (!currentStatus || deleteStatusMutation.isPending) return;
 
         // Pause the timer during confirmation
         if (timerRef.current) clearTimeout(timerRef.current);
@@ -357,42 +351,30 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
                 {
                     text: 'Delete',
                     style: 'destructive',
-                    onPress: async () => {
-                        setDeleting(true);
-                        try {
-                            await api.delete(
-                                `/schools/${schoolId}/status/${currentStatus.id}?userId=${viewerId}`
-                            );
+                    onPress: () => {
+                        deleteStatusMutation.mutate(currentStatus.id, {
+                            onSuccess: () => {
+                                const newStatuses = localStatuses.filter(s => s.id !== currentStatus.id);
+                                setLocalStatuses(newStatuses);
 
-                            // Remove from local state
-                            const newStatuses = localStatuses.filter(s => s.id !== currentStatus.id);
-                            setLocalStatuses(newStatuses);
-
-                            // Invalidate feed cache
-                            queryClient.invalidateQueries({ queryKey: ['statusFeed'] });
-
-                            if (newStatuses.length === 0) {
-                                // No more statuses, close viewer
-                                onClose?.();
-                            } else if (currentIndex >= newStatuses.length) {
-                                // Was last status, go to new last
-                                setCurrentIndex(newStatuses.length - 1);
-                            }
-                            // else currentIndex stays the same, new status at that index loads
-
-                            setPaused(false);
-                        } catch (err) {
-                            console.error('Delete status error:', err);
-                            Alert.alert('Error', 'Failed to delete status. Please try again.');
-                            setPaused(false);
-                        } finally {
-                            setDeleting(false);
-                        }
+                                if (newStatuses.length === 0) {
+                                    onClose?.();
+                                } else if (currentIndex >= newStatuses.length) {
+                                    setCurrentIndex(newStatuses.length - 1);
+                                }
+                                setPaused(false);
+                            },
+                            onError: (err) => {
+                                console.error('Delete status error:', err);
+                                Alert.alert('Error', 'Failed to delete status. Please try again.');
+                                setPaused(false);
+                            },
+                        });
                     },
                 },
             ]
         );
-    }, [currentStatus, deleting, localStatuses, currentIndex, schoolId, viewerId, onClose, queryClient]);
+    }, [currentStatus, deleteStatusMutation, localStatuses, currentIndex, onClose]);
 
     // Open viewers panel
     const handleOpenViewers = useCallback(() => {
@@ -401,8 +383,8 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
         if (timerRef.current) clearTimeout(timerRef.current);
         setPaused(true);
         setShowViewers(true);
-        fetchViewers(currentStatus.id);
-    }, [currentStatus, fetchViewers]);
+        refetchViewData(); // fetch latest viewers
+    }, [currentStatus, refetchViewData]);
 
     // Close viewers panel
     const handleCloseViewers = useCallback(() => {
@@ -654,26 +636,27 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
                                     </View>
                                 )}
 
-                                {/* View count footer (own statuses only) — swipeable to open viewers */}
-                                {isOwnStatus && (
-                                    <GestureDetector gesture={swipeUpGesture}>
-                                        <View style={[styles.viewCountFooter, { bottom: insets.bottom + 10 }]}>
-                                            <TouchableOpacity
-                                                onPress={handleOpenViewers}
-                                                activeOpacity={0.7}
-                                                style={styles.viewCountTouchable}
-                                            >
-                                                <Eye size={16} color="#fff" />
-                                                <Text style={styles.viewCountText}>
-                                                    {viewCount} {viewCount === 1 ? 'view' : 'views'}
-                                                </Text>
-                                                <ChevronUp size={14} color="rgba(255,255,255,0.6)" style={{ marginLeft: 4 }} />
-                                            </TouchableOpacity>
-                                        </View>
-                                    </GestureDetector>
-                                )}
                             </View>
                         </GestureDetector>
+
+                        {/* View count footer (own statuses only) — placed OUTSIDE tap gesture to avoid conflict */}
+                        {isOwnStatus && (
+                            <GestureDetector gesture={swipeUpGesture}>
+                                <View style={[styles.viewCountFooter, { bottom: insets.bottom + 10 }]}>
+                                    <TouchableOpacity
+                                        onPress={handleOpenViewers}
+                                        activeOpacity={0.7}
+                                        style={styles.viewCountTouchable}
+                                    >
+                                        <Eye size={16} color="#fff" />
+                                        <Text style={styles.viewCountText}>
+                                            {viewCount} {viewCount === 1 ? 'view' : 'views'}
+                                        </Text>
+                                        <ChevronUp size={14} color="rgba(255,255,255,0.6)" style={{ marginLeft: 4 }} />
+                                    </TouchableOpacity>
+                                </View>
+                            </GestureDetector>
+                        )}
 
                         {/* Viewers Panel (overlay) */}
                         {showViewers && (
@@ -694,8 +677,16 @@ const StatusViewer = ({ visible, statusGroup, schoolId, viewerId, onClose, onAll
                                 {/* Viewers list */}
                                 {viewersLoading ? (
                                     <View style={styles.viewersLoadingContainer}>
-                                        <ActivityIndicator size="small" color="#0469ff" />
-                                        <Text style={styles.viewersLoadingText}>Loading viewers...</Text>
+                                        {Array.from({ length: 1 }).map((_, i) => (
+                                            <View key={i} style={styles.viewerItem}>
+                                                <Bone animValue={shimmerAnim} width={40} height={40} borderRadius={20} />
+                                                <View style={{ flex: 1, gap: 6 }}>
+                                                    <Bone animValue={shimmerAnim} width={i % 2 === 0 ? '60%' : '45%'} height={14} borderRadius={5} />
+                                                    <Bone animValue={shimmerAnim} width={i % 2 === 0 ? '35%' : '50%'} height={11} borderRadius={4} />
+                                                </View>
+                                                <Bone animValue={shimmerAnim} width={45} height={11} borderRadius={4} />
+                                            </View>
+                                        ))}
                                     </View>
                                 ) : viewers.length === 0 ? (
                                     <View style={styles.viewersEmptyContainer}>
@@ -1033,9 +1024,8 @@ const styles = StyleSheet.create({
         color: '#aaa',
     },
     viewersLoadingContainer: {
-        alignItems: 'center',
-        paddingVertical: 30,
-        gap: 8,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
     },
     viewersLoadingText: {
         fontSize: 13,

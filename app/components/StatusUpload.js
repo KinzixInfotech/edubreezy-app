@@ -235,6 +235,7 @@ const StatusUpload = ({ visible, onClose, schoolId, userId }) => {
                 duration = selectedMedia.duration || null;
 
                 // Upload via existing upload route with progress tracking
+                // Phase 1: File upload → progress mapped to 0-80%
                 const formData = new FormData();
                 formData.append('file', {
                     uri: selectedMedia.uri,
@@ -250,10 +251,12 @@ const StatusUpload = ({ visible, onClose, schoolId, userId }) => {
                     timeout: 120000,
                     onUploadProgress: (progressEvent) => {
                         if (progressEvent.total) {
-                            const pct = Math.min(100, Math.round((progressEvent.loaded / progressEvent.total) * 100));
-                            setUploadProgress(pct);
+                            // Map upload progress to 0-80% range
+                            const rawPct = Math.min(100, Math.round((progressEvent.loaded / progressEvent.total) * 100));
+                            const mappedPct = Math.round(rawPct * 0.8); // 0-80%
+                            setUploadProgress(mappedPct);
                             RNAnimated.timing(progressAnim, {
-                                toValue: pct / 100,
+                                toValue: mappedPct / 100,
                                 duration: 200,
                                 useNativeDriver: false,
                             }).start();
@@ -265,12 +268,16 @@ const StatusUpload = ({ visible, onClose, schoolId, userId }) => {
                 if (!mediaUrl) throw new Error('Upload failed — no URL returned');
             }
 
-            // Uploading complete, now create the status
-            setUploadProgress(100);
-            progressAnim.setValue(1);
+            // Phase 2: Server processing → animate 80-95%
+            setUploadProgress(85);
+            RNAnimated.timing(progressAnim, {
+                toValue: 0.85,
+                duration: 400,
+                useNativeDriver: false,
+            }).start();
 
             // Create status via API
-            await api.post(`/schools/${schoolId}/status`, {
+            const createRes = await api.post(`/schools/${schoolId}/status`, {
                 userId,
                 type: statusType,
                 mediaUrl,
@@ -282,7 +289,61 @@ const StatusUpload = ({ visible, onClose, schoolId, userId }) => {
                 trimEnd: selectedMedia?.trimEnd || null,
             });
 
-            // Invalidate feed cache — partial match to catch ['statusFeed', schoolId, userId]
+            // Done → 100%
+            setUploadProgress(100);
+            progressAnim.setValue(1);
+
+            // Optimistic update: inject new status into feed cache immediately
+            // so the thumbnail appears without waiting for server re-fetch
+            const newStatus = createRes.data?.status || createRes.data;
+            queryClient.setQueryData(
+                ['statusFeed', schoolId, userId],
+                (oldData) => {
+                    if (!oldData?.feed) return oldData;
+                    // Build optimistic status entry using local URI as fallback thumbnail
+                    const optimisticStatus = {
+                        id: newStatus?.id || `temp_${Date.now()}`,
+                        type: statusType,
+                        mediaUrl: mediaUrl || null,
+                        // Use local URI as thumbnail until server generates one
+                        thumbnailUrl: statusType === 'image' ? (selectedMedia?.uri || mediaUrl) : (newStatus?.thumbnailUrl || null),
+                        text: statusType === 'text' ? text : null,
+                        caption: caption || null,
+                        duration,
+                        trimStart: selectedMedia?.trimStart || null,
+                        trimEnd: selectedMedia?.trimEnd || null,
+                        createdAt: new Date().toISOString(),
+                        isSeen: true,
+                        viewCount: 0,
+                    };
+
+                    const updatedFeed = oldData.feed.map((group) => {
+                        if (group.userId === userId) {
+                            return {
+                                ...group,
+                                statuses: [...(group.statuses || []), optimisticStatus],
+                            };
+                        }
+                        return group;
+                    });
+
+                    // If user had no existing group, add one
+                    const hasGroup = oldData.feed.some((g) => g.userId === userId);
+                    if (!hasGroup) {
+                        updatedFeed.unshift({
+                            userId,
+                            userName: 'My Status',
+                            userAvatar: null,
+                            statuses: [optimisticStatus],
+                            hasUnseen: false,
+                        });
+                    }
+
+                    return { ...oldData, feed: updatedFeed };
+                }
+            );
+
+            // Also invalidate in background to get server-generated data (thumbnail, etc.)
             queryClient.invalidateQueries({ queryKey: ['statusFeed'] });
 
             // Close immediately and show toast

@@ -6,7 +6,7 @@ export default {
         name: "EduBreezy",
         slug: "EduBreezy",
         scheme: "edubreezy",
-        version: "1.0.2",
+        version: "1.0.3",
         orientation: "portrait",
         icon: "./assets/icon.png",
         userInterfaceStyle: "light",
@@ -42,7 +42,6 @@ export default {
                 resizeMode: "cover",
                 backgroundColor: "#ffffff"
             },
-            versionCode: 20,
             package: "com.kinzix.edubreezy",
             googleServicesFile: process.env.GOOGLE_SERVICES_JSON || "./google-services.json",
             edgeToEdgeEnabled: true,

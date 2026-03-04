@@ -21,7 +21,7 @@
     },
     "production": {
       "node": "18.18.0",
-      "autoIncrement": true,
+      "autoIncrement": false,
       "android": {
         "buildType": "app-bundle"
       },

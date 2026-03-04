@@ -377,6 +377,7 @@ const PROFILE_CONFIG = {
       { id: 4, label: 'Homework', icon: ClipboardList, route: '/homework/view', color: '#8b5cf6' },
       { id: 5, label: 'My Timetable', icon: Calendar, route: '/student/timetable', color: '#06b6d4' },
       { id: 6, label: 'Certificates', icon: FileText, route: '/student/certificates', color: '#ec4899' },
+      { id: 7, label: 'Active Sessions', icon: Shield, route: '/(screens)/sessions', color: '#64748b' },
     ],
   },
 
@@ -429,6 +430,7 @@ const PROFILE_CONFIG = {
       { id: 3, label: 'Assign Homework', icon: BookOpen, route: '/homework/assign', color: '#f59e0b' },
       { id: 4, label: 'My Timetable', icon: Calendar, route: '/teachers/timetable', color: '#8b5cf6' },
       { id: 5, label: 'Announcements', icon: Bell, route: '/announcements', color: '#ec4899' },
+      { id: 9, label: 'Active Sessions', icon: Shield, route: '/(screens)/sessions', color: '#64748b' },
     ],
   },
 
@@ -470,6 +472,7 @@ const PROFILE_CONFIG = {
     menuItems: [
       { id: 1, label: 'View Children', icon: Users, route: '/(tabs)/home', color: '#ec4899' },
       { id: 2, label: 'School Profile', icon: School, action: 'viewSchoolProfile', color: '#8b5cf6' },
+      { id: 3, label: 'Active Sessions', icon: Shield, route: '/(screens)/sessions', color: '#64748b' },
     ],
   },
 
@@ -505,6 +508,7 @@ const PROFILE_CONFIG = {
       { id: 4, label: 'Announcements', icon: Bell, route: '/admin-announcements', color: '#8b5cf6' },
       { id: 5, label: 'Reports', icon: FileText, route: '/reports', color: '#ec4899' },
       { id: 7, label: 'Edit Profile', icon: Edit, route: '/edit-profile', color: '#ef4444' },
+      { id: 8, label: 'Active Sessions', icon: Shield, route: '/(screens)/sessions', color: '#64748b' },
     ],
   },
 
@@ -542,6 +546,7 @@ const PROFILE_CONFIG = {
       { id: 1, label: 'Trip History', icon: Clock, route: '/(screens)/transport/driver-attendance-history', color: '#0469ff' },
       { id: 2, label: 'My Vehicle', icon: Bus, route: '/(screens)/transport/my-vehicle', color: '#10b981' },
       { id: 3, label: 'My Route', icon: MapPin, route: '/(screens)/transport/my-route', color: '#f59e0b' },
+      { id: 4, label: 'Active Sessions', icon: Shield, route: '/(screens)/sessions', color: '#64748b' },
     ],
   },
 
@@ -575,6 +580,7 @@ const PROFILE_CONFIG = {
       { id: 1, label: 'Trip History', icon: Clock, route: '/(screens)/transport/driver-attendance-history', color: '#0469ff' },
       { id: 2, label: 'My Vehicle', icon: Bus, route: '/(screens)/transport/my-vehicle', color: '#10b981' },
       { id: 3, label: 'My Route', icon: MapPin, route: '/(screens)/transport/my-route', color: '#f59e0b' },
+      { id: 4, label: 'Active Sessions', icon: Shield, route: '/(screens)/sessions', color: '#64748b' },
     ],
   },
 
@@ -603,6 +609,7 @@ const PROFILE_CONFIG = {
       { id: 4, label: 'Approvals', icon: ClipboardCheck, route: '/(screens)/principal/approvals', color: '#8B5CF6' },
       { id: 5, label: 'School Profile', icon: School, action: 'viewSchoolProfile', color: '#10B981' },
       { id: 6, label: 'Payroll', icon: FileText, route: '/(screens)/director/payroll', color: '#F59E0B' },
+      { id: 7, label: 'Active Sessions', icon: Shield, route: '/(screens)/sessions', color: '#64748b' },
     ],
   },
 
@@ -629,6 +636,7 @@ const PROFILE_CONFIG = {
       { id: 2, label: 'Approvals', icon: ClipboardCheck, route: '/(screens)/principal/approvals', color: '#8B5CF6' },
       { id: 3, label: 'Broadcast', icon: Megaphone, route: '/(screens)/director/broadcast', color: '#0469ff' },
       { id: 4, label: 'School Profile', icon: School, action: 'viewSchoolProfile', color: '#10B981' },
+      { id: 5, label: 'Active Sessions', icon: Shield, route: '/(screens)/sessions', color: '#64748b' },
     ],
   },
 
@@ -657,6 +665,7 @@ const PROFILE_CONFIG = {
     menuItems: [
       { id: 1, label: 'Edit Name', icon: Edit, action: 'editName', color: '#84CC16' },
       { id: 2, label: 'School Profile', icon: School, action: 'viewSchoolProfile', color: '#10B981' },
+      { id: 3, label: 'Active Sessions', icon: Shield, route: '/(screens)/sessions', color: '#64748b' },
     ],
   },
 };
@@ -848,6 +857,22 @@ export default function ProfileScreen() {
           setIsLoggingOut(true);
           setTimeout(async () => {
             try {
+              // Revoke current session before logout
+              const storedSessionId = await SecureStore.getItemAsync('currentSessionId');
+              const userStr = await SecureStore.getItemAsync('user');
+              if (storedSessionId && userStr) {
+                try {
+                  const parsed = JSON.parse(userStr);
+                  await api.delete(`/auth/sessions/${storedSessionId}`, {
+                    headers: { 'x-user-id': parsed.id },
+                  });
+                  console.log('✅ Session revoked on logout');
+                } catch (e) {
+                  console.warn('Could not revoke session:', e.message);
+                }
+              }
+              await SecureStore.deleteItemAsync('currentSessionId');
+
               const { data: { session } } = await supabase.auth.getSession();
               const currentSchool = await getCurrentSchool();
 

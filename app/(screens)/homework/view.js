@@ -7,12 +7,12 @@ import {
     ScrollView,
     RefreshControl,
     TouchableOpacity,
-    ActivityIndicator,
     Linking,
     Alert,
     Modal,
     Dimensions,
 } from 'react-native';
+import { HomeworkSkeleton } from '../../components/ScreenSkeleton';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
@@ -33,6 +33,7 @@ import {
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
+import { StatusBar } from 'expo-status-bar';
 
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -231,6 +232,7 @@ export default function HomeworkScreen() {
 
     return (
         <View style={styles.container}>
+            <StatusBar style="dark" translucent />
             {/* Header */}
             <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>
@@ -249,7 +251,6 @@ export default function HomeworkScreen() {
                     </View>
                 </HapticTouchable>
             </Animated.View>
-
             <ScrollView
                 style={styles.content}
                 showsVerticalScrollIndicator={false}
@@ -278,7 +279,6 @@ export default function HomeworkScreen() {
                         </View>
                     </View>
                 </Animated.View>
-
                 {/* Active Filter Info */}
                 {statusFilter !== 'all' && (
                     <Animated.View entering={FadeInDown.delay(300).duration(500)}>
@@ -300,9 +300,7 @@ export default function HomeworkScreen() {
                     </Text>
 
                     {isLoading ? (
-                        <View style={styles.loadingContainer}>
-                            <ActivityIndicator size="large" color="#0469ff" />
-                        </View>
+                        <HomeworkSkeleton />
                     ) : filteredHomework.length > 0 ? (
                         filteredHomework.map((hw, index) => {
                             const statusInfo = getStatusInfo(hw);
@@ -399,10 +397,8 @@ export default function HomeworkScreen() {
                         </Animated.View>
                     )}
                 </View>
-
                 <View style={{ height: 40 }} />
             </ScrollView>
-
             <FilterModal />
         </View>
     );
@@ -418,7 +414,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 16,
-        paddingTop: isSmallDevice ? 40 : 50,
+        paddingTop: 60,
         paddingBottom: 16,
         marginTop: isSmallDevice ? 8 : 0,
         borderBottomWidth: 1,

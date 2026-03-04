@@ -15,6 +15,7 @@ import {
     Alert,
     Platform,
 } from 'react-native';
+import { SyllabusSkeleton } from '../components/ScreenSkeleton';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -71,13 +72,13 @@ export default function SyllabusScreen() {
     const { data: classesData } = useQuery({
         queryKey: ['classes', schoolId],
         queryFn: async () => {
-            const res = await api.get(`/schools/${schoolId}/classes`);
+            const res = await api.get(`/schools/${schoolId}/classes?limit=-1`);
             return res.data;
         },
         enabled: !!schoolId,
     });
 
-    const classes = classesData || [];
+    const classes = Array.isArray(classesData) ? classesData : (classesData?.data || []);
 
     // Fetch statistics
     const { data: statsData, isLoading: statsLoading } = useQuery({
@@ -469,16 +470,16 @@ export default function SyllabusScreen() {
                     </Animated.View>
                 )}
 
-                {/* Syllabi List - MINIMAL CHANGE: Added more icon */}
+                {/* Syllabi List */}
                 <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>
-                        Available Syllabi ({syllabi.length})
-                    </Text>
+                    {!isLoading && (
+                        <Text style={styles.sectionTitle}>
+                            Available Syllabi ({syllabi.length})
+                        </Text>
+                    )}
 
                     {isLoading ? (
-                        <View style={styles.loadingContainer}>
-                            <ActivityIndicator size="large" color="#0469ff" />
-                        </View>
+                        <SyllabusSkeleton />
                     ) : syllabi.length > 0 ? (
                         syllabi.map((syllabus, index) => (
                             <Animated.View
@@ -495,23 +496,9 @@ export default function SyllabusScreen() {
                                         </View>
 
                                         <View style={styles.syllabusContent}>
-                                            <View style={{ flexDirection: 'row', gap: 5, }}>
-                                                <Text style={styles.syllabusClass}>
-                                                    {syllabus.Class?.className || 'N/A'}
-                                                </Text>
-
-                                                {syllabus.Class?.sections?.length > 0 && (
-                                                    <View style={styles.sectionsContainer}>
-                                                        {syllabus.Class.sections.map((section) => (
-                                                            <View key={section.id} style={styles.sectionBadge}>
-                                                                <Text style={styles.sectionText}>
-                                                                    {section.name}
-                                                                </Text>
-                                                            </View>
-                                                        ))}
-                                                    </View>
-                                                )}
-                                            </View>
+                                            <Text style={styles.syllabusClass}>
+                                                {syllabus.Class?.className || 'N/A'}
+                                            </Text>
                                             <Text
                                                 numberOfLines={1}
                                                 ellipsizeMode="tail"
@@ -581,7 +568,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 16,
-        paddingTop: 50,
+        paddingTop: 60,
         paddingBottom: 16,
         borderBottomWidth: 1,
         borderBottomColor: '#f0f0f0',

@@ -6,6 +6,9 @@ import * as SecureStore from 'expo-secure-store';
 import api from '../../lib/api';
 
 const { width } = Dimensions.get('window');
+const SLIDE_WIDTH = width - 32;
+const SLIDE_HEIGHT = SLIDE_WIDTH * (9 / 16); // Strict 16:9 aspect ratio (matches 1920×1080 uploads)
+const ITEM_WIDTH = SLIDE_WIDTH + 32; // slide width + marginHorizontal (16 * 2)
 
 // Skeleton component with shimmer animation
 const SkeletonLoader = () => {
@@ -120,9 +123,15 @@ const BannerCarousel = ({ schoolId, role }) => {
 
     const handleScroll = (event) => {
         const scrollPosition = event.nativeEvent.contentOffset.x;
-        const index = Math.round(scrollPosition / width);
+        const index = Math.round(scrollPosition / ITEM_WIDTH);
         setActiveIndex(index);
     };
+
+    const getItemLayout = (_, index) => ({
+        length: ITEM_WIDTH,
+        offset: ITEM_WIDTH * index,
+        index,
+    });
 
     // Pause on touch
     const onTouchStart = () => setIsAutoPlay(false);
@@ -156,6 +165,10 @@ const BannerCarousel = ({ schoolId, role }) => {
                 pagingEnabled
                 showsHorizontalScrollIndicator={false}
                 keyExtractor={(item) => item.id}
+                getItemLayout={getItemLayout}
+                onScrollToIndexFailed={(info) => {
+                    flatListRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: true });
+                }}
                 onScroll={handleScroll}
                 onTouchStart={onTouchStart}
                 onTouchEnd={onTouchEnd}
@@ -207,8 +220,8 @@ const styles = StyleSheet.create({
         marginBottom: 8,
     },
     slide: {
-        width: width - 32, // Padding 16 on each side
-        height: 180,
+        width: SLIDE_WIDTH,
+        height: SLIDE_HEIGHT,
         marginHorizontal: 16,
         borderRadius: 16,
         overflow: 'hidden',

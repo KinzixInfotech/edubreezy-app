@@ -18,6 +18,7 @@ import { Plus, LogOut, ChevronRight, Building2 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import { getProfilesForSchool, removeProfile, updateLastUsed, clearSchoolProfiles, updateProfileSession, clearProfileSession, getCurrentSchool, clearCurrentSchool } from '../../lib/profileManager';
 import { tryRestoreSession, initTokenSync } from '../../lib/tokenManager';
+import api from '../../lib/api';
 import HapticTouchable from '../components/HapticTouch';
 import { supabase } from '../../lib/supabase';
 import { stopForegroundLocationTracking } from '../../lib/transport-location-task';
@@ -210,6 +211,20 @@ export default function ProfileSelectorScreen() {
             if (result.session?.access_token) {
                 await SecureStore.setItemAsync('token', result.session.access_token);
                 console.log('✅ Token stored for API calls');
+
+                // Create session for device tracking
+                try {
+                    const sessionRes = await api.post('/auth/sessions', {
+                        userId: profile.userData.id,
+                        supabaseSessionToken: result.session.access_token,
+                    });
+                    if (sessionRes.data?.session?.id) {
+                        await SecureStore.setItemAsync('currentSessionId', sessionRes.data.session.id);
+                        console.log('✅ Session created via Profile Selector:', sessionRes.data.session.id);
+                    }
+                } catch (sessionErr) {
+                    console.warn('Could not create session in profile-selector:', sessionErr.message);
+                }
             }
 
             // Navigate to home

@@ -33,9 +33,13 @@ function TabsLayout() {
     loadData();
 
     if (Platform.OS === 'android') {
-      NavigationBar.setPositionAsync('absolute');
-      NavigationBar.setBackgroundColorAsync('transparent');
-      NavigationBar.setButtonStyleAsync('light');
+      try {
+        NavigationBar.setPositionAsync('absolute');
+        NavigationBar.setBackgroundColorAsync('transparent');
+        NavigationBar.setButtonStyleAsync('light');
+      } catch (error) {
+        console.warn('NavigationBar error in TabsLayout:', error);
+      }
     }
   }, []);
 

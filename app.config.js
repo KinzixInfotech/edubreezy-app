@@ -13,7 +13,7 @@ export default {
         newArchEnabled: true,
         splash: {
             image: "./assets/splash.png",
-            resizeMode: "contain",
+            resizeMode: "cover",
             backgroundColor: "#ffffff"
         },
         ios: {
@@ -39,7 +39,7 @@ export default {
         android: {
             splash: {
                 image: "./assets/splash.png",
-                resizeMode: "contain",
+                resizeMode: "cover",
                 backgroundColor: "#ffffff"
             },
             versionCode: 20,

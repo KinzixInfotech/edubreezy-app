@@ -7,9 +7,9 @@ import {
     StyleSheet,
     ScrollView,
     RefreshControl,
-    ActivityIndicator,
 } from 'react-native';
-import { useQuery } from '@tanstack/react-query';
+import { TimetableSkeleton } from '../../components/ScreenSkeleton';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
 import {
@@ -23,16 +23,18 @@ import {
 import * as SecureStore from 'expo-secure-store';
 import api from '../../../lib/api';
 import HapticTouchable from '../../components/HapticTouch';
+import { StatusBar } from 'expo-status-bar';
 
 const DAYS = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const FULL_DAYS = ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export default function StudentTimetableScreen() {
+    const queryClient = useQueryClient();
     const [refreshing, setRefreshing] = useState(false);
     const [selectedDay, setSelectedDay] = useState(new Date().getDay() || 1);
 
-    // Load user data
-    const { data: userData } = useQuery({
+    // Get user ID and schoolId from SecureStore (minimal, just for bootstrapping)
+    const { data: storedUser } = useQuery({
         queryKey: ['user-data'],
         queryFn: async () => {
             const stored = await SecureStore.getItemAsync('user');
@@ -41,18 +43,32 @@ export default function StudentTimetableScreen() {
         staleTime: Infinity,
     });
 
-    const schoolId = userData?.schoolId;
-    // classId can be at different paths depending on full vs minimal user data
-    const classId = userData?.studentData?.classId ||
-        userData?.studentData?.class?.id ||
-        userData?.class?.id ||
-        userData?.classs?.id;
-    const sectionId = userData?.studentData?.sectionId ||
-        userData?.studentData?.section?.id ||
-        userData?.section?.id;
+    const schoolId = storedUser?.schoolId;
+
+    // Always fetch fresh user profile from API for accurate classId/sectionId
+    const { data: userProfile, isLoading: isProfileLoading } = useQuery({
+        queryKey: ['user-profile-full', storedUser?.id],
+        queryFn: async () => {
+            const res = await api.get(`/mobile/user/${storedUser.id}`);
+            return res.data;
+        },
+        enabled: !!storedUser?.id,
+        staleTime: 1000 * 60 * 5,
+    });
+
+    const classId = userProfile?.studentData?.classId ||
+        userProfile?.studentData?.class?.id ||
+        userProfile?.class?.id ||
+        userProfile?.classs?.id;
+    const sectionId = userProfile?.studentData?.sectionId ||
+        userProfile?.studentData?.section?.id ||
+        userProfile?.section?.id;
+
+    // Use API profile for display, fallback to stored for header subtitle
+    const userData = userProfile || storedUser;
 
     // Fetch class timetable
-    const { data: timetableData, isLoading, refetch } = useQuery({
+    const { data: timetableData, isLoading: isTimetableLoading, refetch } = useQuery({
         queryKey: ['student-timetable', schoolId, classId, sectionId],
         queryFn: async () => {
             if (!schoolId || !classId) return null;
@@ -64,6 +80,8 @@ export default function StudentTimetableScreen() {
         enabled: !!schoolId && !!classId,
         staleTime: 1000 * 60 * 5,
     });
+
+    const isLoading = isProfileLoading || isTimetableLoading;
 
     const timeSlots = timetableData?.timeSlots || [];
     const timetable = timetableData?.timetable || {};
@@ -97,9 +115,10 @@ export default function StudentTimetableScreen() {
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
+        await queryClient.invalidateQueries({ queryKey: ['user-profile-full'] });
         await refetch();
         setRefreshing(false);
-    }, [refetch]);
+    }, [refetch, queryClient]);
 
     const periodCount = useMemo(() => {
         return Object.keys(todaySchedule).filter(slotId => {
@@ -109,12 +128,7 @@ export default function StudentTimetableScreen() {
     }, [todaySchedule, timeSlots]);
 
     if (isLoading) {
-        return (
-            <View style={styles.loaderContainer}>
-                <ActivityIndicator size="large" color="#0469ff" />
-                <Text style={styles.loadingText}>Loading timetable...</Text>
-            </View>
-        );
+        return <TimetableSkeleton />;
     }
 
     return (
@@ -305,7 +319,7 @@ const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#fff' },
     loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16 },
     loadingText: { fontSize: 16, fontWeight: '600', color: '#666' },
-    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 50, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', backgroundColor: '#fff' },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 60, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', backgroundColor: '#fff' },
     backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#f5f5f5', alignItems: 'center', justifyContent: 'center' },
     headerCenter: { flex: 1, alignItems: 'center' },
     headerTitle: { fontSize: 18, fontWeight: '700', color: '#111' },

@@ -14,6 +14,7 @@ import {
     Alert,
     Platform,
 } from 'react-native';
+import { GallerySkeleton } from '../components/ScreenSkeleton';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -402,8 +403,8 @@ export default function GalleryScreen() {
                 )}
             </LinearGradient>
 
-            {/* Category Filter - Only show if not in album detail view */}
-            {!selectedAlbum && (
+            {/* Category Filter - Only show if not in album detail view and not loading */}
+            {!selectedAlbum && !isLoading && !imagesLoading && (
                 <Animated.View entering={FadeInDown.delay(100).duration(400)}>
                     <ScrollView
                         horizontal
@@ -447,10 +448,7 @@ export default function GalleryScreen() {
                 }
             >
                 {isLoading || imagesLoading ? (
-                    <View style={styles.loadingContainer}>
-                        <ActivityIndicator size="large" color="#EC4899" />
-                        <Text style={styles.loadingText}>Loading gallery...</Text>
-                    </View>
+                    <GallerySkeleton />
                 ) : (
                     <>
                         {viewMode === 'ALBUMS' && !selectedAlbum ? (

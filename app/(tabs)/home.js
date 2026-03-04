@@ -1,4 +1,5 @@
 import { View, Text, StyleSheet, ActivityIndicator, ScrollView, Dimensions, RefreshControl, Alert, AppState, FlatList, Platform } from 'react-native';
+import { HomeSkeleton } from '../components/ScreenSkeleton';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Link, router, useFocusEffect } from 'expo-router';
 import {
@@ -367,9 +368,45 @@ export default function HomeScreen() {
     // Configure Android navigation bar color to match theme
     useEffect(() => {
         if (Platform.OS === 'android') {
-            NavigationBar.setBackgroundColorAsync('#ffffff');
-            NavigationBar.setButtonStyleAsync('dark');
+            try {
+                NavigationBar.setBackgroundColorAsync('#ffffff');
+                NavigationBar.setButtonStyleAsync('dark');
+            } catch (error) {
+                console.warn('NavigationBar error in Home:', error);
+            }
         }
+    }, []);
+
+    // Track session activity
+    const lastSessionUpdateRef = useRef(0);
+    useEffect(() => {
+        const handleAppStateChange = async (nextAppState) => {
+            if (nextAppState === 'active') {
+                const now = Date.now();
+                // Throttle updates to once every 5 minutes (300,000 ms)
+                if (now - lastSessionUpdateRef.current > 300000) {
+                    try {
+                        const sessionId = await SecureStore.getItemAsync('currentSessionId');
+                        const userStr = await SecureStore.getItemAsync('user');
+                        if (sessionId && userStr) {
+                            const parsed = JSON.parse(userStr);
+                            await api.patch(`/auth/sessions/${sessionId}`, {
+                                lastActiveAt: new Date().toISOString()
+                            }, {
+                                headers: { 'x-user-id': parsed.id }
+                            });
+                            lastSessionUpdateRef.current = now;
+                            console.log('✅ Session activity updated');
+                        }
+                    } catch (err) {
+                        console.warn('Failed to update session activity:', err.message);
+                    }
+                }
+            }
+        };
+
+        const subscription = AppState.addEventListener('change', handleAppStateChange);
+        return () => subscription.remove();
     }, []);
 
     // Listen for auth changes to keep stored profile session fresh
@@ -565,14 +602,13 @@ export default function HomeScreen() {
 
     // Show unified loader for transport roles until all data is ready
     if (loading || isTransportDataLoading) {
+
         return (
+
             <View style={styles.loaderContainer}>
                 <ActivityIndicator size="large" color="#0469ff" />
-                {isTransportDataLoading && (
-                    <Text style={{ marginTop: 12, color: '#666', fontSize: 14 }}>Loading your dashboard...</Text>
-                )}
             </View>
-        );
+        )
     }
 
     if (!user_acc) {
@@ -1160,7 +1196,7 @@ export default function HomeScreen() {
                                     <TrendingUp size={22} color="#fff" />
                                 </View>
                                 <View>
-                                    <Text style={styles.statValue}>{overallScore}</Text>
+                                    <Text style={styles.statValue}>{overallScore}%</Text>
                                     <Text style={styles.statLabel}>Performance</Text>
                                 </View>
                             </LinearGradient>

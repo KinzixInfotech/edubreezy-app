@@ -38,6 +38,7 @@ import * as Haptics from 'expo-haptics';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
 import { StatusBar } from 'expo-status-bar';
+import { LibrarySkeleton } from '../../components/ScreenSkeleton';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -350,7 +351,7 @@ export default function StudentLibraryScreen() {
         switch (activeTab) {
             case 'my-books':
                 if (myBooksLoading) {
-                    return <View style={styles.loader}><ActivityIndicator size="large" color="#0469ff" /></View>;
+                    return <LibrarySkeleton />;
                 }
                 return (
                     <>
@@ -449,7 +450,7 @@ export default function StudentLibraryScreen() {
                             )}
                         </View>
                         {catalogLoading ? (
-                            <View style={styles.loader}><ActivityIndicator size="large" color="#0469ff" /></View>
+                            <LibrarySkeleton />
                         ) : !catalogBooks?.length ? (
                             <View style={styles.emptyState}>
                                 <Search size={48} color="#ccc" />
@@ -466,7 +467,7 @@ export default function StudentLibraryScreen() {
 
             case 'requests':
                 if (requestsLoading) {
-                    return <View style={styles.loader}><ActivityIndicator size="large" color="#0469ff" /></View>;
+                    return <LibrarySkeleton />;
                 }
                 if (!requestsData?.length) {
                     return (
@@ -551,7 +552,7 @@ export default function StudentLibraryScreen() {
 
             case 'history':
                 if (historyLoading) {
-                    return <View style={styles.loader}><ActivityIndicator size="large" color="#0469ff" /></View>;
+                    return <LibrarySkeleton />;
                 }
                 const historyList = Array.isArray(historyData) ? historyData : [];
                 if (!historyList.length) {
@@ -632,7 +633,7 @@ export default function StudentLibraryScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#fff' },
-    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 50, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 60, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
     backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#f5f5f5', alignItems: 'center', justifyContent: 'center' },
     headerCenter: { flex: 1, alignItems: 'center' },
     headerTitle: { fontSize: 18, fontWeight: '700', color: '#111' },

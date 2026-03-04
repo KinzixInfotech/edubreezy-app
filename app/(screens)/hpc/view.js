@@ -12,6 +12,7 @@ import {
     Alert,
     Platform,
 } from 'react-native';
+import { HPCSkeleton } from '../../components/ScreenSkeleton';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -266,12 +267,7 @@ export default function HPCViewScreen() {
 
     // Loading state
     if (isLoading || isUserLoading || !schoolId) {
-        return (
-            <View style={styles.loaderContainer}>
-                <ActivityIndicator size="large" color="#0469ff" />
-                <Text style={styles.loadingText}>Loading progress card...</Text>
-            </View>
-        );
+        return <HPCSkeleton />;
     }
 
     // Error state - only show hard error if API returned error (not just empty data)

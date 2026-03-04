@@ -7,9 +7,9 @@ import {
     StyleSheet,
     ScrollView,
     RefreshControl,
-    ActivityIndicator,
     Dimensions,
 } from 'react-native';
+import { PerformanceSkeleton } from '../../components/ScreenSkeleton';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -218,9 +218,7 @@ export default function StudentPerformanceScreen() {
                 }
             >
                 {isLoading ? (
-                    <View style={styles.loadingContainer}>
-                        <ActivityIndicator size="large" color="#0469ff" />
-                    </View>
+                    <PerformanceSkeleton />
                 ) : (
                     <>
                         {/* Overall Score Card */}
@@ -450,7 +448,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 16,
-        paddingTop: 50,
+        paddingTop: 60,
         paddingBottom: 16,
         borderBottomWidth: 1,
         borderBottomColor: '#f0f0f0',

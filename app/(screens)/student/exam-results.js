@@ -8,8 +8,8 @@ import {
     ScrollView,
     RefreshControl,
     Platform,
-    ActivityIndicator,
 } from 'react-native';
+import { ExamResultsSkeleton } from '../../components/ScreenSkeleton';
 import { useQuery } from '@tanstack/react-query';
 import { router } from 'expo-router';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
@@ -171,9 +171,7 @@ export default function StudentExamResultsScreen() {
             )}
 
             {resultsLoading ? (
-                <View style={styles.loaderContainer}>
-                    <ActivityIndicator size="large" color="#0469ff" />
-                </View>
+                <ExamResultsSkeleton />
             ) : (
                 <ScrollView
                     style={styles.content}
@@ -317,7 +315,7 @@ export default function StudentExamResultsScreen() {
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#fff' },
     loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 50, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', backgroundColor: '#fff' },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 60, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', backgroundColor: '#fff' },
     backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#f5f5f5', alignItems: 'center', justifyContent: 'center' },
     headerCenter: { flex: 1, alignItems: 'center' },
     headerTitle: { fontSize: 18, fontWeight: '700', color: '#111' },

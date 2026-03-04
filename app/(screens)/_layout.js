@@ -16,7 +16,7 @@ export default function ScreenLayout() {
         <Stack.Screen name="payfees" />
         <Stack.Screen name="accountant-collect-fee" />
         <Stack.Screen name="accountant-payment-history" />
-        <Stack.Screen name="/homework/view" />
+        <Stack.Screen name="homework/view" />
         <Stack.Screen name="syllabusview" />
         <Stack.Screen name="homework/assign" />
         <Stack.Screen

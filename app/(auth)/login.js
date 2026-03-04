@@ -487,6 +487,8 @@ export default function LoginScreen() {
                         name: user.studentData.name,
                         email: user.studentData.email,
                         admissionNo: user.studentData.admissionNo,
+                        class: user.studentData.class || null,
+                        section: user.studentData.section || null,
                     },
                 }),
                 ...(user.parentData && {
@@ -528,6 +530,20 @@ export default function LoginScreen() {
                 }
             } else {
                 console.warn('⚠️ No school code found, profile not saved');
+            }
+
+            // Create session for device tracking
+            try {
+                const sessionRes = await api.post('/auth/sessions', {
+                    userId: user.id,
+                    supabaseSessionToken: data.session.access_token,
+                });
+                if (sessionRes.data?.session?.id) {
+                    await SecureStore.setItemAsync('currentSessionId', sessionRes.data.session.id);
+                    console.log('✅ Session created:', sessionRes.data.session.id);
+                }
+            } catch (sessionErr) {
+                console.warn('Could not create session:', sessionErr.message);
             }
 
             router.replace('/(screens)/greeting');

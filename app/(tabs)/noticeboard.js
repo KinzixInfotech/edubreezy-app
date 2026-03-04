@@ -11,6 +11,7 @@ import {
   RefreshControl,
   Platform,
 } from 'react-native';
+import { NoticeboardSkeleton } from '../components/ScreenSkeleton';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { ArrowLeft, BellOff, FileText, X, Megaphone, Send, Inbox, Image as ImageIcon, Eye } from 'lucide-react-native';
@@ -130,32 +131,42 @@ const NoticeBoardScreen = () => {
   const [activeTab, setActiveTab] = useState('received');
   const [selectedCategory, setSelectedCategory] = useState('All');
 
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const [allNotices, setAllNotices] = useState([]);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const PAGE_SIZE = 20;
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setPage(1);
+    setAllNotices([]);
+    setHasMore(true);
+  }, [selectedCategory, activeTab, schoolId, userId]);
+
   // Fetch notices
   const {
-    data: notices = [],
+    data: noticesData,
     isFetching,
     isLoading,
     refetch,
   } = useQuery({
-    queryKey: ['notices', schoolId, userId, selectedCategory, activeTab],
+    queryKey: ['notices', schoolId, userId, selectedCategory, activeTab, page],
     queryFn: async () => {
-      if (!schoolId || !userId) return [];
+      if (!schoolId || !userId) return { notices: [], hasMore: false };
 
       if (activeTab === 'sent' && canBroadcast) {
         const res = await api.get(`/schools/${schoolId}/broadcast?limit=50`);
         const allBroadcasts = res.data.broadcasts || [];
-        // Filter to only show current user's broadcasts
         const mine = allBroadcasts.filter(b => b.senderId === userId);
-        return mine.map(b => ({
-          ...b,
-          read: true,
-          isSent: true,
-        }));
+        return {
+          notices: mine.map(b => ({ ...b, read: true, isSent: true })),
+          hasMore: false,
+        };
       }
 
-      // Build query params based on selected filter
-      // 'All' = no filters, 'Unread' = unread only, others = category filter
-      let queryParams = `userId=${userId}&limit=50`;
+      let queryParams = `userId=${userId}&limit=${PAGE_SIZE}&page=${page}`;
 
       if (selectedCategory === 'Unread') {
         queryParams += '&unread=true';
@@ -164,13 +175,38 @@ const NoticeBoardScreen = () => {
       }
 
       const res = await api.get(`/notices/${schoolId}?${queryParams}`);
-      return res.data.notices || [];
+      const data = res.data;
+      return {
+        notices: data.notices || [],
+        hasMore: data.pagination ? page < data.pagination.totalPages : false,
+      };
     },
     enabled: isUserLoaded && !!schoolId && !!userId,
     staleTime: 30 * 1000,
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
+
+  // Accumulate notices across pages
+  useEffect(() => {
+    if (noticesData) {
+      if (page === 1) {
+        setAllNotices(noticesData.notices);
+      } else {
+        setAllNotices(prev => [...prev, ...noticesData.notices]);
+      }
+      setHasMore(noticesData.hasMore);
+      setLoadingMore(false);
+    }
+  }, [noticesData, page]);
+
+  const notices = allNotices;
+
+  const loadMore = useCallback(() => {
+    if (!hasMore || loadingMore || isFetching) return;
+    setLoadingMore(true);
+    setPage(p => p + 1);
+  }, [hasMore, loadingMore, isFetching]);
 
   // Reset category when tab changes
   useEffect(() => {
@@ -180,6 +216,9 @@ const NoticeBoardScreen = () => {
   }, [activeTab]);
 
   const onRefresh = useCallback(() => {
+    setPage(1);
+    setAllNotices([]);
+    setHasMore(true);
     refetch();
   }, [refetch]);
 
@@ -327,9 +366,7 @@ const NoticeBoardScreen = () => {
 
       {/* Content */}
       {showInitialLoader ? (
-        <View style={styles.centeredContainer}>
-          <ActivityIndicator size="large" color="#0469ff" />
-        </View>
+        <NoticeboardSkeleton />
       ) : (
         <FlatList
           data={notices}
@@ -342,12 +379,21 @@ const NoticeBoardScreen = () => {
           ]}
           refreshControl={
             <RefreshControl
-              refreshing={isFetching}
+              refreshing={isFetching && page === 1}
               onRefresh={onRefresh}
               tintColor="#0469ff"
             />
           }
           ListEmptyComponent={<EmptyState isSentTab={activeTab === 'sent'} />}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={{ paddingVertical: 16, alignItems: 'center' }}>
+                <ActivityIndicator size="small" color="#0469ff" />
+              </View>
+            ) : null
+          }
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.3}
           removeClippedSubviews={true}
           maxToRenderPerBatch={10}
           windowSize={5}
@@ -504,7 +550,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    paddingTop: 50,
+    paddingTop: 60,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
     gap: 16,

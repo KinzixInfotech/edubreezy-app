@@ -26,6 +26,11 @@ export default function VideoSplash({ onComplete }) {
                     await videoRef.current.playAsync();
                 } catch (error) {
                     console.log('Video init error:', error);
+                    // On error, complete anyway so app isn't stuck
+                    if (!hasCompletedRef.current) {
+                        hasCompletedRef.current = true;
+                        onComplete?.();
+                    }
                 }
             }
         };

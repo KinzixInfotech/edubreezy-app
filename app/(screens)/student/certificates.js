@@ -35,6 +35,7 @@ import * as WebBrowser from 'expo-web-browser';
 import api from '../../../lib/api';
 import HapticTouchable from '../../components/HapticTouch';
 import { CertificatesSkeleton } from '../../components/ScreenSkeleton';
+import { StatusBar } from 'expo-status-bar';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -153,6 +154,7 @@ export default function StudentCertificatesScreen() {
 
     return (
         <View style={styles.container}>
+            <StatusBar style='dark' />
             {/* Header */}
             <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>

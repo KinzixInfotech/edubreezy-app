@@ -41,6 +41,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../../lib/api';
 import { LinearGradient } from 'expo-linear-gradient';
+import { getDeviceInfo } from '../../lib/deviceInfo';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('screen');
 export const PRIMARY_COLOR = '#0b5cde';
@@ -534,9 +535,11 @@ export default function LoginScreen() {
 
             // Create session for device tracking
             try {
+                const deviceInfo = await getDeviceInfo();
                 const sessionRes = await api.post('/auth/sessions', {
                     userId: user.id,
                     supabaseSessionToken: data.session.access_token,
+                    ...deviceInfo,
                 });
                 if (sessionRes.data?.session?.id) {
                     await SecureStore.setItemAsync('currentSessionId', sessionRes.data.session.id);

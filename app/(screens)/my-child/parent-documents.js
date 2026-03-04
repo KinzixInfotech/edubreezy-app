@@ -31,6 +31,7 @@ import {
 } from 'lucide-react-native';
 import api from '../../../lib/api';
 import HapticTouchable from '../../components/HapticTouch';
+import { StatusBar } from 'expo-status-bar';
 
 
 export default function ParentDocumentsScreen() {

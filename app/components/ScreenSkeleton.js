@@ -256,42 +256,55 @@ export function PerformanceSkeleton() {
 export function TimetableSkeleton() {
     const anim = useShimmer();
     return (
-        <View style={{ gap: 16, padding: 16 }}>
-            {/* Next Period Card */}
-            <Bone animValue={anim} width={'100%'} height={110} borderRadius={16} />
-            {/* Stats Row - 2 cards */}
-            <View style={{ flexDirection: 'row', gap: 12 }}>
-                <View style={{ flex: 1, backgroundColor: '#f8f9fa', borderRadius: 16, padding: 16, alignItems: 'center', gap: 8 }}>
-                    <Bone animValue={anim} width={24} height={24} borderRadius={12} />
-                    <Bone animValue={anim} width={30} height={20} borderRadius={5} />
-                    <Bone animValue={anim} width={70} height={10} borderRadius={4} />
+        <View style={sk.container}>
+            {/* Header */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 60, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', backgroundColor: '#fff' }}>
+                <Bone animValue={anim} width={40} height={40} borderRadius={20} />
+                <View style={{ flex: 1, alignItems: 'center', gap: 4 }}>
+                    <Bone animValue={anim} width={120} height={16} borderRadius={5} />
+                    <Bone animValue={anim} width={80} height={11} borderRadius={4} />
                 </View>
-                <View style={{ flex: 1, backgroundColor: '#f8f9fa', borderRadius: 16, padding: 16, alignItems: 'center', gap: 8 }}>
-                    <Bone animValue={anim} width={24} height={24} borderRadius={12} />
-                    <Bone animValue={anim} width={30} height={20} borderRadius={5} />
-                    <Bone animValue={anim} width={70} height={10} borderRadius={4} />
-                </View>
+                <View style={{ width: 40 }} />
             </View>
-            {/* Day Selector Chips */}
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-                {Array.from({ length: 6 }).map((_, i) => (
-                    <Bone key={i} animValue={anim} width={48} height={56} borderRadius={12} />
+            {/* Content */}
+            <View style={{ gap: 16, padding: 16 }}>
+                {/* Stats Row - 2 cards */}
+                <View style={{ flexDirection: 'row', gap: 12 }}>
+                    <View style={{ flex: 1, backgroundColor: '#E3F2FD', borderRadius: 16, padding: 16, alignItems: 'center', gap: 8 }}>
+                        <Bone animValue={anim} width={24} height={24} borderRadius={12} />
+                        <Bone animValue={anim} width={30} height={22} borderRadius={5} />
+                        <Bone animValue={anim} width={80} height={10} borderRadius={4} />
+                    </View>
+                    <View style={{ flex: 1, backgroundColor: '#D1FAE5', borderRadius: 16, padding: 16, alignItems: 'center', gap: 8 }}>
+                        <Bone animValue={anim} width={24} height={24} borderRadius={12} />
+                        <Bone animValue={anim} width={30} height={22} borderRadius={5} />
+                        <Bone animValue={anim} width={80} height={10} borderRadius={4} />
+                    </View>
+                </View>
+                {/* Day Selector Chips */}
+                <View style={{ flexDirection: 'row', gap: 10, justifyContent: 'center' }}>
+                    {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((_, i) => (
+                        <Bone key={i} animValue={anim} width={42} height={36} borderRadius={18} />
+                    ))}
+                </View>
+                {/* Schedule title */}
+                <Bone animValue={anim} width={170} height={16} borderRadius={5} />
+                {/* Period Cards */}
+                {Array.from({ length: 4 }).map((_, i) => (
+                    <View key={i} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#f8f9fa', borderRadius: 14, padding: 14, gap: 12 }}>
+                        <View style={{ alignItems: 'center', gap: 4, width: 50 }}>
+                            <Bone animValue={anim} width={38} height={12} borderRadius={4} />
+                            <Bone animValue={anim} width={38} height={12} borderRadius={4} />
+                        </View>
+                        <View style={{ width: 1, height: 40, backgroundColor: '#E8EDF5' }} />
+                        <View style={{ flex: 1, gap: 6 }}>
+                            <Bone animValue={anim} width={'65%'} height={14} borderRadius={5} />
+                            <Bone animValue={anim} width={'45%'} height={11} borderRadius={4} />
+                        </View>
+                        <Bone animValue={anim} width={22} height={50} borderRadius={6} />
+                    </View>
                 ))}
             </View>
-            {/* Period List */}
-            {Array.from({ length: 5 }).map((_, i) => (
-                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#f8f9fa', borderRadius: 14, padding: 14, gap: 12 }}>
-                    <View style={{ alignItems: 'center', gap: 4, width: 50 }}>
-                        <Bone animValue={anim} width={40} height={12} borderRadius={4} />
-                        <Bone animValue={anim} width={30} height={10} borderRadius={4} />
-                    </View>
-                    <View style={{ width: 1, height: 40, backgroundColor: '#E8EDF5' }} />
-                    <View style={{ flex: 1, gap: 6 }}>
-                        <Bone animValue={anim} width={'70%'} height={14} borderRadius={5} />
-                        <Bone animValue={anim} width={'50%'} height={11} borderRadius={4} />
-                    </View>
-                </View>
-            ))}
         </View>
     );
 }

@@ -14,6 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { StatusBar } from 'expo-status-bar';
 import * as SecureStore from 'expo-secure-store';
 import {
     ArrowLeft,
@@ -258,6 +259,7 @@ export default function SessionsScreen() {
 
     return (
         <View style={styles.container}>
+            <StatusBar style="light" />
             {/* Header */}
             <LinearGradient
                 colors={['#0469ff', '#0356d4']}

@@ -694,6 +694,14 @@ export default function ProfileScreen() {
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
 
+  // Imperatively update StatusBar — declarative <StatusBar> is unreliable on Android during scroll
+  useEffect(() => {
+    StatusBar.setBarStyle(isScrolledPastHeader ? 'dark-content' : 'light-content', true);
+    if (Platform.OS === 'android') {
+      StatusBar.setBackgroundColor(isScrolledPastHeader ? '#fff' : '#0469ff', true);
+    }
+  }, [isScrolledPastHeader]);
+
   const handleScroll = (event) => {
     const scrollY = event.nativeEvent.contentOffset.y;
     const shouldBeDark = scrollY > 250;
@@ -1009,8 +1017,6 @@ export default function ProfileScreen() {
   return (
     <View style={styles.safeArea}>
       <StatusBar
-        barStyle={isScrolledPastHeader ? 'dark-content' : 'light-content'}
-        backgroundColor={isScrolledPastHeader ? '#fff' : '#0469ff'}
         translucent={false}
       />
 
@@ -1333,6 +1339,23 @@ export default function ProfileScreen() {
               </View>
             </Animated2.View>
           )}
+
+          {/* Active Sessions */}
+          <Animated2.View entering={FadeInDown.delay(550).duration(600)} style={styles.section}>
+            <View style={styles.menuContainer}>
+              <HapticTouchable onPress={() => router.push('/(screens)/sessions')}>
+                <View style={[styles.menuItem, styles.lastMenuItem]}>
+                  <View style={[styles.menuIconContainer, { backgroundColor: '#64748b15' }]}>
+                    <Shield size={20} color="#64748b" />
+                  </View>
+                  <Text style={styles.menuText}>Active Sessions</Text>
+                  <View style={styles.menuArrow}>
+                    <Text style={styles.arrowText}>›</Text>
+                  </View>
+                </View>
+              </HapticTouchable>
+            </View>
+          </Animated2.View>
 
           {/* Logout */}
           <Animated2.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>

@@ -24,6 +24,7 @@ import { supabase } from '../../lib/supabase';
 import { stopForegroundLocationTracking } from '../../lib/transport-location-task';
 import fcmService from '../../services/fcmService';
 import { onProfilePictureChange } from '../../lib/profileEvents';
+import { getDeviceInfo } from '../../lib/deviceInfo';
 
 const { width } = Dimensions.get('window');
 const PROFILE_SIZE = 100;
@@ -214,9 +215,11 @@ export default function ProfileSelectorScreen() {
 
                 // Create session for device tracking
                 try {
+                    const deviceInfo = await getDeviceInfo();
                     const sessionRes = await api.post('/auth/sessions', {
                         userId: profile.userData.id,
                         supabaseSessionToken: result.session.access_token,
+                        ...deviceInfo,
                     });
                     if (sessionRes.data?.session?.id) {
                         await SecureStore.setItemAsync('currentSessionId', sessionRes.data.session.id);

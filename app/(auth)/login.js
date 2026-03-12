@@ -469,7 +469,7 @@ export default function LoginScreen() {
                 await supabase.auth.signOut();
                 Alert.alert(
                     'Web Only',
-                    'Admin accounts can only access the web dashboard at school.edubreezy.com. Please use the web version for admin features.',
+                    'Admin accounts can only access the web dashboard at atlas.edubreezy.com. Please use the web version for admin features.',
                     [{ text: 'OK' }]
                 );
                 setLoading(false);

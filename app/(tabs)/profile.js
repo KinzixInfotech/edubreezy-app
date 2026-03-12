@@ -834,7 +834,7 @@ export default function ProfileScreen() {
       setEditNameModalVisible(true);
     } else if (item.action === 'viewSchoolProfile') {
       if (user?.schoolId) {
-        const url = `https://school.edubreezy.com/explore/schools/${user.schoolId}?ref=com.kinzix.edubreezy`;
+        const url = `https://atlas.edubreezy.com/explore/schools/${user.schoolId}?ref=com.kinzix.edubreezy`;
         try {
           const supported = await Linking.canOpenURL(url);
           if (supported) {

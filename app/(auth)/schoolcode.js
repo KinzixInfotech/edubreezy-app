@@ -709,7 +709,6 @@ export default function SchoolCodePage() {
                       <View>
                         <View style={styles.searchRow}>
                           <View style={[styles.searchInputWrapper, searchError && styles.inputWrapperError, { flex: 1 }]}>
-                            <Text style={styles.searchIcon}>🔍</Text>
                             <TextInput
                               style={styles.searchInput}
                               placeholder="Search by school name or city..."

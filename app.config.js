@@ -7,7 +7,6 @@ export default {
         slug: "EduBreezy",
         scheme: "edubreezy",
         version: "1.0.3",
-        orientation: "portrait",
         icon: "./assets/icon.png",
         userInterfaceStyle: "light",
         newArchEnabled: true,

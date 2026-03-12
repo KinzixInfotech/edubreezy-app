@@ -59,6 +59,8 @@ import ProfileAvatar from '../components/ProfileAvatar';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const isSmallDevice = SCREEN_WIDTH < 375;
+const CHILD_CARD_WIDTH = isSmallDevice ? SCREEN_WIDTH * 0.7 : SCREEN_WIDTH * 0.75;
+const CHILD_CARD_MARGIN = 6;
 const isShortDevice = SCREEN_HEIGHT < 700;
 const isTablet = SCREEN_WIDTH >= 768;
 
@@ -368,12 +370,14 @@ export default function HomeScreen() {
     // Configure Android navigation bar color to match theme
     useEffect(() => {
         if (Platform.OS === 'android') {
-            try {
-                NavigationBar.setBackgroundColorAsync('#ffffff');
-                NavigationBar.setButtonStyleAsync('dark');
-            } catch (error) {
-                console.warn('NavigationBar error in Home:', error);
-            }
+            (async () => {
+                try {
+                    await NavigationBar.setBackgroundColorAsync('#ffffff');
+                    await NavigationBar.setButtonStyleAsync('dark');
+                } catch (error) {
+                    console.warn('NavigationBar error in Home:', error);
+                }
+            })();
         }
     }, []);
 
@@ -2101,158 +2105,163 @@ export default function HomeScreen() {
                         </View>
                     </View>
                     {/* Carousel Container */}
-                    <View style={[styles.carouselContainer, uiChildren.length === 1 && { height: 'auto' }]}>
+                    <View style={{ marginTop: 12 }}>
                         {uiChildren.length === 1 ? (
-                            // Single child - fill like other sections, no vertical centering
-                            <View style={{ width: '100%' }}>
-                                <Animated.View entering={FadeInRight.delay(200).duration(500)} style={{ width: '100%' }}>
-                                    <HapticTouchable onPress={() => setSelectedChild(uiChildren[0])}>
-                                        <LinearGradient
-                                            colors={['#0469ff', '#0347b8']}
-                                            style={[
-                                                {
-                                                    // Use childCard styles but override width
-                                                    flexDirection: 'row',
-                                                    padding: 16,
-                                                    borderRadius: 16,
-                                                    gap: 12,
-                                                    position: 'relative',
-                                                    width: '100%', // Full width instead of fixed SCREEN_WIDTH * 0.75
-                                                },
-                                                styles.selectedChildCard,
-                                                {
-                                                    shadowColor: '#0469ff',
-                                                    shadowOpacity: 0.3,
-                                                    shadowRadius: 12,
-                                                    elevation: 8,
-                                                }
-                                            ]}
-                                        >{/* Decorative Education Pattern */}
-                                            <Text style={{ position: 'absolute', top: 5, right: 50, fontSize: 24, color: 'rgba(255,255,255,0.25)', fontWeight: '300' }}>+</Text>
-                                            <Text style={{ position: 'absolute', top: 40, right: 15, fontSize: 18, color: 'rgba(255,255,255,0.2)', fontWeight: '300' }}>×</Text>
-                                            <Text style={{ position: 'absolute', bottom: 8, right: 80, fontSize: 20, color: 'rgba(255,255,255,0.18)', fontWeight: '300' }}>÷</Text>
-                                            <Text style={{ position: 'absolute', top: 10, left: '45%', fontSize: 16, color: 'rgba(255,255,255,0.2)', fontWeight: '300' }}>△</Text>
-                                            <Text style={{ position: 'absolute', bottom: 5, left: '55%', fontSize: 14, color: 'rgba(255,255,255,0.18)', fontWeight: '300' }}>○</Text>
-                                            <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.08)' }} />
-                                            <View style={{ position: 'absolute', bottom: -25, left: '25%', width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.06)' }} />
+                            // Single child - full width card
+                            <Animated.View entering={FadeInRight.delay(200).duration(500)}>
+                                <HapticTouchable onPress={() => setSelectedChild(uiChildren[0])}>
+                                    <LinearGradient
+                                        colors={['#0469ff', '#0347b8']}
+                                        style={{
+                                            flexDirection: 'row',
+                                            padding: 16,
+                                            borderRadius: 16,
+                                            gap: 12,
+                                            position: 'relative',
+                                            overflow: 'hidden',
+                                            alignItems: 'center',
+                                            shadowColor: '#0469ff',
+                                            shadowOpacity: 0.3,
+                                            shadowRadius: 12,
+                                            shadowOffset: { width: 0, height: 6 },
+                                            elevation: 8,
+                                        }}
+                                    >
+                                        <Text style={{ position: 'absolute', top: 5, right: 50, fontSize: 24, color: 'rgba(255,255,255,0.25)', fontWeight: '300' }}>+</Text>
+                                        <Text style={{ position: 'absolute', top: 40, right: 15, fontSize: 18, color: 'rgba(255,255,255,0.2)', fontWeight: '300' }}>×</Text>
+                                        <Text style={{ position: 'absolute', bottom: 8, right: 80, fontSize: 20, color: 'rgba(255,255,255,0.18)', fontWeight: '300' }}>÷</Text>
+                                        <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.08)' }} />
 
-                                            <Image
-                                                source={
-                                                    uiChildren[0]?.avatar &&
-                                                        !uiChildren[0].avatar.includes('default.png')
-                                                        ? { uri: uiChildren[0].avatar }
-                                                        : icon
-                                                }
-                                                style={styles.childAvatar}
-                                            />
-
-
-                                            <View style={styles.childInfo}>
-                                                <Text style={[styles.childName, styles.selectedText]} numberOfLines={1}>
-                                                    {uiChildren[0].name}
-                                                </Text>
-                                                <Text style={[styles.childClass, styles.selectedSubText]}>
-                                                    Class {uiChildren[0].class} - {uiChildren[0].section}
-                                                </Text>
-                                                <View style={styles.childMeta}>
-                                                    <View style={[styles.metaBadge, styles.selectedBadge]}>
-                                                        <Text style={[styles.metaText, styles.selectedText]}>
-                                                            Roll: {uiChildren[0].rollNo}
-                                                        </Text>
-                                                    </View>
+                                        <Image
+                                            source={
+                                                uiChildren[0]?.avatar && !uiChildren[0].avatar.includes('default.png')
+                                                    ? { uri: uiChildren[0].avatar }
+                                                    : icon
+                                            }
+                                            style={styles.childAvatar}
+                                        />
+                                        <View style={styles.childInfo}>
+                                            <Text style={[styles.childName, styles.selectedText]} numberOfLines={1}>
+                                                {uiChildren[0].name}
+                                            </Text>
+                                            <Text style={[styles.childClass, styles.selectedSubText]}>
+                                                Class {uiChildren[0].class} - {uiChildren[0].section}
+                                            </Text>
+                                            <View style={styles.childMeta}>
+                                                <View style={[styles.metaBadge, styles.selectedBadge]}>
+                                                    <Text style={[styles.metaText, styles.selectedText]}>
+                                                        Roll: {uiChildren[0].rollNo}
+                                                    </Text>
                                                 </View>
                                             </View>
-                                            <View style={styles.selectedIndicator}>
-                                                <Text style={styles.checkmark}>✓</Text>
-                                            </View>
-                                        </LinearGradient>
-                                    </HapticTouchable>
-                                </Animated.View>
-                            </View>
+                                        </View>
+                                        <View style={styles.selectedIndicator}>
+                                            <Text style={styles.checkmark}>✓</Text>
+                                        </View>
+                                    </LinearGradient>
+                                </HapticTouchable>
+                            </Animated.View>
                         ) : (
-                            // Multiple children - use carousel
-                            <FlatList
-                                data={uiChildren}
-                                horizontal
-                                pagingEnabled={false}
-                                showsHorizontalScrollIndicator={false}
-                                snapToInterval={SCREEN_WIDTH * 0.75 + 16} // card width + margin
-                                snapToAlignment="center"
-                                decelerationRate="fast"
-                                contentContainerStyle={{
-                                    paddingHorizontal: (SCREEN_WIDTH - (isSmallDevice ? SCREEN_WIDTH * 0.7 : SCREEN_WIDTH * 0.75)) / 2,
-                                    alignItems: 'center',
-                                }}
-                                keyExtractor={(item) => item.id}
-                                renderItem={({ item: child, index }) => {
-                                    const isSelected = selectedChild?.id === child.id;
-                                    const distanceFromCenter = Math.abs(
-                                        index - uiChildren.findIndex(c => c.id === selectedChild?.id)
-                                    );
+                            // Multiple children - snap carousel, each card = full section width
+                            (() => {
+                                const CARD_WIDTH = SCREEN_WIDTH - 32;
+                                const CARD_GAP = 12;
+                                const SNAP_INTERVAL = CARD_WIDTH + CARD_GAP;
+                                const selectedIndex = Math.max(0, uiChildren.findIndex(c => c.id === selectedChild?.id));
 
-                                    // Calculate opacity and scale based on distance from selected
-                                    const opacity = isSelected ? 1 : Math.max(0.3, 1 - (distanceFromCenter * 0.4));
-                                    const scale = isSelected ? 1 : Math.max(0.85, 1 - (distanceFromCenter * 0.1));
-
-                                    return (
-                                        <Animated.View
-                                            entering={FadeInRight.delay(200 + index * 100).duration(500)}
-                                            style={{
-                                                marginHorizontal: 8,
-                                                opacity,
-                                                transform: [{ scale }],
-                                            }}
-                                        >
-                                            <HapticTouchable onPress={() => setSelectedChild(child)}>
-                                                <LinearGradient
-                                                    colors={isSelected ? ['#0469ff', '#0347b8'] : ['#f8f9fa', '#e9ecef']}
-                                                    style={[
-                                                        styles.childCard,
-                                                        isSelected && styles.selectedChildCard,
-                                                        {
-                                                            shadowColor: isSelected ? '#0469ff' : '#000',
-                                                            shadowOpacity: isSelected ? 0.3 : 0.1,
-                                                            shadowRadius: isSelected ? 12 : 4,
-                                                            elevation: isSelected ? 8 : 2,
-                                                        }
-                                                    ]}
+                                return (
+                                    <FlatList
+                                        data={uiChildren}
+                                        horizontal
+                                        pagingEnabled={false}
+                                        showsHorizontalScrollIndicator={false}
+                                        snapToInterval={SNAP_INTERVAL}
+                                        snapToAlignment="start"
+                                        decelerationRate="fast"
+                                        initialScrollIndex={selectedIndex}
+                                        getItemLayout={(_, index) => ({
+                                            length: SNAP_INTERVAL,
+                                            offset: SNAP_INTERVAL * index,
+                                            index,
+                                        })}
+                                        contentContainerStyle={{ paddingRight: 32 }}
+                                        keyExtractor={(item) => item.id}
+                                        // NO onMomentumScrollEnd - selection only changes on tap
+                                        renderItem={({ item: child, index }) => {
+                                            const isSelected = selectedChild?.id === child.id;
+                                            return (
+                                                <Animated.View
+                                                    entering={FadeInRight.delay(200 + index * 100).duration(500)}
+                                                    style={{
+                                                        width: CARD_WIDTH,
+                                                        marginRight: CARD_GAP,
+                                                    }}
                                                 >
-                                                    {/* Decorative Education Pattern (only on selected) */}
-                                                    {isSelected && (
-                                                        <>
-                                                            <Text style={{ position: 'absolute', top: 8, right: 45, fontSize: 14, color: 'rgba(255,255,255,0.15)', fontWeight: '300' }}>+</Text>
-                                                            <Text style={{ position: 'absolute', top: 35, right: 20, fontSize: 10, color: 'rgba(255,255,255,0.12)', fontWeight: '300' }}>×</Text>
-                                                            <Text style={{ position: 'absolute', bottom: 12, right: 70, fontSize: 16, color: 'rgba(255,255,255,0.1)', fontWeight: '300' }}>÷</Text>
-                                                            <View style={{ position: 'absolute', top: -15, right: -15, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.05)' }} />
-                                                        </>
-                                                    )}
-                                                    <Image source={{ uri: child.avatar }} style={styles.childAvatar} />
-                                                    <View style={styles.childInfo}>
-                                                        <Text style={[styles.childName, isSelected && styles.selectedText]} numberOfLines={1}>
-                                                            {child.name}
-                                                        </Text>
-                                                        <Text style={[styles.childClass, isSelected && styles.selectedSubText]}>
-                                                            Class {child.class} - {child.section}
-                                                        </Text>
-                                                        <View style={styles.childMeta}>
-                                                            <View style={[styles.metaBadge, isSelected && styles.selectedBadge]}>
-                                                                <Text style={[styles.metaText, isSelected && styles.selectedText]}>
-                                                                    Roll: {child.rollNo}
+                                                    <HapticTouchable onPress={() => setSelectedChild(child)}>
+                                                        <LinearGradient
+                                                            colors={isSelected ? ['#0469ff', '#0347b8'] : ['#f8f9fa', '#e9ecef']}
+                                                            style={{
+                                                                flexDirection: 'row',
+                                                                padding: 16,
+                                                                borderRadius: 16,
+                                                                gap: 12,
+                                                                position: 'relative',
+                                                                overflow: 'hidden',
+                                                                alignItems: 'center',
+                                                                minHeight: 100,
+                                                                shadowColor: isSelected ? '#0469ff' : '#000',
+                                                                shadowOpacity: isSelected ? 0.3 : 0.08,
+                                                                shadowRadius: isSelected ? 12 : 4,
+                                                                shadowOffset: { width: 0, height: isSelected ? 6 : 2 },
+                                                                elevation: isSelected ? 8 : 2,
+                                                            }}
+                                                        >
+                                                            {isSelected && (
+                                                                <>
+                                                                    <Text style={{ position: 'absolute', top: 8, right: 45, fontSize: 14, color: 'rgba(255,255,255,0.15)', fontWeight: '300' }}>+</Text>
+                                                                    <Text style={{ position: 'absolute', top: 35, right: 20, fontSize: 10, color: 'rgba(255,255,255,0.12)', fontWeight: '300' }}>×</Text>
+                                                                    <Text style={{ position: 'absolute', bottom: 12, right: 70, fontSize: 16, color: 'rgba(255,255,255,0.1)', fontWeight: '300' }}>÷</Text>
+                                                                    <View style={{ position: 'absolute', top: -15, right: -15, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.05)' }} />
+                                                                </>
+                                                            )}
+
+                                                            <Image
+                                                                source={
+                                                                    child?.avatar && !child.avatar.includes('default.png')
+                                                                        ? { uri: child.avatar }
+                                                                        : icon
+                                                                }
+                                                                style={styles.childAvatar}
+                                                            />
+                                                            <View style={styles.childInfo}>
+                                                                <Text style={[styles.childName, isSelected && styles.selectedText]} numberOfLines={1}>
+                                                                    {child.name}
                                                                 </Text>
+                                                                <Text style={[styles.childClass, isSelected && styles.selectedSubText]}>
+                                                                    Class {child.class} - {child.section}
+                                                                </Text>
+                                                                <View style={styles.childMeta}>
+                                                                    <View style={[styles.metaBadge, isSelected && styles.selectedBadge]}>
+                                                                        <Text style={[styles.metaText, isSelected && styles.selectedText]}>
+                                                                            Roll: {child.rollNo}
+                                                                        </Text>
+                                                                    </View>
+                                                                </View>
                                                             </View>
-                                                        </View>
-                                                    </View>
-                                                    {isSelected && (
-                                                        <View style={styles.selectedIndicator}>
-                                                            <Text style={styles.checkmark}>✓</Text>
-                                                        </View>
-                                                    )}
-                                                </LinearGradient>
-                                            </HapticTouchable>
-                                        </Animated.View>
-                                    );
-                                }}
-                            />
+
+                                                            {isSelected && (
+                                                                <View style={styles.selectedIndicator}>
+                                                                    <Text style={styles.checkmark}>✓</Text>
+                                                                </View>
+                                                            )}
+                                                        </LinearGradient>
+                                                    </HapticTouchable>
+                                                </Animated.View>
+                                            );
+                                        }}
+                                    />
+                                );
+                            })()
                         )}
                     </View>
                 </Animated.View>
@@ -4353,7 +4362,7 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     carouselContainer: {
-        height: 160,
+        // height: 160,
         marginTop: 12,
     },
     childrenScroll: {
@@ -4361,7 +4370,7 @@ const styles = StyleSheet.create({
         paddingRight: 16,
     },
     childCard: {
-        width: isSmallDevice ? SCREEN_WIDTH * 0.7 : SCREEN_WIDTH * 0.75,
+        width: CHILD_CARD_WIDTH,
         flexDirection: 'row',
         padding: 16,
         borderRadius: 16,
@@ -5399,7 +5408,7 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                             <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
                             <View style={styles.statIcon}><Award size={22} color="#fff" /></View>
                             <View>
-                                <Text style={styles.statValue}>{Math.round(attendancePercent)}%</Text>
+                                <Text style={styles.statValue}>{attendancePercent}%</Text>
                                 <Text style={styles.statLabel}>Attendance</Text>
                             </View>
                         </LinearGradient>

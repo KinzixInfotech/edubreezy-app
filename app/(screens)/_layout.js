@@ -19,6 +19,8 @@ export default function ScreenLayout() {
         <Stack.Screen name="homework/view" />
         <Stack.Screen name="syllabusview" />
         <Stack.Screen name="homework/assign" />
+        <Stack.Screen name="chat/[conversationId]" />
+        <Stack.Screen name="chat/new" />
         <Stack.Screen
           name="transport/my-vehicle"
           options={{

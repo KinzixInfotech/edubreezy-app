@@ -60,21 +60,21 @@ function TabsLayout() {
   const getTabConfig = () => {
     switch (role) {
       case 'STUDENT':
-        return { showHome: true, showProfile: true, showNoticeBoard: true, showMarkAttendance: false };
+        return { showHome: true, showProfile: true, showChat: true, showNoticeBoard: true, showMarkAttendance: false };
       case 'TEACHING_STAFF':
-        return { showHome: true, showProfile: true, markSelf: false, showNoticeBoard: true, showMarkAttendance: false };
+        return { showHome: true, showProfile: true, showChat: true, markSelf: false, showNoticeBoard: true, showMarkAttendance: false };
       case 'ADMIN':
-        return { showHome: true, showProfile: true, showNoticeBoard: true, showMarkAttendance: false };
+        return { showHome: true, showProfile: true, showChat: true, showNoticeBoard: true, showMarkAttendance: false };
       case 'PARENT':
-        return { showHome: true, showProfile: true, markSelf: false, showNoticeBoard: true, showMarkAttendance: false };
+        return { showHome: true, showProfile: true, showChat: true, markSelf: false, showNoticeBoard: true, showMarkAttendance: false };
       case 'DIRECTOR':
-        return { showHome: true, showProfile: true, markSelf: false, showNoticeBoard: true, showMarkAttendance: false };
+        return { showHome: true, showProfile: true, showChat: true, markSelf: false, showNoticeBoard: true, showMarkAttendance: false };
       case 'PRINCIPAL':
-        return { showHome: true, showProfile: true, markSelf: false, showNoticeBoard: true, showMarkAttendance: false };
+        return { showHome: true, showProfile: true, showChat: true, markSelf: false, showNoticeBoard: true, showMarkAttendance: false };
       case 'ACCOUNTANT':
-        return { showHome: true, showProfile: true, markSelf: false, showNoticeBoard: true, showMarkAttendance: false };
+        return { showHome: true, showProfile: true, showChat: false, markSelf: false, showNoticeBoard: true, showMarkAttendance: false };
       default:
-        return { showHome: true, showProfile: true, showNoticeBoard: false, markSelf: false, showMarkAttendance: false };
+        return { showHome: true, showProfile: true, showChat: false, showNoticeBoard: false, markSelf: false, showMarkAttendance: false };
     }
   };
 
@@ -145,6 +145,33 @@ function TabsLayout() {
         }}
       />
 
+
+      <Tabs.Screen
+        name="noticeboard"
+        options={{
+          title: 'Notice Board',
+          href: tabConfig.showNoticeBoard ? undefined : null,
+          tabBarItemStyle: tabConfig.showNoticeBoard ? undefined : { display: 'none' },
+          unmountOnBlur: false,
+          tabBarBadge: noticeBadgeCount > 0 ? noticeBadgeCount : undefined,
+          tabBarIcon: ({ focused, color, size }) => (
+            <Ionicons name={focused ? 'megaphone' : 'megaphone-outline'} size={size} color={color} />
+          ),
+        }}
+      />
+
+      <Tabs.Screen
+        name="chat"
+        options={{
+          title: 'Chat',
+          href: tabConfig.showChat ? undefined : null,
+          tabBarItemStyle: tabConfig.showChat ? undefined : { display: 'none' },
+          unmountOnBlur: false,
+          tabBarIcon: ({ focused, color, size }) => (
+            <Ionicons name={focused ? 'chatbubbles' : 'chatbubbles-outline'} size={size} color={color} />
+          ),
+        }}
+      />
       <Tabs.Screen
         name="profile"
         options={{
@@ -184,19 +211,6 @@ function TabsLayout() {
         }}
       />
 
-      <Tabs.Screen
-        name="noticeboard"
-        options={{
-          title: 'Notice Board',
-          href: tabConfig.showNoticeBoard ? undefined : null,
-          tabBarItemStyle: tabConfig.showNoticeBoard ? undefined : { display: 'none' },
-          unmountOnBlur: false,
-          tabBarBadge: noticeBadgeCount > 0 ? noticeBadgeCount : undefined,
-          tabBarIcon: ({ focused, color, size }) => (
-            <Ionicons name={focused ? 'megaphone' : 'megaphone-outline'} size={size} color={color} />
-          ),
-        }}
-      />
     </Tabs>
   );
 }

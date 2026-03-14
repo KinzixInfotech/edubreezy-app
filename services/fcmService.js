@@ -228,6 +228,27 @@ class FCMService {
         return type === 'notice' || type === 'NOTICE' || type === 'broadcast' || type === 'BROADCAST';
     }
 
+    // Check if notification is a chat message type
+    isChatType(remoteMessage) {
+        const type = remoteMessage?.data?.type || remoteMessage?.data?.notificationType;
+        return type === 'CHAT_MESSAGE' || type === 'chat_message';
+    }
+
+    // Navigate to a chat conversation from notification data
+    navigateToChat(remoteMessage) {
+        const conversationId = remoteMessage?.data?.conversationId;
+        const schoolId = remoteMessage?.data?.schoolId;
+        const title = remoteMessage?.data?.conversationTitle || remoteMessage?.notification?.title || 'Chat';
+        if (conversationId) {
+            router.push({
+                pathname: '/(screens)/chat/[conversationId]',
+                params: { conversationId, schoolId, title },
+            });
+        } else {
+            router.push('/(tabs)/chat');
+        }
+    }
+
     setupNotificationListeners(onNotificationReceived) {
         // console.log('🔔 Setting up FCM notification listeners...');
 
@@ -254,8 +275,13 @@ class FCMService {
         const unsubscribeBackground = messaging().onNotificationOpenedApp(async remoteMessage => {
             // console.log('📬 Notification opened from background:', remoteMessage);
 
-            // Don't increment here - background handler already did if it was a notice
+            // Handle chat notifications
+            if (this.isChatType(remoteMessage)) {
+                this.navigateToChat(remoteMessage);
+                return;
+            }
 
+            // Don't increment here - background handler already did if it was a notice
             const noticeId = remoteMessage?.data?.noticeId;
             if (noticeId) {
                 router.push(`/(tabs)/noticeboard?noticeId=${noticeId}`);
@@ -270,6 +296,12 @@ class FCMService {
         messaging().getInitialNotification().then(async remoteMessage => {
             if (remoteMessage) {
                 // console.log('📭 Notification opened from quit state:', remoteMessage);
+
+                // Handle chat notifications
+                if (this.isChatType(remoteMessage)) {
+                    this.navigateToChat(remoteMessage);
+                    return;
+                }
 
                 // Only increment for notice types
                 if (this.isNoticeType(remoteMessage)) {

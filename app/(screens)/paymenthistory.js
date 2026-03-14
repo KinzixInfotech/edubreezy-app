@@ -11,6 +11,7 @@ import {
     Alert,
     ActivityIndicator,
     Share,
+    TouchableOpacity,
 } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import { useState, useCallback } from 'react';
@@ -29,12 +30,13 @@ import {
     FileText,
     ChevronRight,
     X,
+    AlertCircle,
+    Hourglass,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
     FadeInDown,
     FadeInRight,
-    FadeIn,
     SlideInRight,
 } from 'react-native-reanimated';
 import * as SecureStore from 'expo-secure-store';
@@ -44,6 +46,7 @@ import api from '../../lib/api';
 import HapticTouchable from '../components/HapticTouch';
 import { Modal } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import Svg, { Circle } from 'react-native-svg';
 
 export default function PaymentHistoryScreen() {
     const params = useLocalSearchParams();
@@ -55,6 +58,7 @@ export default function PaymentHistoryScreen() {
     const [receiptModalVisible, setReceiptModalVisible] = useState(false);
     const [isDownloading, setIsDownloading] = useState(false);
     const [filterMode, setFilterMode] = useState('ALL'); // 'ALL' | 'ONLINE' | 'CASH'
+    const [activeTab, setActiveTab] = useState('DETAILS'); // 'DETAILS' | 'RECEIPTS'
 
     const queryClient = useQueryClient();
 
@@ -81,8 +85,18 @@ export default function PaymentHistoryScreen() {
         select: (data) => data?.find(y => y.isActive),
     });
 
-    // Fetch payment history
-    const { data: payments, isLoading } = useQuery({
+    // Fetch student fee details for DETAILS tab
+    const { data: studentFee, isLoading: feeLoading } = useQuery({
+        queryKey: ['student-fee', childData?.studentId, academicYears?.id],
+        queryFn: async () => {
+            const res = await api.get(`/schools/fee/students/${childData.studentId}?academicYearId=${academicYears.id}`);
+            return res.data;
+        },
+        enabled: !!childData && !!academicYears?.id,
+    });
+
+    // Fetch payment history for RECEIPTS tab
+    const { data: payments, isLoading: paymentsLoading } = useQuery({
         queryKey: ['payment-history', childData?.studentId, academicYears?.id],
         queryFn: async () => {
             const params = new URLSearchParams({
@@ -98,9 +112,13 @@ export default function PaymentHistoryScreen() {
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
-        await queryClient.invalidateQueries(['payment-history']);
+        if (activeTab === 'DETAILS') {
+            await queryClient.invalidateQueries(['student-fee']);
+        } else {
+            await queryClient.invalidateQueries(['payment-history']);
+        }
         setRefreshing(false);
-    }, []);
+    }, [activeTab]);
 
     const formatCurrency = (amount) => {
         return new Intl.NumberFormat('en-IN', {
@@ -238,14 +256,13 @@ Thank you for your payment!
         }
     };
 
-    // Calculate summary
+    // Summary logic
     const summary = {
         totalPayments: payments?.length || 0,
         totalAmount: payments?.reduce((sum, p) => sum + p.amount, 0) || 0,
         lastPayment: payments?.[0],
     };
 
-    // Filter payments
     const filteredPayments = payments?.filter(payment => {
         if (filterMode === 'ALL') return true;
         if (filterMode === 'CASH') return ['CASH', 'CHEQUE'].includes(payment.paymentMethod);
@@ -261,11 +278,138 @@ Thank you for your payment!
         );
     }
 
+    const renderDonutChart = () => {
+        if (!studentFee) return null;
+
+        const total = studentFee.originalAmount || 0;
+        const paid = studentFee.paidAmount || 0;
+        const balance = studentFee.balanceAmount || 0;
+        const concession = studentFee.concessionAmount || 0;
+
+        const size = 140;
+        const strokeWidth = 28;
+        const radius = (size - strokeWidth) / 2;
+        const circumference = radius * 2 * Math.PI;
+
+        const paidPercent = total > 0 ? (paid / total) : 0;
+        const balancePercent = total > 0 ? (balance / total) : 0;
+        const conPercent = total > 0 ? (concession / total) : 0;
+
+        const paidStroke = circumference * paidPercent;
+        const balanceStroke = circumference * balancePercent;
+        const conStroke = circumference * conPercent;
+
+        const gap = 4;
+
+        const slices = [];
+        let currentOffset = 0;
+
+        if (paidPercent > 0) {
+            slices.push({ color: '#51CF66', stroke: Math.max(0, paidStroke - gap), offset: -currentOffset });
+            currentOffset += paidStroke;
+        }
+        if (balancePercent > 0) {
+            slices.push({ color: '#FF6B6B', stroke: Math.max(0, balanceStroke - gap), offset: -currentOffset });
+            currentOffset += balanceStroke;
+        }
+        if (conPercent > 0) {
+            slices.push({ color: '#FF922B', stroke: Math.max(0, conStroke - gap), offset: -currentOffset });
+            currentOffset += conStroke;
+        }
+
+        return (
+            <View style={styles.feeStatusCard}>
+                <View style={styles.feeStatusHeader}>
+                    <Text style={styles.feeStatusTitle}>Fee Status</Text>
+                    {/* <ChevronRight size={20} color="#0469ff" /> */}
+                </View>
+                <View style={styles.feeStatusBody}>
+                    <View style={styles.chartContainer}>
+                        <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+                            {slices.map((slice, index) => (
+                                <Circle
+                                    key={index}
+                                    cx={size / 2}
+                                    cy={size / 2}
+                                    r={radius}
+                                    stroke={slice.color}
+                                    strokeWidth={strokeWidth}
+                                    fill="transparent"
+                                    strokeDasharray={`${slice.stroke} ${circumference}`}
+                                    strokeDashoffset={slice.offset}
+                                    transform={`rotate(-90 ${size / 2} ${size / 2})`}
+                                    strokeLinecap="butt"
+                                />
+                            ))}
+                        </Svg>
+                    </View>
+                    <View style={styles.legendContainer}>
+                        <View style={styles.legendItem}>
+                            <View style={[styles.legendDot, { backgroundColor: '#3B82F6' }]} />
+                            <View>
+                                <Text style={styles.legendLabel}>Payable</Text>
+                                <Text style={styles.legendValue}>{formatCurrency(total)}</Text>
+                            </View>
+                        </View>
+                        <View style={styles.legendItem}>
+                            <View style={[styles.legendDot, { backgroundColor: '#FF922B' }]} />
+                            <View>
+                                <Text style={styles.legendLabel}>Con/Dis</Text>
+                                <Text style={styles.legendValue}>{formatCurrency(concession)}</Text>
+                            </View>
+                        </View>
+                        <View style={styles.legendItem}>
+                            <View style={[styles.legendDot, { backgroundColor: '#51CF66' }]} />
+                            <View>
+                                <Text style={styles.legendLabel}>Paid</Text>
+                                <Text style={styles.legendValue}>{formatCurrency(paid)}</Text>
+                            </View>
+                        </View>
+                        <View style={styles.legendItem}>
+                            <View style={[styles.legendDot, { backgroundColor: '#FF6B6B' }]} />
+                            <View>
+                                <Text style={styles.legendLabel}>Balance</Text>
+                                <Text style={styles.legendValue}>{formatCurrency(balance)}</Text>
+                            </View>
+                        </View>
+                    </View>
+                </View>
+            </View>
+        );
+    };
+
+    const renderStamp = (status) => {
+        if (status === 'PAID') {
+            return (
+                <View style={[styles.circularStamp, { borderColor: '#16a34a', borderStyle: 'solid' }]}>
+                    <CheckCircle size={20} color="#16a34a" />
+                    <Text style={[styles.stampText, { color: '#16a34a', fontSize: 9, marginTop: 2 }]}>PAID</Text>
+                </View>
+            );
+        } else if (status === 'PARTIAL') {
+            return (
+                <View style={[styles.circularStamp, { borderColor: '#d97706' }]}>
+                    <Text style={[styles.stampText, { color: '#d97706', marginBottom: 1 }]}>PARTIAL</Text>
+                    <Hourglass size={14} color="#d97706" />
+                    <Text style={[styles.stampText, { color: '#d97706', marginTop: 1 }]}>PAYMENT</Text>
+                </View>
+            );
+        } else {
+            return (
+                <View style={[styles.circularStamp, { borderColor: '#dc2626' }]}>
+                    <Text style={[styles.stampText, { color: '#dc2626', marginBottom: 1 }]}>PAYMENT</Text>
+                    <Hourglass size={14} color="#dc2626" />
+                    <Text style={[styles.stampText, { color: '#dc2626', marginTop: 1 }]}>REQUIRED</Text>
+                </View>
+            );
+        }
+    };
+
     return (
         <View style={styles.container}>
             <StatusBar style="dark" />
             {/* Header */}
-            <Animated.View entering={FadeInDown.duration(400)} style={[styles.header, Platform.OS === 'ios' ? { paddingTop: 60 } : { paddingTop: 20 }]}>
+            <Animated.View entering={FadeInDown.duration(400)} style={[styles.header, Platform.OS === 'ios' ? { paddingTop: 60 } : { paddingTop: 60 }]}>
                 <HapticTouchable onPress={() => router.back()}>
                     <View style={styles.backButton}>
                         <ArrowLeft size={24} color="#111" />
@@ -282,6 +426,11 @@ Thank you for your payment!
 
             <ScrollView
                 style={styles.content}
+                contentContainerStyle={
+                    activeTab === 'DETAILS'
+                        ? { paddingBottom: 35 }
+                        : { paddingBottom: 0 }
+                }
                 showsVerticalScrollIndicator={false}
                 refreshControl={
                     <RefreshControl
@@ -291,151 +440,254 @@ Thank you for your payment!
                     />
                 }
             >
-                {isLoading ? (
-                    <View style={styles.loadingContainer}>
-                        <ActivityIndicator size="large" color="#0469ff" />
-                    </View>
-                ) : !payments || payments.length === 0 ? (
-                    <Animated.View entering={FadeInDown.delay(300)} style={styles.noDataCard}>
-                        <Receipt size={64} color="#ccc" />
-                        <Text style={styles.noDataText}>No payment history yet</Text>
-                        <Text style={styles.noDataSubtext}>
-                            Payments will appear here once made
-                        </Text>
-                    </Animated.View>
-                ) : (
-                    <>
-                        {/* Summary Cards */}
-                        <Animated.View entering={FadeInDown.delay(200)}>
-                            <View style={styles.summaryGrid}>
-                                <LinearGradient
-                                    colors={['#3B82F6', '#2563EB']}
-                                    style={styles.summaryCard}
-                                >
-                                    <FileText size={24} color="#fff" />
-                                    <Text style={styles.summaryValue}>{summary.totalPayments}</Text>
-                                    <Text style={styles.summaryLabel}>Total Payments</Text>
-                                </LinearGradient>
+                {/* Tabs */}
+                <View style={styles.tabsContainer}>
+                    <HapticTouchable onPress={() => setActiveTab('DETAILS')} style={styles.tabInput}>
+                        <View style={[styles.tabItem, activeTab === 'DETAILS' && styles.tabItemActive]}>
+                            <Text style={[styles.tabText, activeTab === 'DETAILS' && styles.tabTextActive]}>Fee Details</Text>
+                        </View>
+                    </HapticTouchable>
+                    <HapticTouchable onPress={() => setActiveTab('RECEIPTS')} style={styles.tabInput}>
+                        <View style={[styles.tabItem, activeTab === 'RECEIPTS' && styles.tabItemActive]}>
+                            <Text style={[styles.tabText, activeTab === 'RECEIPTS' && styles.tabTextActive]}>Receipts</Text>
+                        </View>
+                    </HapticTouchable>
+                </View>
 
-                                <LinearGradient
-                                    colors={['#51CF66', '#37B24D']}
-                                    style={styles.summaryCard}
-                                >
-                                    <DollarSign size={24} color="#fff" />
-                                    <Text style={styles.summaryValue}>
-                                        {formatCurrency(summary.totalAmount)}
-                                    </Text>
-                                    <Text style={styles.summaryLabel}>Total Paid</Text>
-                                </LinearGradient>
-                            </View>
+                {activeTab === 'DETAILS' ? (
+                    feeLoading ? (
+                        <View style={styles.loadingContainer}>
+                            <ActivityIndicator size="large" color="#0469ff" />
+                        </View>
+                    ) : !studentFee ? (
+                        <Animated.View entering={FadeInDown.delay(300)} style={styles.noDataCard}>
+                            <AlertCircle size={64} color="#ccc" />
+                            <Text style={styles.noDataText}>No fee details found</Text>
                         </Animated.View>
-                        {/* Last Payment Card */}
-                        {summary.lastPayment && (
-                            <Animated.View entering={FadeInDown.delay(300)}>
-                                <View style={styles.lastPaymentCard}>
-                                    <View style={styles.lastPaymentHeader}>
-                                        <CheckCircle size={20} color="#51CF66" />
-                                        <Text style={styles.lastPaymentTitle}>Last Payment</Text>
-                                    </View>
-                                    <View style={styles.lastPaymentBody}>
-                                        <Text style={styles.lastPaymentAmount}>
-                                            {formatCurrency(summary.lastPayment.amount)}
-                                        </Text>
-                                        <Text style={styles.lastPaymentDate}>
-                                            {formatDate(summary.lastPayment.paymentDate)}
-                                        </Text>
-                                    </View>
-                                </View>
-                            </Animated.View>
-                        )}
-                        {/* Payments List */}
-                        <Animated.View entering={FadeInDown.delay(400)}>
-                            <View style={styles.sectionHeader}>
-                                <Text style={styles.sectionTitle}>All Payments</Text>
+                    ) : (
+                        <Animated.View entering={FadeInDown.delay(200)}>
+                            {/* Fee Status Card (Donut Chart) */}
+                            {renderDonutChart()}
+
+                            <View style={styles.feeDetailsHeader}>
+                                <Text style={styles.feeDetailsTitle}>Fee Details {studentFee.globalFeeStructure?.mode ? `(${studentFee.globalFeeStructure.mode})` : ''}</Text>
                             </View>
 
-                            {/* Filter Tabs */}
-                            <ScrollView
-                                horizontal
-                                showsHorizontalScrollIndicator={false}
-                                contentContainerStyle={{ gap: 8, paddingBottom: 16 }}
-                            >
-                                {['ALL', 'ONLINE', 'CASH'].map((mode) => (
-                                    <HapticTouchable key={mode} onPress={() => setFilterMode(mode)}>
-                                        <View style={[
-                                            styles.filterChip,
-                                            filterMode === mode && styles.filterChipActive
-                                        ]}>
-                                            <Text style={[
-                                                styles.filterChipText,
-                                                filterMode === mode && styles.filterChipTextActive
-                                            ]}>
-                                                {mode === 'ALL' ? 'All Transactions' : mode === 'CASH' ? 'Cash/Cheque' : 'Online'}
-                                            </Text>
-                                        </View>
-                                    </HapticTouchable>
-                                ))}
-                            </ScrollView>
-
-                            {filteredPayments?.map((payment, index) => {
-                                const MethodIcon = getPaymentMethodIcon(payment.paymentMethod);
+                            {/* Installments List */}
+                            {studentFee.installments?.map((inst, index) => {
+                                const dueDate = new Date(inst.dueDate);
+                                const monthName = dueDate.toLocaleDateString('en-IN', { month: 'short' }).toUpperCase();
+                                const balance = inst.amount - inst.paidAmount;
 
                                 return (
-                                    <Animated.View
-                                        key={payment.id}
-                                        entering={FadeInRight.delay(500 + index * 50)}
-                                    >
-                                        <HapticTouchable onPress={() => handleViewReceipt(payment)}>
-                                            <View style={styles.paymentCard}>
-                                                <View style={styles.paymentLeft}>
-                                                    <View style={styles.paymentIconContainer}>
-                                                        <LinearGradient
-                                                            colors={['#E3F2FD', '#BBDEFB']}
-                                                            style={styles.paymentIcon}
-                                                        >
-                                                            <MethodIcon size={20} color="#0469ff" />
-                                                        </LinearGradient>
-                                                    </View>
-
-                                                    <View style={styles.paymentInfo}>
-                                                        <Text style={styles.paymentReceipt}>
-                                                            {payment.receiptNumber}
-                                                        </Text>
-                                                        <View style={styles.paymentMeta}>
-                                                            <Calendar size={12} color="#666" />
-                                                            <Text style={styles.paymentDate}>
-                                                                {formatDate(payment.paymentDate)}
-                                                            </Text>
-                                                        </View>
-                                                        <Text style={styles.paymentMethod}>
-                                                            {payment.paymentMethod}
-                                                        </Text>
-                                                    </View>
+                                    <View key={inst.id} style={styles.installmentCardWrap}>
+                                        <View style={styles.monthCol}>
+                                            <Text style={styles.monthColText}>{monthName}</Text>
+                                        </View>
+                                        <View style={styles.installmentCardContent}>
+                                            <View style={styles.installmentRowTop}>
+                                                <View style={[styles.instDataBox, { borderColor: '#dc2626' }]}>
+                                                    <Text style={styles.instDataLabel}>Due</Text>
+                                                    <Text style={styles.instDataValue}>{formatCurrency(inst.amount)}</Text>
                                                 </View>
-
-                                                <View style={styles.paymentRight}>
-                                                    <Text style={styles.paymentAmount}>
-                                                        {formatCurrency(payment.amount)}
-                                                    </Text>
-                                                    <View style={styles.statusBadge}>
-                                                        <CheckCircle size={12} color="#51CF66" />
-                                                        <Text style={styles.statusText}>
-                                                            {payment.status}
-                                                        </Text>
-                                                    </View>
-                                                    <ChevronRight size={16} color="#999" />
+                                                <View style={[styles.instDataBox, { borderColor: '#16a34a' }]}>
+                                                    <Text style={styles.instDataLabel}>Paid</Text>
+                                                    <Text style={styles.instDataValue}>{formatCurrency(inst.paidAmount)}</Text>
                                                 </View>
                                             </View>
-                                        </HapticTouchable>
-                                    </Animated.View>
+                                            {balance > 0 && (
+                                                <View style={[styles.balanceBox, { borderColor: '#2563eb', backgroundColor: '#eff6ff' }]}>
+                                                    <Text style={styles.balanceText}>Balance {formatCurrency(balance)}</Text>
+                                                </View>
+                                            )}
+                                            {inst.paidDate && (
+                                                <Text style={styles.paidDateText}>Paid on {formatDate(inst.paidDate)}</Text>
+                                            )}
+                                        </View>
+                                        <View style={styles.stampCol}>
+                                            {renderStamp(inst.status)}
+                                            {inst.paidAmount > 0 && (
+                                                <HapticTouchable onPress={() => setActiveTab('RECEIPTS')} style={styles.instReceiptBtn}>
+                                                    <LinearGradient colors={['#3b82f6', '#2563eb']} style={styles.instReceiptIcon}>
+                                                        <FileText size={12} color="#fff" />
+                                                    </LinearGradient>
+                                                </HapticTouchable>
+                                            )}
+                                        </View>
+                                    </View>
                                 );
                             })}
-                        </Animated.View>
 
-                        <View style={{ height: 40 }} />
-                    </>
+                            <View style={{ height: 100 }} />
+                        </Animated.View>
+                    )
+                ) : (
+                    paymentsLoading ? (
+                        <View style={styles.loadingContainer}>
+                            <ActivityIndicator size="large" color="#0469ff" />
+                        </View>
+                    ) : !payments || payments.length === 0 ? (
+                        <Animated.View entering={FadeInDown.delay(300)} style={styles.noDataCard}>
+                            <Receipt size={64} color="#ccc" />
+                            <Text style={styles.noDataText}>No payment history yet</Text>
+                            <Text style={styles.noDataSubtext}>
+                                Payments will appear here once made
+                            </Text>
+                        </Animated.View>
+                    ) : (
+                        <>
+                            {/* Summary Cards */}
+                            <Animated.View entering={FadeInDown.delay(200)}>
+                                <View style={styles.summaryGrid}>
+                                    <LinearGradient
+                                        colors={['#3B82F6', '#2563EB']}
+                                        style={styles.summaryCard}
+                                    >
+                                        <FileText size={24} color="#fff" />
+                                        <Text style={styles.summaryValue}>{summary.totalPayments}</Text>
+                                        <Text style={styles.summaryLabel}>Total Payments</Text>
+                                    </LinearGradient>
+
+                                    <LinearGradient
+                                        colors={['#51CF66', '#37B24D']}
+                                        style={styles.summaryCard}
+                                    >
+                                        <DollarSign size={24} color="#fff" />
+                                        <Text style={styles.summaryValue}>
+                                            {formatCurrency(summary.totalAmount)}
+                                        </Text>
+                                        <Text style={styles.summaryLabel}>Total Paid</Text>
+                                    </LinearGradient>
+                                </View>
+                            </Animated.View>
+                            {/* Last Payment Card */}
+                            {summary.lastPayment && (
+                                <Animated.View entering={FadeInDown.delay(300)}>
+                                    <View style={styles.lastPaymentCard}>
+                                        <View style={styles.lastPaymentHeader}>
+                                            <CheckCircle size={20} color="#51CF66" />
+                                            <Text style={styles.lastPaymentTitle}>Last Payment</Text>
+                                        </View>
+                                        <View style={styles.lastPaymentBody}>
+                                            <Text style={styles.lastPaymentAmount}>
+                                                {formatCurrency(summary.lastPayment.amount)}
+                                            </Text>
+                                            <Text style={styles.lastPaymentDate}>
+                                                {formatDate(summary.lastPayment.paymentDate)}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                </Animated.View>
+                            )}
+                            {/* Payments List */}
+                            <Animated.View entering={FadeInDown.delay(400)}>
+                                <View style={styles.sectionHeader}>
+                                    <Text style={styles.sectionTitle}>All Payments</Text>
+                                </View>
+
+                                {/* Filter Tabs */}
+                                <ScrollView
+                                    horizontal
+                                    showsHorizontalScrollIndicator={false}
+                                    contentContainerStyle={{ gap: 8, paddingBottom: 16 }}
+                                >
+                                    {['ALL', 'ONLINE', 'CASH'].map((mode) => (
+                                        <HapticTouchable key={mode} onPress={() => setFilterMode(mode)}>
+                                            <View style={[
+                                                styles.filterChip,
+                                                filterMode === mode && styles.filterChipActive
+                                            ]}>
+                                                <Text style={[
+                                                    styles.filterChipText,
+                                                    filterMode === mode && styles.filterChipTextActive
+                                                ]}>
+                                                    {mode === 'ALL' ? 'All Transactions' : mode === 'CASH' ? 'Cash/Cheque' : 'Online'}
+                                                </Text>
+                                            </View>
+                                        </HapticTouchable>
+                                    ))}
+                                </ScrollView>
+
+                                {filteredPayments?.map((payment, index) => {
+                                    const MethodIcon = getPaymentMethodIcon(payment.paymentMethod);
+
+                                    return (
+                                        <Animated.View
+                                            key={payment.id}
+                                            entering={FadeInRight.delay(500 + index * 50)}
+                                        >
+                                            <HapticTouchable onPress={() => handleViewReceipt(payment)}>
+                                                <View style={styles.paymentCard}>
+                                                    <View style={styles.paymentLeft}>
+                                                        <View style={styles.paymentIconContainer}>
+                                                            <LinearGradient
+                                                                colors={['#E3F2FD', '#BBDEFB']}
+                                                                style={styles.paymentIcon}
+                                                            >
+                                                                <MethodIcon size={20} color="#0469ff" />
+                                                            </LinearGradient>
+                                                        </View>
+
+                                                        <View style={styles.paymentInfo}>
+                                                            <Text style={styles.paymentReceipt}>
+                                                                {payment.receiptNumber}
+                                                            </Text>
+                                                            <View style={styles.paymentMeta}>
+                                                                <Calendar size={12} color="#666" />
+                                                                <Text style={styles.paymentDate}>
+                                                                    {formatDate(payment.paymentDate)}
+                                                                </Text>
+                                                            </View>
+                                                            <Text style={styles.paymentMethod}>
+                                                                {payment.paymentMethod}
+                                                            </Text>
+                                                        </View>
+                                                    </View>
+
+                                                    <View style={styles.paymentRight}>
+                                                        <Text style={styles.paymentAmount}>
+                                                            {formatCurrency(payment.amount)}
+                                                        </Text>
+                                                        <View style={styles.statusBadge}>
+                                                            <CheckCircle size={12} color="#51CF66" />
+                                                            <Text style={styles.statusText}>
+                                                                {payment.status}
+                                                            </Text>
+                                                        </View>
+                                                        <ChevronRight size={16} color="#999" />
+                                                    </View>
+                                                </View>
+                                            </HapticTouchable>
+                                        </Animated.View>
+                                    );
+                                })}
+                            </Animated.View>
+
+                            <View style={{ height: 40 }} />
+                        </>
+                    )
                 )}
             </ScrollView>
+
+            {/* Sticky Totals Footer for Fee Details Tab */}
+            {activeTab === 'DETAILS' && studentFee && (
+                <View style={styles.stickyFooter}>
+                    <View style={styles.installmentTotalsRow}>
+                        <View style={[styles.totalBox, { backgroundColor: '#fde68a' }]}>
+                            <Text style={styles.totalBoxLabel}>Total</Text>
+                            <Text style={styles.totalBoxValue}>{formatCurrency(studentFee.originalAmount)}</Text>
+                        </View>
+                        <Text style={styles.minusIcon}>-</Text>
+                        <View style={[styles.totalBox, { backgroundColor: '#dcfce7' }]}>
+                            <Text style={styles.totalBoxLabel}>Paid</Text>
+                            <Text style={styles.totalBoxValue}>{formatCurrency(studentFee.paidAmount)}</Text>
+                        </View>
+                    </View>
+                    <View style={styles.finalBalanceRow}>
+                        <Text style={styles.finalBalanceText}>Balance {formatCurrency(studentFee.balanceAmount)}</Text>
+                    </View>
+                </View>
+            )}
 
             {/* Receipt Modal */}
             <Modal
@@ -885,5 +1137,281 @@ const styles = StyleSheet.create({
         fontSize: 15,
         fontWeight: '600',
         color: '#fff',
+    },
+    // ---- New Styles for Tabs & Installments ----
+    tabsContainer: {
+        flexDirection: 'row',
+        backgroundColor: '#f5f5f5',
+        borderRadius: 12,
+        padding: 4,
+        marginBottom: 20,
+    },
+    tabInput: {
+        flex: 1,
+    },
+    tabItem: {
+        paddingVertical: 10,
+        alignItems: 'center',
+        borderRadius: 8,
+    },
+    tabItemActive: {
+        backgroundColor: '#fff',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 2,
+        elevation: 2,
+    },
+    tabText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#666',
+    },
+    tabTextActive: {
+        color: '#0469ff',
+    },
+    feeStatusCard: {
+        backgroundColor: '#f4f7ff',
+        borderRadius: 16,
+        padding: 20,
+        marginBottom: 24,
+    },
+    feeStatusHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 20,
+    },
+    feeStatusTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#111',
+    },
+    feeStatusBody: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    chartContainer: {
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    legendContainer: {
+        gap: 12,
+        paddingLeft: 16,
+    },
+    legendItem: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 8,
+    },
+    legendDot: {
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+        marginTop: 4,
+        borderWidth: 2,
+        borderColor: '#fff',
+    },
+    legendLabel: {
+        fontSize: 13,
+        color: '#666',
+    },
+    legendValue: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#111',
+    },
+    feeDetailsHeader: {
+        backgroundColor: '#3b82f6',
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 10,
+    },
+    feeDetailsTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#fff',
+    },
+    installmentCardWrap: {
+        flexDirection: 'row',
+        backgroundColor: '#fff',
+        borderRadius: 12,
+        marginBottom: 12,
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 3,
+        overflow: 'hidden',
+    },
+    monthCol: {
+        backgroundColor: '#e5e7eb',
+        width: 44,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    monthColText: {
+        transform: [{ rotate: '-90deg' }],
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#4b5563',
+        width: 60,
+        textAlign: 'center',
+    },
+    installmentCardContent: {
+        flex: 1,
+        padding: 12,
+    },
+    installmentRowTop: {
+        flexDirection: 'row',
+        gap: 8,
+        marginBottom: 8,
+    },
+    instDataBox: {
+        flex: 1,
+        borderWidth: 1,
+        borderRadius: 8,
+        paddingVertical: 6,
+        paddingHorizontal: 8,
+        alignItems: 'center',
+    },
+    instDataLabel: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#111',
+        marginBottom: 2,
+    },
+    instDataValue: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#111',
+    },
+    balanceBox: {
+        borderWidth: 1,
+        borderRadius: 8,
+        paddingVertical: 6,
+        alignItems: 'center',
+    },
+    balanceText: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: '#111',
+    },
+    paidDateText: {
+        fontSize: 12,
+        fontStyle: 'italic',
+        color: '#16a34a',
+        marginTop: 6,
+    },
+    stampCol: {
+        width: 70,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingRight: 10,
+    },
+    paidIconContainer: {
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    circularStamp: {
+        width: 62,
+        height: 62,
+        borderRadius: 31,
+        borderWidth: 1.2,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderStyle: 'dashed',
+        padding: 2,
+    },
+    stampText: {
+        fontSize: 7.5,
+        fontWeight: '900',
+        textAlign: 'center',
+        textTransform: 'uppercase',
+    },
+    installmentTotalsRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        // marginTop: 10,
+        paddingHorizontal: 16,
+    },
+    totalBox: {
+        flex: 1,
+        paddingVertical: 10,
+        borderRadius: 8,
+        alignItems: 'center',
+    },
+    totalBoxLabel: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#111',
+    },
+    totalBoxValue: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#111',
+        marginTop: 2,
+    },
+    minusIcon: {
+        fontSize: 24,
+        fontWeight: '800',
+        color: '#111',
+        marginHorizontal: 16,
+    },
+    finalBalanceRow: {
+        backgroundColor: '#3b82f6',
+        paddingVertical: 14,
+        alignItems: 'center',
+        marginTop: 12,
+        borderBottomLeftRadius: 16,
+        borderBottomRightRadius: 16,
+    },
+    finalBalanceText: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#fff',
+    },
+    instReceiptBtn: {
+        position: 'absolute',
+        bottom: 8,
+        right: 8,
+    },
+    instReceiptIcon: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1.5,
+        borderColor: '#fff',
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 1,
+    },
+    stickyFooter: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        backgroundColor: '#fff',
+        // paddingHorizontal: 16,
+        paddingBottom: 10,
+        paddingTop: 8,
+        borderTopWidth: 1,
+        borderTopColor: '#f0f0f0',
+        shadowColor: '#000',
+        // shadowOffset: { width: 0, height: -3 },
+        // shadowOpacity: 0.1,
+        // shadowRadius: 4,
+        // elevation: 8,
     },
 });

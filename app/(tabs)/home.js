@@ -27,7 +27,8 @@ import {
     AlertTriangle,
     MessageSquare,
     Pencil,
-    ImageIcon
+    ImageIcon,
+    Search
 } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
@@ -56,6 +57,7 @@ import { useActiveTrip } from '../../hooks/useActiveTrip';
 import { stopForegroundLocationTracking, isForegroundTrackingActive } from '../../lib/transport-location-task';
 import LocationDisclosureModal from '../components/LocationDisclosureModal';
 import ProfileAvatar from '../components/ProfileAvatar';
+import ActionSearchModal from '../components/ActionSearchModal';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const isSmallDevice = SCREEN_WIDTH < 375;
@@ -129,7 +131,7 @@ export default function HomeScreen() {
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [notificationPermission, setNotificationPermission] = useState(false);
-    // Use refs for modal states so opening/closing modals doesn't re-render
+    // Use refs for modal states so opening/closing     s doesn't re-render
     // the entire HomeScreen (which would remount inline view components)
     const selectedStatusGroupRef = useRef(null);
     const showStatusUploadRef = useRef(false);
@@ -934,6 +936,9 @@ export default function HomeScreen() {
 
     // === STUDENT VIEW ===
     const StudentView = ({ refreshing, onRefresh, banner, paddingTop, refreshOffset, navigateOnce }) => {
+        const [showSearchModal, setShowSearchModal] = useState(false);
+        const [searchQuery, setSearchQuery] = useState('');
+
         // Consolidated dashboard API - single call for all student data
         const { data: dashboardData, isLoading: isDashboardLoading } = useQuery({
             queryKey: ['student-dashboard', schoolId, userId],
@@ -1240,7 +1245,16 @@ export default function HomeScreen() {
                             entering={FadeInDown.delay(400 + groupIndex * 100).duration(600)}
                             style={styles.section}
                         >
-                            <Text style={styles.sectionTitle}>{group.title}</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                                <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>{group.title}</Text>
+                                {groupIndex === 0 && (
+                                    <HapticTouchable onPress={() => setShowSearchModal(true)}>
+                                        <View style={{ padding: 8, backgroundColor: 'rgba(4, 105, 255, 0.1)', borderRadius: 12 }}>
+                                            <Search size={20} color="#0469ff" />
+                                        </View>
+                                    </HapticTouchable>
+                                )}
+                            </View>
                             <View style={styles.actionsGrid}>
                                 {group.actions.map((action, index) => (
                                     <Animated.View
@@ -1373,6 +1387,15 @@ export default function HomeScreen() {
 
                 {/* Bottom Spacer */}
                 <View style={{ height: 100 }} />
+
+                <ActionSearchModal
+                    visible={showSearchModal}
+                    onClose={() => setShowSearchModal(false)}
+                    actionGroups={actionGroups}
+                    searchQuery={searchQuery}
+                    setSearchQuery={setSearchQuery}
+                    onNavigate={(action) => navigateOnce(action.href || '')}
+                />
             </ScrollView >
         );
     };
@@ -1450,6 +1473,7 @@ export default function HomeScreen() {
 
             {/* Bottom Spacer */}
             <View style={{ height: 100 }} />
+
         </ScrollView>
     );
 
@@ -1457,6 +1481,8 @@ export default function HomeScreen() {
 
     // / Complete ParentView Component
     const ParentView = ({ schoolId, parentId, refreshing, onRefresh, onScroll, paddingTop, refreshOffset, banner, navigateOnce }) => {
+        const [showSearchModal, setShowSearchModal] = useState(false);
+        const [searchQuery, setSearchQuery] = useState('');
         const [showAddChildModal, setShowAddChildModal] = useState(false);
         // Use ref to track if we've restored from cache - prevents flash of null
         const hasRestoredChild = useRef(false);
@@ -2420,7 +2446,16 @@ export default function HomeScreen() {
                             entering={FadeInDown.delay(400 + groupIndex * 100).duration(600)}
                             style={styles.section}
                         >
-                            <Text style={styles.sectionTitle}>{group.title}</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                                <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>{group.title}</Text>
+                                {groupIndex === 0 && (
+                                    <HapticTouchable onPress={() => setShowSearchModal(true)}>
+                                        <View style={{ padding: 8, backgroundColor: 'rgba(4, 105, 255, 0.1)', borderRadius: 12 }}>
+                                            <Search size={20} color="#0469ff" />
+                                        </View>
+                                    </HapticTouchable>
+                                )}
+                            </View>
                             <View style={styles.actionsGrid}>
                                 {group.actions.map((action, index) => {
                                     const totalItems = group.actions.length;
@@ -2583,6 +2618,21 @@ export default function HomeScreen() {
                     parentId={parentId}
                     schoolId={schoolId}
                     onSuccess={handleAddChildSuccess}
+                />
+
+                <ActionSearchModal
+                    visible={showSearchModal}
+                    onClose={() => setShowSearchModal(false)}
+                    actionGroups={actionGroups}
+                    searchQuery={searchQuery}
+                    setSearchQuery={setSearchQuery}
+                    onNavigate={(action) => {
+                        if (action.params) {
+                            navigateOnce(action.href, action.params);
+                        } else {
+                            navigateOnce(action.href || '');
+                        }
+                    }}
                 />
             </Animated.ScrollView >
         );
@@ -4955,6 +5005,9 @@ const styles = StyleSheet.create({
 // === TEACHER VIEW (MOVED) ===
 // === TEACHING STAFF VIEW ===
 const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, upcomingEvents, todaysEvents, banner, onScroll, paddingTop, refreshOffset, navigateOnce, onStatusPress, onMyStatusPress }) => {
+    const [showSearchModal, setShowSearchModal] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const queryClient = useQueryClient();
     const [showDelegationModal, setShowDelegationModal] = useState(false);
     const [activeDelegations, setActiveDelegations] = useState([]);
     const [shownDelegations, setShownDelegations] = useState({});
@@ -5436,7 +5489,16 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
             {/* Quick Actions */}
             {actionGroups.map((group, groupIndex) => (
                 <Animated.View key={group.title} entering={FadeInDown.delay(400 + groupIndex * 100).duration(600)} style={styles.section}>
-                    <Text style={styles.sectionTitle}>{group.title}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                        <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>{group.title}</Text>
+                        {groupIndex === 0 && (
+                            <HapticTouchable onPress={() => setShowSearchModal(true)}>
+                                <View style={{ padding: 8, backgroundColor: 'rgba(4, 105, 255, 0.1)', borderRadius: 12 }}>
+                                    <Search size={20} color="#0469ff" />
+                                </View>
+                            </HapticTouchable>
+                        )}
+                    </View>
                     <View style={styles.actionsGrid}>
                         {group.actions.map((action, index) => {
                             const totalItems = group.actions.length;
@@ -5557,9 +5619,27 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                 onSelectDelegation={handleSelectDelegation}
                 onClose={handleDismissDelegationModal}
             />
+
+            <ActionSearchModal
+                visible={showSearchModal}
+                onClose={() => setShowSearchModal(false)}
+                actionGroups={actionGroups}
+                searchQuery={searchQuery}
+                setSearchQuery={setSearchQuery}
+                onNavigate={(action) => {
+                    if (action.params) {
+                        navigateOnce(action.href, action.params);
+                    } else {
+                        navigateOnce(action.href || '');
+                    }
+                }}
+            />
         </Animated.ScrollView>
     );
 }); const DriverView = ({ refreshing, onRefresh, onScroll, paddingTop, refreshOffset, schoolId, userId, prefetchedStaffData, prefetchedTripsData, navigateOnce, upcomingEvents, user_acc, banner }) => {
+    const [showSearchModal, setShowSearchModal] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const queryClient = useQueryClient();
     // Location tracking state
     const [isPollingLocation, setIsPollingLocation] = useState(false);
     const [startingTripId, setStartingTripId] = useState(null); // Track which trip is being started
@@ -5567,7 +5647,6 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
     const pendingTripActionRef = useRef(null); // Stores the action to execute after disclosure accepted
     const locationWatchRef = useRef(null);
     const appStateRef = useRef(AppState.currentState);
-    const queryClient = useQueryClient();
 
     // Use prefetched data directly
     const staffData = prefetchedStaffData;
@@ -6340,7 +6419,14 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
 
 
                 <Animated.View entering={FadeInDown.delay(200).duration(600)} style={styles.section}>
-                    <Text style={styles.sectionTitle}>Quick Actions</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                        <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Quick Actions</Text>
+                        <HapticTouchable onPress={() => setShowSearchModal(true)}>
+                            <View style={{ padding: 8, backgroundColor: 'rgba(4, 105, 255, 0.1)', borderRadius: 12 }}>
+                                <Search size={20} color="#0469ff" />
+                            </View>
+                        </HapticTouchable>
+                    </View>
                     <View style={styles.actionsGrid}>
                         {quickActions.map((action, index) => (
                             <Animated.View key={action.label} entering={FadeInDown.delay(300 + index * 50).duration(400)} style={{ width: isTablet ? '31.5%' : '48%' }}>
@@ -6558,6 +6644,15 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
 
                 {/* Bottom Spacer */}
                 <View style={{ height: 100 }} />
+
+                <ActionSearchModal
+                    visible={showSearchModal}
+                    onClose={() => setShowSearchModal(false)}
+                    actionGroups={[{ title: 'Quick Actions', actions: quickActions }]}
+                    searchQuery={searchQuery}
+                    setSearchQuery={setSearchQuery}
+                    onNavigate={(action) => navigateOnce(action.href || '')}
+                />
             </Animated.ScrollView>
 
             {/* Location Disclosure Modal — Google Play: must appear BEFORE location permission */}
@@ -6579,6 +6674,8 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
 
 // === CONDUCTOR VIEW ===
 const ConductorView = ({ refreshing, onRefresh, onScroll, paddingTop, refreshOffset, schoolId, userId, prefetchedStaffData, prefetchedTripsData, navigateOnce, upcomingEvents, user_acc, banner }) => {
+    const [showSearchModal, setShowSearchModal] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
     const queryClient = useQueryClient();
 
     // Use prefetched data directly
@@ -6762,7 +6859,14 @@ const ConductorView = ({ refreshing, onRefresh, onScroll, paddingTop, refreshOff
             </Animated.View>
 
             <Animated.View entering={FadeInDown.delay(200).duration(600)} style={styles.section}>
-                <Text style={styles.sectionTitle}>Quick Actions</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                    <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>Quick Actions</Text>
+                    <HapticTouchable onPress={() => setShowSearchModal(true)}>
+                        <View style={{ padding: 8, backgroundColor: 'rgba(4, 105, 255, 0.1)', borderRadius: 12 }}>
+                            <Search size={20} color="#0469ff" />
+                        </View>
+                    </HapticTouchable>
+                </View>
                 <View style={styles.actionsGrid}>
                     {quickActions.map((action, index) => (
                         <Animated.View key={action.label} entering={FadeInDown.delay(300 + index * 50).duration(400)} style={{ width: isTablet ? '31.5%' : '48%' }}>
@@ -6886,6 +6990,15 @@ const ConductorView = ({ refreshing, onRefresh, onScroll, paddingTop, refreshOff
 
             {/* Bottom Spacer */}
             <View style={{ height: 100 }} />
+
+            <ActionSearchModal
+                visible={showSearchModal}
+                onClose={() => setShowSearchModal(false)}
+                actionGroups={[{ title: 'Quick Actions', actions: quickActions }]}
+                searchQuery={searchQuery}
+                setSearchQuery={setSearchQuery}
+                onNavigate={(action) => navigateOnce(action.href || '')}
+            />
         </Animated.ScrollView>
     );
 };

@@ -47,11 +47,12 @@ import HapticTouchable from '../components/HapticTouch';
 import { Modal } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import Svg, { Circle } from 'react-native-svg';
-
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 export default function PaymentHistoryScreen() {
     const params = useLocalSearchParams();
     const childData = params.childData ? JSON.parse(params.childData) : null;
     console.log(childData);
+    const insets = useSafeAreaInsets();
 
     const [refreshing, setRefreshing] = useState(false);
     const [selectedReceipt, setSelectedReceipt] = useState(null);
@@ -406,10 +407,10 @@ Thank you for your payment!
     };
 
     return (
-        <View style={styles.container}>
+        <SafeAreaView style={styles.container}>
             <StatusBar style="dark" />
             {/* Header */}
-            <Animated.View entering={FadeInDown.duration(400)} style={[styles.header, Platform.OS === 'ios' ? { paddingTop: 60 } : { paddingTop: 60 }]}>
+            <Animated.View entering={FadeInDown.duration(400)} style={[styles.header, Platform.OS === 'ios' ? { paddingTop: 60 } : { paddingTop: 10 }]}>
                 <HapticTouchable onPress={() => router.back()}>
                     <View style={styles.backButton}>
                         <ArrowLeft size={24} color="#111" />
@@ -428,7 +429,7 @@ Thank you for your payment!
                 style={styles.content}
                 contentContainerStyle={
                     activeTab === 'DETAILS'
-                        ? { paddingBottom: 35 }
+                        ? { paddingBottom: 50 + (insets.bottom || 0) }  // enough room for the footer
                         : { paddingBottom: 0 }
                 }
                 showsVerticalScrollIndicator={false}
@@ -671,7 +672,7 @@ Thank you for your payment!
 
             {/* Sticky Totals Footer for Fee Details Tab */}
             {activeTab === 'DETAILS' && studentFee && (
-                <View style={styles.stickyFooter}>
+                <View style={[styles.stickyFooter, { paddingBottom: insets.bottom || 10 }]}>
                     <View style={styles.installmentTotalsRow}>
                         <View style={[styles.totalBox, { backgroundColor: '#fde68a' }]}>
                             <Text style={styles.totalBoxLabel}>Total</Text>
@@ -878,7 +879,7 @@ Thank you for your payment!
                     </Animated.View>
                 </View>
             </Modal>
-        </View>
+        </SafeAreaView>
     );
 }
 
@@ -1370,8 +1371,6 @@ const styles = StyleSheet.create({
         paddingVertical: 14,
         alignItems: 'center',
         marginTop: 12,
-        borderBottomLeftRadius: 16,
-        borderBottomRightRadius: 16,
     },
     finalBalanceText: {
         fontSize: 16,
@@ -1408,7 +1407,6 @@ const styles = StyleSheet.create({
         paddingTop: 8,
         borderTopWidth: 1,
         borderTopColor: '#f0f0f0',
-        shadowColor: '#000',
         // shadowOffset: { width: 0, height: -3 },
         // shadowOpacity: 0.1,
         // shadowRadius: 4,

@@ -28,7 +28,8 @@ import {
     MessageSquare,
     Pencil,
     ImageIcon,
-    Search
+    Search,
+    UserPlus
 } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
@@ -471,6 +472,24 @@ export default function HomeScreen() {
         ...CACHE_CONFIG.STATIC,
     });
 
+
+
+    // Share cache with TeacherView to ensure real-time bypassing of backend Redis cache
+    const { data: dashboardData } = useQuery({
+        queryKey: ['teacher-dashboard', schoolId, userId],
+        queryFn: async () => { return null; }, // Let TeacherView do the fetching
+        enabled: false, // Don't fetch here, just subscribe to the cache!
+    });
+
+    // Compute teacher class/section string
+    const teacherAssignments = dashboardData?.teacher?.sectionsAssigned || teacher?.sectionsAssigned;
+    const firstSection = teacherAssignments?.[0];
+    const derivedClassName = firstSection?.class?.className || firstSection?.Class?.className;
+    const derivedSectionName = firstSection?.name;
+    const teacherSubtitleDisplay = (derivedClassName && derivedSectionName)
+        ? `Class ${derivedClassName} - ${derivedSectionName}`
+        : (user_acc?.email || '');
+
     // Pre-fetch transport staff data for Driver/Conductor roles
     const isTransportRole = user_acc?.role?.name === 'DRIVER' || user_acc?.role?.name === 'CONDUCTOR';
 
@@ -642,9 +661,7 @@ export default function HomeScreen() {
             },
             teaching_staff: {
                 '{name}': user_acc?.name || '',
-                '{class}': (teacher?.sectionsAssigned?.[0]?.class?.className && teacher?.sectionsAssigned?.[0]?.name)
-                    ? `${teacher.sectionsAssigned[0].class.className}'${teacher.sectionsAssigned[0].name}`
-                    : '',
+                '{class}': teacherSubtitleDisplay,
             },
             parent: {
                 '{name}': user_acc?.parentData?.name || user_acc?.name || '',
@@ -793,6 +810,8 @@ export default function HomeScreen() {
     });
     // === ROLE-BASED CONTENT ===
     const headerComponent = <Header />;
+
+
 
     const permissionBanner = showPermissionBanner ? (
         <Animated.View entering={FadeInDown.duration(400)} style={styles.permissionBanner}>
@@ -1861,6 +1880,7 @@ export default function HomeScreen() {
                 classId: child.classId,
                 section: child.section,
                 sectionId: child.sectionId,
+                admissionNo: child.admissionNo,
                 rollNo: child.rollNumber,
                 avatar: child.profilePicture,
                 attendance: Math.floor(Math.random() * 21) + 80,
@@ -1869,6 +1889,8 @@ export default function HomeScreen() {
                 pendingFee: 0
             })) || [],
             [data]);
+        // alert(JSON.stringify(data.children));
+
 
         const icon = require("../../assets/avatar_face.png");
         const parentData = useMemo(() => ({
@@ -2177,6 +2199,11 @@ export default function HomeScreen() {
                                                 <View style={[styles.metaBadge, styles.selectedBadge]}>
                                                     <Text style={[styles.metaText, styles.selectedText]}>
                                                         Roll: {uiChildren[0].rollNo}
+                                                    </Text>
+                                                </View>
+                                                <View style={[styles.metaBadge, styles.selectedBadge]}>
+                                                    <Text style={[styles.metaText, styles.selectedText]}>
+                                                        {uiChildren[0].admissionNo || 'N/A'}
                                                     </Text>
                                                 </View>
                                             </View>
@@ -3806,7 +3833,7 @@ export default function HomeScreen() {
                                     <Animated.View style={headerNameStyle}>
                                         <Text style={[styles.name, { color: '#fff', fontSize: 18, marginTop: 2 }]} numberOfLines={1}>{title}</Text>
                                         <Text style={[styles.parentEmail, { marginTop: 4, color: 'rgba(255,255,255,0.7)', fontSize: 12 }]} numberOfLines={1}>
-                                            {user_acc?.email || user_acc?.parentData?.email || 'test@email.com'}
+                                            {subtitle}
                                         </Text>
                                     </Animated.View>
                                 </View>
@@ -5169,6 +5196,13 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
         {
             title: 'Teaching',
             actions: [
+                {
+                    icon: UserPlus,
+                    label: 'Add Student',
+                    color: '#10b981',
+                    bgColor: '#dcfce7',
+                    href: '/teachers/create-student',
+                },
                 {
                     icon: Book,
                     label: 'Add Homework',

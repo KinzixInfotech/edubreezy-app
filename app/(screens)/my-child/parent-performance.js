@@ -14,11 +14,11 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
     ArrowLeft,
     AlertCircle,
     Award,
-    TrendingUp,
     CheckCircle,
     XCircle,
     Clock,
@@ -28,6 +28,7 @@ import {
     Star,
     User,
     Calendar,
+    TrendingUp,
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../../components/HapticTouch';
@@ -35,13 +36,159 @@ import api from '../../../lib/api';
 import { StatusBar } from 'expo-status-bar';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+// 16px padding each side, 18px card padding each side, 3 gaps × 8px
+const PILL_WIDTH = (SCREEN_WIDTH - 32 - 36 - 24) / 4;
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+const getScoreColor = (score) => {
+    if (score >= 80) return '#00C48C';
+    if (score >= 60) return '#2563EB';
+    if (score >= 40) return '#F59E0B';
+    return '#EF4444';
+};
+
+const getScoreGradient = (score) => {
+    if (score >= 80) return ['#00C48C', '#00A37A'];
+    if (score >= 60) return ['#2563EB', '#1D4ED8'];
+    if (score >= 40) return ['#F59E0B', '#D97706'];
+    return ['#EF4444', '#DC2626'];
+};
+
+const getScoreLabel = (score) => {
+    if (score >= 90) return 'Excellent';
+    if (score >= 80) return 'Very Good';
+    if (score >= 70) return 'Good';
+    if (score >= 60) return 'Above Average';
+    if (score >= 50) return 'Average';
+    if (score >= 40) return 'Below Average';
+    return 'Needs Improvement';
+};
+
+// ─── Sub-components ─────────────────────────────────────────────────────────
+
+const ScoreRing = ({ score, size = 96 }) => {
+    const color = getScoreColor(score);
+    const r = (size / 2) - 6;
+    const circumference = 2 * Math.PI * r;
+    const dash = (score / 100) * circumference;
+
+    return (
+        <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+            {/* Background ring */}
+            <View style={{
+                position: 'absolute',
+                width: size,
+                height: size,
+                borderRadius: size / 2,
+                borderWidth: 6,
+                borderColor: 'rgba(255,255,255,0.2)',
+            }} />
+            {/* Score text */}
+            <View style={{ alignItems: 'center' }}>
+                <Text style={{ fontSize: 28, fontWeight: '800', color: '#fff', letterSpacing: -1 }}>
+                    {score}
+                </Text>
+                <Text style={{ fontSize: 10, color: 'rgba(255,255,255,0.75)', fontWeight: '600', marginTop: -2 }}>
+                    / 100
+                </Text>
+            </View>
+        </View>
+    );
+};
+
+const AttendancePill = ({ icon: Icon, value, label, bg, color }) => (
+    <View style={[pillStyles.container, { backgroundColor: bg, width: PILL_WIDTH }]}>
+        <View style={[pillStyles.iconWrap, { backgroundColor: color + '25' }]}>
+            <Icon size={18} color={color} />
+        </View>
+        <Text style={[pillStyles.value, { color }]}>{value}</Text>
+        <Text style={pillStyles.label}>{label}</Text>
+    </View>
+);
+
+const pillStyles = StyleSheet.create({
+    container: {
+        borderRadius: 16,
+        paddingVertical: 16,
+        paddingHorizontal: 8,
+        alignItems: 'center',
+        gap: 7,
+        borderWidth: 1,
+        borderColor: 'rgba(0,0,0,0.04)',
+    },
+    iconWrap: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    value: {
+        fontSize: 20,
+        fontWeight: '800',
+        letterSpacing: -0.5,
+    },
+    label: {
+        fontSize: 10,
+        color: '#9CA3AF',
+        fontWeight: '700',
+        textTransform: 'uppercase',
+        letterSpacing: 0.4,
+    },
+});
+
+const SectionCard = ({ children, style }) => (
+    <View style={[sectionStyles.card, style]}>{children}</View>
+);
+
+const SectionTitle = ({ icon: Icon, iconColor, label }) => (
+    <View style={sectionStyles.titleRow}>
+        <View style={[sectionStyles.iconBadge, { backgroundColor: iconColor + '18' }]}>
+            <Icon size={15} color={iconColor} />
+        </View>
+        <Text style={sectionStyles.titleText}>{label}</Text>
+    </View>
+);
+
+const sectionStyles = StyleSheet.create({
+    card: {
+        backgroundColor: '#F8FAFC',
+        borderRadius: 20,
+        padding: 18,
+        marginBottom: 14,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+    },
+    titleRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        marginBottom: 16,
+    },
+    iconBadge: {
+        width: 30,
+        height: 30,
+        borderRadius: 9,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    titleText: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#0F172A',
+        letterSpacing: -0.2,
+    },
+});
+
+// ─── Main Component ──────────────────────────────────────────────────────────
 
 export default function ParentPerformanceScreen() {
     const params = useLocalSearchParams();
     const queryClient = useQueryClient();
     const [refreshing, setRefreshing] = useState(false);
+    const insets = useSafeAreaInsets();
 
-    // Parse child data from params
     const childData = params.childData ? JSON.parse(params.childData) : null;
 
     const { data: userData } = useQuery({
@@ -56,7 +203,6 @@ export default function ParentPerformanceScreen() {
     const schoolId = userData?.schoolId;
     const childId = childData?.studentId || childData?.id;
 
-    // Fetch attendance stats
     const { data: attendanceData, isLoading: attendanceLoading } = useQuery({
         queryKey: ['parent-performance-attendance', schoolId, childId],
         queryFn: async () => {
@@ -71,7 +217,6 @@ export default function ParentPerformanceScreen() {
         staleTime: 1000 * 60 * 5,
     });
 
-    // Fetch exam results
     const { data: examData, isLoading: examLoading } = useQuery({
         queryKey: ['parent-performance-exams', schoolId, childId],
         queryFn: async () => {
@@ -85,50 +230,26 @@ export default function ParentPerformanceScreen() {
 
     const isLoading = attendanceLoading || examLoading;
 
-    // Extract stats
     const monthlyStats = attendanceData?.monthlyStats || {};
     const yearlyAggregate = attendanceData?.yearlyAggregate || {};
     const examStats = examData?.stats || {};
     const recentExams = (examData?.results || []).slice(0, 5);
 
-    // Calculate overall performance score (weighted average)
     const calculateOverallScore = () => {
         let score = 0;
         let weight = 0;
-
-        // Attendance component (40% weight)
         if (monthlyStats.attendancePercentage !== undefined) {
             score += (monthlyStats.attendancePercentage || 0) * 0.4;
             weight += 0.4;
         }
-
-        // Exam component (60% weight)
         if (examStats.avgPercentage !== undefined) {
             score += (examStats.avgPercentage || 0) * 0.6;
             weight += 0.6;
         }
-
         return weight > 0 ? Math.round(score / weight) : 0;
     };
 
     const overallScore = calculateOverallScore();
-
-    const getScoreColor = (score) => {
-        if (score >= 80) return '#10B981';
-        if (score >= 60) return '#3B82F6';
-        if (score >= 40) return '#F59E0B';
-        return '#EF4444';
-    };
-
-    const getScoreLabel = (score) => {
-        if (score >= 90) return 'Excellent';
-        if (score >= 80) return 'Very Good';
-        if (score >= 70) return 'Good';
-        if (score >= 60) return 'Above Average';
-        if (score >= 50) return 'Average';
-        if (score >= 40) return 'Below Average';
-        return 'Needs Improvement';
-    };
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
@@ -139,11 +260,11 @@ export default function ParentPerformanceScreen() {
         setRefreshing(false);
     }, [queryClient]);
 
-    // No child data error state
+    // ── Error state ──
     if (!childData) {
         return (
-            <View style={styles.container}>
-
+            <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
+                <StatusBar style="dark" />
                 <View style={styles.header}>
                     <HapticTouchable onPress={() => router.back()}>
                         <View style={styles.backButton}>
@@ -156,21 +277,22 @@ export default function ParentPerformanceScreen() {
                     <View style={{ width: 40 }} />
                 </View>
                 <View style={styles.emptyState}>
-                    <AlertCircle size={48} color="#ccc" />
+                    <View style={styles.emptyIconWrap}>
+                        <AlertCircle size={32} color="#94A3B8" />
+                    </View>
                     <Text style={styles.emptyTitle}>No Child Selected</Text>
-                    <Text style={styles.emptySubtitle}>
-                        Please select a child from the home screen
-                    </Text>
+                    <Text style={styles.emptySubtitle}>Please select a child from the home screen</Text>
                 </View>
-            </View>
+            </SafeAreaView>
         );
     }
 
     return (
-        <View style={styles.container}>
+        <SafeAreaView style={styles.container} edges={['top']}>
             <StatusBar style="dark" />
-            {/* Header */}
-            <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
+
+            {/* ── Header ── */}
+            <Animated.View entering={FadeInDown.duration(350)} style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>
                     <View style={styles.backButton}>
                         <ArrowLeft size={24} color="#111" />
@@ -178,189 +300,232 @@ export default function ParentPerformanceScreen() {
                 </HapticTouchable>
                 <View style={styles.headerCenter}>
                     <Text style={styles.headerTitle}>Performance</Text>
-                    <Text style={styles.headerSubtitle}>{childData.name}</Text>
+                    <Text style={styles.headerSub}>{childData.name}</Text>
                 </View>
                 <View style={{ width: 40 }} />
             </Animated.View>
 
             <ScrollView
-                style={styles.content}
+                style={{ flex: 1 }}
+                contentContainerStyle={[
+                    styles.scrollContent,
+                    { paddingBottom: insets.bottom + 24 }
+                ]}
                 showsVerticalScrollIndicator={false}
                 refreshControl={
                     <RefreshControl
                         refreshing={refreshing}
                         onRefresh={onRefresh}
-                        tintColor="#0469ff"
+                        tintColor="#2563EB"
                     />
                 }
             >
                 {isLoading ? (
-                    <View style={styles.loadingContainer}>
-                        <ActivityIndicator size="large" color="#0469ff" />
+                    <View style={styles.loadingWrap}>
+                        <ActivityIndicator size="large" color="#2563EB" />
+                        <Text style={styles.loadingText}>Loading performance…</Text>
                     </View>
                 ) : (
                     <>
-                        {/* Overall Score Card */}
-                        <Animated.View entering={FadeInDown.delay(100).duration(500)}>
+                        {/* ── Hero Score Card ── */}
+                        <Animated.View entering={FadeInDown.delay(80).duration(500)}>
                             <LinearGradient
-                                colors={[getScoreColor(overallScore), getScoreColor(overallScore) + 'DD']}
-                                style={styles.overallScoreCard}
+                                colors={getScoreGradient(overallScore)}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={styles.heroCard}
                             >
-                                <View style={styles.scoreCircle}>
-                                    <Text style={styles.scoreValue}>{overallScore}</Text>
-                                    <Text style={styles.scoreMax}>/100</Text>
+                                {/* Decorative circles */}
+                                <View style={styles.heroBubble1} />
+                                <View style={styles.heroBubble2} />
+
+                                <View style={styles.heroTop}>
+                                    <ScoreRing score={overallScore} />
+                                    <View style={styles.heroMeta}>
+                                        <View style={styles.heroBadge}>
+                                            <Star size={11} color="#fff" fill="#fff" />
+                                            <Text style={styles.heroBadgeText}>Overall Score</Text>
+                                        </View>
+                                        <Text style={styles.heroLabel}>{getScoreLabel(overallScore)}</Text>
+                                        <Text style={styles.heroDesc}>
+                                            Attendance 40% · Exams 60%
+                                        </Text>
+                                    </View>
                                 </View>
-                                <View style={styles.scoreMeta}>
-                                    <Text style={styles.scoreLabel}>{getScoreLabel(overallScore)}</Text>
-                                    <Text style={styles.scoreDescription}>Overall Performance Score</Text>
+
+                                {/* Mini stats row */}
+                                <View style={styles.heroStatsRow}>
+                                    <View style={styles.heroStat}>
+                                        <Text style={styles.heroStatVal}>
+                                            {Math.round(monthlyStats.attendancePercentage || 0)}%
+                                        </Text>
+                                        <Text style={styles.heroStatLabel}>Attendance</Text>
+                                    </View>
+                                    <View style={styles.heroStatDivider} />
+                                    <View style={styles.heroStat}>
+                                        <Text style={styles.heroStatVal}>
+                                            {examStats.avgPercentage || 0}%
+                                        </Text>
+                                        <Text style={styles.heroStatLabel}>Avg Exam</Text>
+                                    </View>
+                                    <View style={styles.heroStatDivider} />
+                                    <View style={styles.heroStat}>
+                                        <Text style={styles.heroStatVal}>
+                                            {examStats.passRate || 0}%
+                                        </Text>
+                                        <Text style={styles.heroStatLabel}>Pass Rate</Text>
+                                    </View>
                                 </View>
-                                <Star size={48} color="rgba(255,255,255,0.3)" style={styles.scoreIcon} />
                             </LinearGradient>
                         </Animated.View>
 
-                        {/* Child Info */}
-                        <Animated.View entering={FadeInDown.delay(150).duration(500)}>
-                            <View style={styles.childInfoCard}>
-                                <View style={styles.childInfoIcon}>
-                                    <User size={20} color="#0469ff" />
+                        {/* ── Child Info ── */}
+                        <Animated.View entering={FadeInDown.delay(140).duration(450)}>
+                            <View style={styles.childCard}>
+                                <View style={styles.childAvatar}>
+                                    <User size={18} color="#2563EB" />
                                 </View>
-                                <View style={styles.childInfoContent}>
-                                    <Text style={styles.childInfoName}>{childData.name}</Text>
-                                    <Text style={styles.childInfoClass}>
-                                        Class {childData.class} - {childData.section} • Roll: {childData.rollNo}
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.childName}>{childData.name}</Text>
+                                    <Text style={styles.childMeta}>
+                                        Class {childData.class} – {childData.section}
+                                        {'  ·  '}
+                                        Roll #{childData.rollNo}
                                     </Text>
+                                </View>
+                                <View style={styles.childChip}>
+                                    <TrendingUp size={12} color="#2563EB" />
+                                    <Text style={styles.childChipText}>Active</Text>
                                 </View>
                             </View>
                         </Animated.View>
 
-                        {/* Attendance Section */}
-                        <Animated.View entering={FadeInDown.delay(200).duration(500)}>
-                            <View style={styles.section}>
-                                <View style={styles.sectionHeader}>
-                                    <Calendar size={18} color="#0469ff" />
-                                    <Text style={styles.sectionTitle}>Attendance (This Month)</Text>
+                        {/* ── Attendance This Month ── */}
+                        <Animated.View entering={FadeInDown.delay(200).duration(450)}>
+                            <SectionCard>
+                                <SectionTitle icon={Calendar} iconColor="#2563EB" label="Attendance — This Month" />
+                                <View style={styles.pillsRow}>
+                                    <AttendancePill
+                                        icon={BarChart3}
+                                        value={`${Math.round(monthlyStats.attendancePercentage || 0)}%`}
+                                        label="Rate"
+                                        bg="#EFF6FF"
+                                        color="#2563EB"
+                                    />
+                                    <AttendancePill
+                                        icon={CheckCircle}
+                                        value={monthlyStats.totalPresent || 0}
+                                        label="Present"
+                                        bg="#F0FDF4"
+                                        color="#16A34A"
+                                    />
+                                    <AttendancePill
+                                        icon={XCircle}
+                                        value={monthlyStats.totalAbsent || 0}
+                                        label="Absent"
+                                        bg="#FFF1F2"
+                                        color="#EF4444"
+                                    />
+                                    <AttendancePill
+                                        icon={Clock}
+                                        value={monthlyStats.totalLate || 0}
+                                        label="Late"
+                                        bg="#FFFBEB"
+                                        color="#D97706"
+                                    />
                                 </View>
-
-                                <View style={styles.statsRow}>
-                                    <View style={[styles.statBox, { backgroundColor: '#E3F2FD' }]}>
-                                        <BarChart3 size={20} color="#3B82F6" />
-                                        <Text style={[styles.statBoxValue, { color: '#3B82F6' }]}>
-                                            {Math.round(monthlyStats.attendancePercentage || 0)}%
+                                <View style={styles.dividerRow}>
+                                    <Text style={styles.dividerLabel}>Total Working Days</Text>
+                                    <View style={styles.dividerChip}>
+                                        <Text style={styles.dividerChipText}>
+                                            {monthlyStats.totalWorkingDays || 0} days
                                         </Text>
-                                        <Text style={styles.statBoxLabel}>Attendance</Text>
-                                    </View>
-                                    <View style={[styles.statBox, { backgroundColor: '#D1FAE5' }]}>
-                                        <CheckCircle size={20} color="#10B981" />
-                                        <Text style={[styles.statBoxValue, { color: '#10B981' }]}>
-                                            {monthlyStats.totalPresent || 0}
-                                        </Text>
-                                        <Text style={styles.statBoxLabel}>Present</Text>
-                                    </View>
-                                    <View style={[styles.statBox, { backgroundColor: '#FEE2E2' }]}>
-                                        <XCircle size={20} color="#EF4444" />
-                                        <Text style={[styles.statBoxValue, { color: '#EF4444' }]}>
-                                            {monthlyStats.totalAbsent || 0}
-                                        </Text>
-                                        <Text style={styles.statBoxLabel}>Absent</Text>
-                                    </View>
-                                    <View style={[styles.statBox, { backgroundColor: '#FEF3C7' }]}>
-                                        <Clock size={20} color="#F59E0B" />
-                                        <Text style={[styles.statBoxValue, { color: '#F59E0B' }]}>
-                                            {monthlyStats.totalLate || 0}
-                                        </Text>
-                                        <Text style={styles.statBoxLabel}>Late</Text>
                                     </View>
                                 </View>
-
-                                {/* Working Days */}
-                                <View style={styles.workingDaysRow}>
-                                    <Text style={styles.workingDaysLabel}>Working Days:</Text>
-                                    <Text style={styles.workingDaysValue}>
-                                        {monthlyStats.totalWorkingDays || 0} days
-                                    </Text>
-                                </View>
-                            </View>
+                            </SectionCard>
                         </Animated.View>
 
-                        {/* Yearly Attendance Aggregate */}
+                        {/* ── Yearly Summary ── */}
                         {yearlyAggregate.totalWorkingDays > 0 && (
-                            <Animated.View entering={FadeInDown.delay(250).duration(500)}>
-                                <View style={styles.section}>
-                                    <View style={styles.sectionHeader}>
-                                        <Target size={18} color="#9C27B0" />
-                                        <Text style={styles.sectionTitle}>Yearly Summary</Text>
+                            <Animated.View entering={FadeInDown.delay(260).duration(450)}>
+                                <SectionCard>
+                                    <SectionTitle icon={Target} iconColor="#7C3AED" label="Yearly Summary" />
+                                    <View style={styles.yearlyRow}>
+                                        {[
+                                            { val: yearlyAggregate.totalPresent || 0, label: 'Present', color: '#16A34A' },
+                                            { val: yearlyAggregate.totalAbsent || 0, label: 'Absent', color: '#EF4444' },
+                                            { val: yearlyAggregate.totalWorkingDays || 0, label: 'Working Days', color: '#7C3AED' },
+                                        ].map((item, i, arr) => (
+                                            <React.Fragment key={item.label}>
+                                                <View style={styles.yearlyStat}>
+                                                    <Text style={[styles.yearlyVal, { color: item.color }]}>
+                                                        {item.val}
+                                                    </Text>
+                                                    <Text style={styles.yearlyLabel}>{item.label}</Text>
+                                                </View>
+                                                {i < arr.length - 1 && <View style={styles.yearlyDivider} />}
+                                            </React.Fragment>
+                                        ))}
                                     </View>
-                                    <View style={styles.yearlyStatsRow}>
-                                        <View style={styles.yearlyStat}>
-                                            <Text style={styles.yearlyStatValue}>{yearlyAggregate.totalPresent || 0}</Text>
-                                            <Text style={styles.yearlyStatLabel}>Present Days</Text>
-                                        </View>
-                                        <View style={styles.yearlyDivider} />
-                                        <View style={styles.yearlyStat}>
-                                            <Text style={styles.yearlyStatValue}>{yearlyAggregate.totalAbsent || 0}</Text>
-                                            <Text style={styles.yearlyStatLabel}>Absent Days</Text>
-                                        </View>
-                                        <View style={styles.yearlyDivider} />
-                                        <View style={styles.yearlyStat}>
-                                            <Text style={styles.yearlyStatValue}>{yearlyAggregate.totalWorkingDays || 0}</Text>
-                                            <Text style={styles.yearlyStatLabel}>Working Days</Text>
-                                        </View>
-                                    </View>
-                                </View>
+                                </SectionCard>
                             </Animated.View>
                         )}
 
-                        {/* Exam Performance Section */}
-                        <Animated.View entering={FadeInDown.delay(300).duration(500)}>
-                            <View style={styles.section}>
-                                <View style={styles.sectionHeader}>
-                                    <BookOpen size={18} color="#FF6B6B" />
-                                    <Text style={styles.sectionTitle}>Exam Performance</Text>
+                        {/* ── Exam Performance ── */}
+                        <Animated.View entering={FadeInDown.delay(320).duration(450)}>
+                            <SectionCard>
+                                <SectionTitle icon={BookOpen} iconColor="#EA580C" label="Exam Performance" />
+
+                                <View style={styles.examRow}>
+                                    {[
+                                        { val: examStats.totalExams || 0, label: 'Exams Taken', color: '#2563EB', bg: '#EFF6FF' },
+                                        { val: `${examStats.avgPercentage || 0}%`, label: 'Avg Score', color: '#16A34A', bg: '#F0FDF4' },
+                                        { val: `${examStats.passRate || 0}%`, label: 'Pass Rate', color: '#D97706', bg: '#FFFBEB' },
+                                    ].map((item) => (
+                                        <View key={item.label} style={[styles.examBox, { backgroundColor: item.bg }]}>
+                                            <Text style={[styles.examVal, { color: item.color }]}>{item.val}</Text>
+                                            <Text style={styles.examLabel}>{item.label}</Text>
+                                        </View>
+                                    ))}
                                 </View>
 
-                                <View style={styles.examStatsRow}>
-                                    <View style={[styles.examStatBox, { backgroundColor: '#E3F2FD' }]}>
-                                        <Text style={styles.examStatValue}>{examStats.totalExams || 0}</Text>
-                                        <Text style={styles.examStatLabel}>Exams Taken</Text>
-                                    </View>
-                                    <View style={[styles.examStatBox, { backgroundColor: '#D1FAE5' }]}>
-                                        <Text style={[styles.examStatValue, { color: '#10B981' }]}>
-                                            {examStats.avgPercentage || 0}%
-                                        </Text>
-                                        <Text style={styles.examStatLabel}>Avg Score</Text>
-                                    </View>
-                                    <View style={[styles.examStatBox, { backgroundColor: '#FEF3C7' }]}>
-                                        <Text style={[styles.examStatValue, { color: '#F59E0B' }]}>
-                                            {examStats.passRate || 0}%
-                                        </Text>
-                                        <Text style={styles.examStatLabel}>Pass Rate</Text>
-                                    </View>
-                                </View>
-
-                                {/* Recent Exams */}
                                 {recentExams.length > 0 && (
-                                    <View style={styles.recentExams}>
-                                        <Text style={styles.recentExamsTitle}>Recent Exams</Text>
+                                    <View style={styles.recentWrap}>
+                                        <Text style={styles.recentHeading}>Recent Exams</Text>
                                         {recentExams.map((exam, idx) => (
                                             <Animated.View
                                                 key={exam.examId + (exam.attemptId || '')}
-                                                entering={FadeInRight.delay(350 + idx * 50).duration(400)}
+                                                entering={FadeInRight.delay(370 + idx * 55).duration(400)}
                                             >
-                                                <View style={styles.recentExamCard}>
-                                                    <View style={styles.recentExamLeft}>
-                                                        <Text style={styles.recentExamTitle} numberOfLines={1}>
+                                                <View style={[
+                                                    styles.examRow2,
+                                                    idx === recentExams.length - 1 && { borderBottomWidth: 0 }
+                                                ]}>
+                                                    <View style={[
+                                                        styles.examIndexBadge,
+                                                        { backgroundColor: getScoreColor(exam.percentage) + '18' }
+                                                    ]}>
+                                                        <Text style={[
+                                                            styles.examIndexText,
+                                                            { color: getScoreColor(exam.percentage) }
+                                                        ]}>
+                                                            {String(idx + 1).padStart(2, '0')}
+                                                        </Text>
+                                                    </View>
+                                                    <View style={{ flex: 1 }}>
+                                                        <Text style={styles.examName} numberOfLines={1}>
                                                             {exam.examTitle}
                                                         </Text>
-                                                        <Text style={styles.recentExamType}>
-                                                            {exam.examType} • {exam.subjects?.length || 0} subjects
+                                                        <Text style={styles.examMeta}>
+                                                            {exam.examType} · {exam.subjects?.length || 0} subjects
                                                         </Text>
                                                     </View>
                                                     <View style={[
-                                                        styles.recentExamScore,
-                                                        { backgroundColor: getScoreColor(exam.percentage) + '20' }
+                                                        styles.scorePill,
+                                                        { backgroundColor: getScoreColor(exam.percentage) + '15' }
                                                     ]}>
                                                         <Text style={[
-                                                            styles.recentExamScoreText,
+                                                            styles.scorePillText,
                                                             { color: getScoreColor(exam.percentage) }
                                                         ]}>
                                                             {exam.percentage}%
@@ -371,73 +536,81 @@ export default function ParentPerformanceScreen() {
                                         ))}
                                     </View>
                                 )}
-                            </View>
+                            </SectionCard>
                         </Animated.View>
 
-                        {/* Performance Insights */}
-                        <Animated.View entering={FadeInDown.delay(400).duration(500)}>
-                            <View style={styles.insightsCard}>
-                                <View style={styles.insightsHeader}>
-                                    <Award size={20} color="#FFB020" />
-                                    <Text style={styles.insightsTitle}>Performance Insights</Text>
+                        {/* ── Insights ── */}
+                        <Animated.View entering={FadeInDown.delay(400).duration(450)}>
+                            <LinearGradient
+                                colors={['#FFFBEB', '#FEF3C7']}
+                                style={styles.insightCard}
+                            >
+                                <View style={styles.insightHeader}>
+                                    <View style={styles.insightIconWrap}>
+                                        <Award size={16} color="#D97706" />
+                                    </View>
+                                    <Text style={styles.insightTitle}>Performance Insights</Text>
                                 </View>
-                                <View style={styles.insightsList}>
+
+                                <View style={styles.insightList}>
                                     {monthlyStats.attendancePercentage >= 90 && (
-                                        <View style={styles.insightItem}>
-                                            <View style={[styles.insightDot, { backgroundColor: '#10B981' }]} />
+                                        <View style={styles.insightRow}>
+                                            <View style={[styles.insightDot, { backgroundColor: '#16A34A' }]} />
                                             <Text style={styles.insightText}>Excellent attendance this month! 🌟</Text>
                                         </View>
                                     )}
                                     {monthlyStats.attendancePercentage < 75 && monthlyStats.attendancePercentage > 0 && (
-                                        <View style={styles.insightItem}>
-                                            <View style={[styles.insightDot, { backgroundColor: '#FF6B6B' }]} />
-                                            <Text style={styles.insightText}>Attendance needs improvement (below 75%)</Text>
+                                        <View style={styles.insightRow}>
+                                            <View style={[styles.insightDot, { backgroundColor: '#EF4444' }]} />
+                                            <Text style={styles.insightText}>Attendance below 75% — needs attention</Text>
                                         </View>
                                     )}
                                     {examStats.avgPercentage >= 80 && (
-                                        <View style={styles.insightItem}>
-                                            <View style={[styles.insightDot, { backgroundColor: '#10B981' }]} />
+                                        <View style={styles.insightRow}>
+                                            <View style={[styles.insightDot, { backgroundColor: '#16A34A' }]} />
                                             <Text style={styles.insightText}>Great exam performance! Keep it up! 📚</Text>
                                         </View>
                                     )}
                                     {examStats.passRate < 100 && examStats.totalExams > 0 && (
-                                        <View style={styles.insightItem}>
+                                        <View style={styles.insightRow}>
                                             <View style={[styles.insightDot, { backgroundColor: '#F59E0B' }]} />
                                             <Text style={styles.insightText}>
-                                                Passed {examStats.totalPassed}/{examStats.totalExams} exams - room for improvement
+                                                Passed {examStats.totalPassed}/{examStats.totalExams} exams — room to grow
                                             </Text>
                                         </View>
                                     )}
                                     {examStats.totalExams === 0 && (
-                                        <View style={styles.insightItem}>
-                                            <View style={[styles.insightDot, { backgroundColor: '#3B82F6' }]} />
+                                        <View style={styles.insightRow}>
+                                            <View style={[styles.insightDot, { backgroundColor: '#2563EB' }]} />
                                             <Text style={styles.insightText}>No exam results available yet</Text>
                                         </View>
                                     )}
                                 </View>
-                            </View>
+                            </LinearGradient>
                         </Animated.View>
-
-                        <View style={{ height: 40 }} />
                     </>
                 )}
             </ScrollView>
-        </View>
+        </SafeAreaView>
     );
 }
+
+// ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#fff',
+        backgroundColor: '#FFFFFF',
     },
+
+    // Header
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 16,
-        paddingTop: 50,
-        paddingBottom: 16,
+        paddingTop: 8,
+        paddingBottom: 14,
         borderBottomWidth: 1,
         borderBottomColor: '#f0f0f0',
         backgroundColor: '#fff',
@@ -459,295 +632,388 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         color: '#111',
     },
-    headerSubtitle: {
+    headerSub: {
         fontSize: 13,
         color: '#666',
         marginTop: 2,
     },
-    content: {
-        flex: 1,
+
+    // Scroll
+    scrollContent: {
         padding: 16,
+        gap: 0,
     },
-    loadingContainer: {
-        padding: 60,
+
+    // Loading
+    loadingWrap: {
+        paddingVertical: 80,
         alignItems: 'center',
+        gap: 12,
     },
+    loadingText: {
+        fontSize: 13,
+        color: '#94A3B8',
+        fontWeight: '500',
+    },
+
+    // Empty
     emptyState: {
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
         gap: 12,
+        paddingHorizontal: 40,
+    },
+    emptyIconWrap: {
+        width: 72,
+        height: 72,
+        borderRadius: 24,
+        backgroundColor: '#F1F5F9',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     emptyTitle: {
         fontSize: 16,
-        fontWeight: '600',
-        color: '#111',
+        fontWeight: '700',
+        color: '#0F172A',
     },
     emptySubtitle: {
-        fontSize: 14,
-        color: '#666',
+        fontSize: 13,
+        color: '#94A3B8',
         textAlign: 'center',
+        lineHeight: 20,
     },
-    // Overall Score Card
-    overallScoreCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
+
+    // Hero card
+    heroCard: {
+        borderRadius: 24,
         padding: 20,
-        borderRadius: 20,
-        marginBottom: 16,
+        marginBottom: 14,
         overflow: 'hidden',
     },
-    scoreCircle: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
-        backgroundColor: 'rgba(255,255,255,0.25)',
-        alignItems: 'center',
-        justifyContent: 'center',
+    heroBubble1: {
+        position: 'absolute',
+        width: 160,
+        height: 160,
+        borderRadius: 80,
+        backgroundColor: 'rgba(255,255,255,0.08)',
+        top: -40,
+        right: -40,
     },
-    scoreValue: {
-        fontSize: 28,
+    heroBubble2: {
+        position: 'absolute',
+        width: 100,
+        height: 100,
+        borderRadius: 50,
+        backgroundColor: 'rgba(255,255,255,0.06)',
+        bottom: -20,
+        left: 20,
+    },
+    heroTop: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 18,
+        marginBottom: 18,
+    },
+    heroMeta: {
+        flex: 1,
+        gap: 5,
+    },
+    heroBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 5,
+        backgroundColor: 'rgba(255,255,255,0.2)',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 20,
+        alignSelf: 'flex-start',
+    },
+    heroBadgeText: {
+        fontSize: 10,
+        color: '#fff',
+        fontWeight: '700',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    heroLabel: {
+        fontSize: 22,
         fontWeight: '800',
         color: '#fff',
+        letterSpacing: -0.5,
     },
-    scoreMax: {
-        fontSize: 12,
-        color: 'rgba(255,255,255,0.8)',
-        marginTop: -4,
+    heroDesc: {
+        fontSize: 11,
+        color: 'rgba(255,255,255,0.75)',
+        fontWeight: '500',
     },
-    scoreMeta: {
+    heroStatsRow: {
+        flexDirection: 'row',
+        backgroundColor: 'rgba(0,0,0,0.12)',
+        borderRadius: 16,
+        padding: 14,
+    },
+    heroStat: {
         flex: 1,
-        marginLeft: 16,
+        alignItems: 'center',
+        gap: 3,
     },
-    scoreLabel: {
-        fontSize: 20,
-        fontWeight: '700',
+    heroStatVal: {
+        fontSize: 17,
+        fontWeight: '800',
         color: '#fff',
+        letterSpacing: -0.5,
     },
-    scoreDescription: {
-        fontSize: 13,
-        color: 'rgba(255,255,255,0.9)',
-        marginTop: 4,
+    heroStatLabel: {
+        fontSize: 10,
+        color: 'rgba(255,255,255,0.7)',
+        fontWeight: '600',
+        textTransform: 'uppercase',
+        letterSpacing: 0.3,
     },
-    scoreIcon: {
-        position: 'absolute',
-        right: 16,
-        top: 16,
+    heroStatDivider: {
+        width: 1,
+        height: 30,
+        backgroundColor: 'rgba(255,255,255,0.2)',
     },
-    // Child Info Card
-    childInfoCard: {
+
+    // Child card
+    childCard: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 14,
-        backgroundColor: '#f8f9fa',
-        borderRadius: 12,
-        marginBottom: 16,
         gap: 12,
+        padding: 14,
+        backgroundColor: '#F8FAFC',
+        borderRadius: 16,
+        marginBottom: 14,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
     },
-    childInfoIcon: {
+    childAvatar: {
         width: 40,
         height: 40,
-        borderRadius: 20,
-        backgroundColor: '#E3F2FD',
+        borderRadius: 14,
+        backgroundColor: '#DBEAFE',
         alignItems: 'center',
         justifyContent: 'center',
     },
-    childInfoContent: {
-        flex: 1,
-    },
-    childInfoName: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: '#111',
-    },
-    childInfoClass: {
-        fontSize: 13,
-        color: '#666',
-        marginTop: 2,
-    },
-    // Section
-    section: {
-        backgroundColor: '#f8f9fa',
-        borderRadius: 16,
-        padding: 16,
-        marginBottom: 16,
-    },
-    sectionHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-        marginBottom: 14,
-    },
-    sectionTitle: {
+    childName: {
         fontSize: 15,
         fontWeight: '700',
-        color: '#111',
+        color: '#0F172A',
+        letterSpacing: -0.2,
     },
-    // Stats Row
-    statsRow: {
+    childMeta: {
+        fontSize: 12,
+        color: '#64748B',
+        marginTop: 2,
+        fontWeight: '500',
+    },
+    childChip: {
         flexDirection: 'row',
-        gap: 8,
-    },
-    statBox: {
-        flex: 1,
-        padding: 12,
-        borderRadius: 12,
         alignItems: 'center',
-        gap: 6,
+        gap: 4,
+        backgroundColor: '#EFF6FF',
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 20,
     },
-    statBoxValue: {
-        fontSize: 18,
+    childChipText: {
+        fontSize: 11,
+        color: '#2563EB',
         fontWeight: '700',
     },
-    statBoxLabel: {
-        fontSize: 10,
-        color: '#666',
-        fontWeight: '600',
-    },
-    // Working Days
-    workingDaysRow: {
+
+    // Pills row (attendance)
+    pillsRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
+        marginBottom: 14,
+    },
+
+    // Divider row
+    dividerRow: {
+        flexDirection: 'row',
         alignItems: 'center',
-        marginTop: 12,
-        paddingTop: 12,
+        justifyContent: 'space-between',
+        paddingTop: 14,
         borderTopWidth: 1,
-        borderTopColor: '#e5e7eb',
+        borderTopColor: '#E2E8F0',
     },
-    workingDaysLabel: {
-        fontSize: 13,
-        color: '#666',
+    dividerLabel: {
+        fontSize: 12,
+        color: '#64748B',
+        fontWeight: '500',
     },
-    workingDaysValue: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: '#111',
+    dividerChip: {
+        backgroundColor: '#E2E8F0',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 8,
     },
-    // Yearly Stats
-    yearlyStatsRow: {
+    dividerChipText: {
+        fontSize: 12,
+        color: '#0F172A',
+        fontWeight: '700',
+    },
+
+    // Yearly
+    yearlyRow: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-around',
-        paddingVertical: 8,
+        paddingVertical: 6,
     },
     yearlyStat: {
         alignItems: 'center',
+        gap: 4,
     },
-    yearlyStatValue: {
-        fontSize: 22,
-        fontWeight: '700',
-        color: '#111',
+    yearlyVal: {
+        fontSize: 24,
+        fontWeight: '800',
+        letterSpacing: -0.5,
     },
-    yearlyStatLabel: {
+    yearlyLabel: {
         fontSize: 11,
-        color: '#666',
-        marginTop: 4,
+        color: '#94A3B8',
+        fontWeight: '600',
+        textTransform: 'uppercase',
+        letterSpacing: 0.3,
     },
     yearlyDivider: {
         width: 1,
-        height: 40,
-        backgroundColor: '#e5e7eb',
+        height: 36,
+        backgroundColor: '#E2E8F0',
     },
-    // Exam Stats
-    examStatsRow: {
+
+    // Exam boxes
+    examRow: {
         flexDirection: 'row',
         gap: 10,
+        marginBottom: 2,
     },
-    examStatBox: {
+    examBox: {
         flex: 1,
+        borderRadius: 14,
         padding: 14,
-        borderRadius: 12,
         alignItems: 'center',
-        gap: 4,
+        gap: 5,
     },
-    examStatValue: {
+    examVal: {
         fontSize: 20,
-        fontWeight: '700',
-        color: '#3B82F6',
+        fontWeight: '800',
+        letterSpacing: -0.5,
     },
-    examStatLabel: {
-        fontSize: 11,
-        color: '#666',
-        fontWeight: '500',
+    examLabel: {
+        fontSize: 10,
+        color: '#94A3B8',
+        fontWeight: '600',
+        textTransform: 'uppercase',
+        letterSpacing: 0.3,
+        textAlign: 'center',
     },
-    // Recent Exams
-    recentExams: {
+
+    // Recent exams list
+    recentWrap: {
         marginTop: 16,
-        paddingTop: 14,
+        paddingTop: 16,
         borderTopWidth: 1,
-        borderTopColor: '#e5e7eb',
+        borderTopColor: '#E2E8F0',
     },
-    recentExamsTitle: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: '#666',
-        marginBottom: 10,
-    },
-    recentExamCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingVertical: 10,
-        borderBottomWidth: 1,
-        borderBottomColor: '#f0f0f0',
-    },
-    recentExamLeft: {
-        flex: 1,
-    },
-    recentExamTitle: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#111',
-    },
-    recentExamType: {
-        fontSize: 12,
-        color: '#666',
-        marginTop: 2,
-    },
-    recentExamScore: {
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-        borderRadius: 8,
-    },
-    recentExamScoreText: {
-        fontSize: 14,
+    recentHeading: {
+        fontSize: 11,
         fontWeight: '700',
-    },
-    // Insights Card
-    insightsCard: {
-        backgroundColor: '#FFFBEB',
-        borderRadius: 16,
-        padding: 16,
-        borderWidth: 1,
-        borderColor: '#FEF3C7',
-    },
-    insightsHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
+        color: '#94A3B8',
+        textTransform: 'uppercase',
+        letterSpacing: 0.8,
         marginBottom: 12,
     },
-    insightsTitle: {
-        fontSize: 15,
+    examRow2: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        paddingVertical: 10,
+        borderBottomWidth: 1,
+        borderBottomColor: '#F1F5F9',
+    },
+    examIndexBadge: {
+        width: 32,
+        height: 32,
+        borderRadius: 10,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    examIndexText: {
+        fontSize: 12,
+        fontWeight: '800',
+    },
+    examName: {
+        fontSize: 13,
+        fontWeight: '700',
+        color: '#0F172A',
+    },
+    examMeta: {
+        fontSize: 11,
+        color: '#94A3B8',
+        marginTop: 2,
+        fontWeight: '500',
+    },
+    scorePill: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 10,
+    },
+    scorePillText: {
+        fontSize: 13,
+        fontWeight: '800',
+        letterSpacing: -0.3,
+    },
+
+    // Insights
+    insightCard: {
+        borderRadius: 20,
+        padding: 18,
+        borderWidth: 1,
+        borderColor: '#FDE68A',
+    },
+    insightHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        marginBottom: 14,
+    },
+    insightIconWrap: {
+        width: 32,
+        height: 32,
+        borderRadius: 10,
+        backgroundColor: '#FEF3C7',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    insightTitle: {
+        fontSize: 14,
         fontWeight: '700',
         color: '#92400E',
+        letterSpacing: -0.2,
     },
-    insightsList: {
+    insightList: {
         gap: 10,
     },
-    insightItem: {
+    insightRow: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 10,
     },
     insightDot: {
-        width: 8,
-        height: 8,
+        width: 7,
+        height: 7,
         borderRadius: 4,
     },
     insightText: {
         fontSize: 13,
         color: '#78350F',
         flex: 1,
+        fontWeight: '500',
+        lineHeight: 18,
     },
 });

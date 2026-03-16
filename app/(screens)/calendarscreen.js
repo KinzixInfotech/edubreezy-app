@@ -33,7 +33,7 @@ import * as SecureStore from 'expo-secure-store';
 import api from '../../lib/api';
 import HapticTouchable from '../components/HapticTouch';
 import { StatusBar } from 'expo-status-bar';
-
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CALENDAR_WIDTH = SCREEN_WIDTH - 32;
 const DAY_WIDTH = CALENDAR_WIDTH / 7;
@@ -66,6 +66,7 @@ const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 export default function CalendarScreen() {
     const params = useLocalSearchParams();
+    const insets = useSafeAreaInsets();
 
     const [refreshing, setRefreshing] = useState(false);
     const [currentDate, setCurrentDate] = useState(new Date());
@@ -90,31 +91,28 @@ export default function CalendarScreen() {
     // Calculate 6-month range once (centered on today)
     const dateRange = useMemo(() => {
         const today = new Date();
-        const startDate = new Date(today.getFullYear(), today.getMonth() - 3, 1); // 3 months before
-        const endDate = new Date(today.getFullYear(), today.getMonth() + 4, 0);   // 3 months after (end of month)
+        const startDate = new Date(today.getFullYear(), today.getMonth() - 3, 1);
+        const endDate = new Date(today.getFullYear(), today.getMonth() + 4, 0);
         return { startDate, endDate };
-    }, []); // Only calculate once on mount
+    }, []);
 
-    // Fetch calendar events for 6-month range (single query, no refetch on month change)
+    // Fetch calendar events for 6-month range
     const { data: eventsData, isLoading, isFetching, refetch } = useQuery({
         queryKey: ['calendar-events-range', schoolId],
         queryFn: async () => {
-            console.log('📅 Fetching calendar events...'); // Debug log
             const res = await api.get(
                 `/schools/${schoolId}/calendar/events?startDate=${dateRange.startDate.toISOString()}&endDate=${dateRange.endDate.toISOString()}`
             );
             return res.data;
         },
         enabled: !!schoolId,
-        staleTime: 1000 * 60 * 10, // 10 minutes
-        gcTime: 1000 * 60 * 30,    // Keep in cache for 30 minutes
-        refetchOnMount: false,     // Don't refetch when component mounts if data exists
-        refetchOnWindowFocus: false, // Don't refetch on app focus
+        staleTime: 1000 * 60 * 10,
+        gcTime: 1000 * 60 * 30,
+        refetchOnMount: false,
+        refetchOnWindowFocus: false,
     });
 
-    // console.log(eventsData)
-
-    // Fetch upcoming events (optimized with longer cache)
+    // Fetch upcoming events
     const { data: upcomingData } = useQuery({
         queryKey: ['upcoming-events', schoolId],
         queryFn: async () => {
@@ -122,18 +120,25 @@ export default function CalendarScreen() {
             return res.data;
         },
         enabled: !!schoolId,
-        staleTime: 1000 * 60 * 10,    // 10 minutes
-        gcTime: 1000 * 60 * 30,        // Keep in cache for 30 minutes  
-        refetchOnMount: false,         // Don't refetch when component mounts if data exists
-        refetchOnWindowFocus: false,   // Don't refetch on app focus
+        staleTime: 1000 * 60 * 10,
+        gcTime: 1000 * 60 * 30,
+        refetchOnMount: false,
+        refetchOnWindowFocus: false,
     });
-
 
     const events = eventsData?.events || [];
     const upcomingEvents = upcomingData?.events || [];
     const hasGoogleCalendar = eventsData?.hasGoogleCalendar || false;
 
-    // Calendar calculations
+    // Events this month count
+    const eventsThisMonth = useMemo(() => {
+        const now = new Date();
+        return events.filter(event => {
+            const d = new Date(event.startDate || event.start);
+            return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+        }).length;
+    }, [events]);
+
     const monthYear = currentDate.toLocaleDateString('en-US', {
         month: 'long',
         year: 'numeric'
@@ -149,7 +154,6 @@ export default function CalendarScreen() {
 
         const days = [];
 
-        // Previous month days
         const prevMonthLastDay = new Date(year, month, 0).getDate();
         for (let i = startingDayOfWeek - 1; i >= 0; i--) {
             days.push({
@@ -159,7 +163,6 @@ export default function CalendarScreen() {
             });
         }
 
-        // Current month days
         for (let i = 1; i <= daysInMonth; i++) {
             days.push({
                 date: i,
@@ -168,7 +171,6 @@ export default function CalendarScreen() {
             });
         }
 
-        // Next month days
         const remainingDays = 42 - days.length;
         for (let i = 1; i <= remainingDays; i++) {
             days.push({
@@ -255,7 +257,7 @@ export default function CalendarScreen() {
     }
 
     return (
-        <View style={styles.container}>
+        <SafeAreaView style={styles.container}>
             <StatusBar style='dark' />
             {/* Header */}
             <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
@@ -287,6 +289,19 @@ export default function CalendarScreen() {
                     />
                 }
             >
+                {/* Events this month stat */}
+                <Animated.View entering={FadeInDown.delay(100).duration(400)}>
+                    <View style={styles.statsRow}>
+                        <View style={styles.statPill}>
+                            <CalendarIcon size={13} color="#0469ff" />
+                            <Text style={styles.statPillText}>
+                                <Text style={styles.statPillCount}>{eventsThisMonth}</Text>
+                                {' '}event{eventsThisMonth !== 1 ? 's' : ''} this month
+                            </Text>
+                        </View>
+                    </View>
+                </Animated.View>
+
                 {/* Calendar Card */}
                 <Animated.View entering={FadeInDown.delay(200).duration(500)}>
                     <View style={styles.calendarCard}>
@@ -511,7 +526,14 @@ export default function CalendarScreen() {
                 onRequestClose={() => setDateEventsModalVisible(false)}
             >
                 <View style={styles.modalOverlay}>
-                    <Animated.View entering={FadeIn.duration(200)} style={styles.modalContent}>
+                    <Animated.View
+                        entering={FadeIn.duration(200)}
+                        style={[
+                            styles.modalContent,
+                            { paddingBottom: insets.bottom + 8 }
+                        ]}
+                    >
+                        <View style={styles.modalHandle} />
                         <View style={styles.modalHeader}>
                             <Text style={styles.modalTitle}>
                                 {selectedDate?.toLocaleDateString('en-US', {
@@ -525,7 +547,11 @@ export default function CalendarScreen() {
                             </HapticTouchable>
                         </View>
 
-                        <ScrollView style={styles.modalBody}>
+                        <ScrollView
+                            style={styles.modalBody}
+                            showsVerticalScrollIndicator={false}
+                            bounces={false}
+                        >
                             {dateEvents.map((event, idx) => {
                                 const statusConfig = getStatusConfig(event.eventType);
                                 return (
@@ -584,9 +610,16 @@ export default function CalendarScreen() {
                 onRequestClose={() => setDetailModalVisible(false)}
             >
                 <View style={styles.modalOverlay}>
-                    <Animated.View entering={FadeIn.duration(200)} style={styles.detailModalContent}>
+                    <Animated.View
+                        entering={FadeIn.duration(200)}
+                        style={[
+                            styles.detailModalContent,
+                            { paddingBottom: insets.bottom + 8 }
+                        ]}
+                    >
                         {selectedEvent && (
                             <>
+                                <View style={styles.modalHandle} />
                                 <View style={styles.detailHeader}>
                                     <View style={styles.detailHeaderLeft}>
                                         <View
@@ -698,25 +731,21 @@ export default function CalendarScreen() {
                                                 if (!url) return;
 
                                                 if (Platform.OS === 'android') {
-                                                    // Open Google Calendar app directly
                                                     IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
                                                         data: url,
                                                         packageName: 'com.google.android.calendar',
                                                     }).catch(() => {
-                                                        // Fallback to browser if Google Calendar app isn't installed
                                                         Linking.openURL(url).catch(() =>
                                                             Alert.alert('Cannot open Google Calendar event.')
                                                         );
                                                     });
                                                 } else {
-                                                    // iOS: just open in browser
                                                     Linking.openURL(url).catch(() =>
                                                         Alert.alert('Cannot open Google Calendar event.')
                                                     );
                                                 }
                                             }}
                                         >
-
                                             <View style={styles.googleLinkButton}>
                                                 <ExternalLink size={16} color="#0469ff" />
                                                 <Text style={styles.googleLinkText}>View in Google Calendar</Text>
@@ -729,7 +758,7 @@ export default function CalendarScreen() {
                     </Animated.View>
                 </View>
             </Modal>
-        </View>
+        </SafeAreaView>
     );
 }
 
@@ -748,7 +777,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 16,
-        paddingTop: 60,
+        paddingTop: 8,
         paddingBottom: 16,
         borderBottomWidth: 1,
         borderBottomColor: '#f0f0f0',
@@ -793,18 +822,33 @@ const styles = StyleSheet.create({
         flex: 1,
         padding: 16,
     },
+    // Stats row
+    statsRow: {
+        flexDirection: 'row',
+        marginBottom: 12,
+    },
+    statPill: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        backgroundColor: '#E3F2FD',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 20,
+    },
+    statPillText: {
+        fontSize: 13,
+        color: '#444',
+    },
+    statPillCount: {
+        fontWeight: '700',
+        color: '#0469ff',
+    },
     calendarCard: {
         backgroundColor: '#ffffffff',
         borderRadius: 16,
         padding: 16,
         marginBottom: 20,
-        // borderWidth:0.,
-        // borderColor:'gray',
-        // shadowColor: '#000',
-        // shadowOffset: { width: 0, height: 2 },
-        // shadowOpacity: 0.1,
-        // shadowRadius: 8,
-        // elevation: 4,
     },
     calendarHeader: {
         flexDirection: 'row',
@@ -1034,6 +1078,15 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: 'rgba(0,0,0,0.5)',
         justifyContent: 'flex-end',
+    },
+    modalHandle: {
+        width: 36,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: '#e0e0e0',
+        alignSelf: 'center',
+        marginTop: 10,
+        marginBottom: 4,
     },
     modalContent: {
         backgroundColor: '#fff',

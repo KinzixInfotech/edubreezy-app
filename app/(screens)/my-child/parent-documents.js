@@ -15,35 +15,32 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import * as SecureStore from 'expo-secure-store';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
-import { LinearGradient } from 'expo-linear-gradient';
 import {
     ArrowLeft,
     FileText,
     Award,
     IdCard,
-    Download,
     Eye,
     Share2,
     Calendar,
     User,
-    Clock,
     AlertCircle,
 } from 'lucide-react-native';
 import api from '../../../lib/api';
 import HapticTouchable from '../../components/HapticTouch';
 import { StatusBar } from 'expo-status-bar';
-
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function ParentDocumentsScreen() {
     const router = useRouter();
     const params = useLocalSearchParams();
+    const insets = useSafeAreaInsets();
 
     const childData = params.childData ? JSON.parse(params.childData) : null;
     const [selectedChildId, setSelectedChildId] = useState(childData?.studentId || childData?.id || null);
 
-    // Get user data
     const { data: userData } = useQuery({
-        queryKey: ['user-data'], // Changed key to match parent-homework
+        queryKey: ['user-data'],
         queryFn: async () => {
             const stored = await SecureStore.getItemAsync('user');
             return stored ? JSON.parse(stored) : null;
@@ -54,16 +51,6 @@ export default function ParentDocumentsScreen() {
     const schoolId = userData?.schoolId;
     const parentId = userData?.id;
 
-    useEffect(() => {
-        console.warn('🔍 ParentDocuments Debug:', {
-            hasUserData: !!userData,
-            schoolId,
-            parentId,
-            token: SecureStore.getItem('token') ? 'Present' : 'Missing'
-        });
-    }, [userData, schoolId, parentId]);
-
-    // Fetch documents for parent
     const {
         data: documentsData,
         isLoading,
@@ -72,21 +59,12 @@ export default function ParentDocumentsScreen() {
     } = useQuery({
         queryKey: ['parent-documents', schoolId, parentId, selectedChildId],
         queryFn: async () => {
-            console.warn('🚀 Fetching documents...', { schoolId, parentId, selectedChildId });
-            if (!schoolId || !parentId) {
-                console.warn('❌ Missing credentials for documents fetch');
-                return { documents: [], stats: {} };
-            }
-            try {
-                const url = `/schools/${schoolId}/parents/${parentId}/documents${selectedChildId ? `?studentId=${selectedChildId}` : ''}`;
-                const res = await api.get(url);
-                console.warn('✅ Documents fetched:', res.data?.documents?.length);
-                return res.data;
-            } catch (err) {
-                console.error('❌ Documents fetch failed:', err);
-                throw err;
-            }
+            if (!schoolId || !parentId) return { documents: [], stats: {} };
+            const url = `/schools/${schoolId}/parents/${parentId}/documents${selectedChildId ? `?studentId=${selectedChildId}` : ''}`;
+            const res = await api.get(url);
+            return res.data;
         },
+        enabled: !!schoolId && !!parentId,
         staleTime: 1000 * 60 * 2,
     });
 
@@ -107,10 +85,19 @@ export default function ParentDocumentsScreen() {
 
     const getDocColor = (type) => {
         switch (type) {
-            case 'certificate': return ['#8B5CF6', '#7C3AED'];
-            case 'idcard': return ['#10B981', '#059669'];
-            case 'admitcard': return ['#F59E0B', '#D97706'];
-            default: return ['#6B7280', '#4B5563'];
+            case 'certificate': return '#8B5CF6';
+            case 'idcard': return '#10B981';
+            case 'admitcard': return '#F59E0B';
+            default: return '#6B7280';
+        }
+    };
+
+    const getDocBgColor = (type) => {
+        switch (type) {
+            case 'certificate': return '#F3E8FF';
+            case 'idcard': return '#D1FAE5';
+            case 'admitcard': return '#FEF3C7';
+            default: return '#F3F4F6';
         }
     };
 
@@ -155,61 +142,70 @@ export default function ParentDocumentsScreen() {
 
     if (!childData && !parentId) {
         return (
-            <View style={styles.centered}>
-                <AlertCircle size={48} color="#999" />
-                <Text style={styles.emptyText}>Unable to load documents</Text>
-            </View>
+            <SafeAreaView style={styles.container}>
+                <View style={styles.centered}>
+                    <AlertCircle size={48} color="#999" />
+                    <Text style={styles.emptyText}>Unable to load documents</Text>
+                </View>
+            </SafeAreaView>
         );
     }
 
     return (
-        <View style={styles.container}>
-            {/* Header */}
-            <LinearGradient colors={['#0469ff', '#0347b8']} style={styles.header}>
-                <View style={styles.headerContent}>
-                    <HapticTouchable onPress={() => router.back()} style={styles.backBtn}>
-                        <ArrowLeft size={24} color="#fff" />
-                    </HapticTouchable>
-                    <View style={styles.headerText}>
-                        <Text style={styles.headerTitle}>Documents</Text>
-                        <Text style={styles.headerSubtitle}>
-                            Certificates, ID Cards & Admit Cards
-                        </Text>
-                    </View>
-                </View>
-            </LinearGradient>
+        <SafeAreaView style={styles.container}>
+            <StatusBar style="dark" />
 
-            {/* Stats */}
-            <Animated.View entering={FadeInDown.delay(100)} style={styles.statsRow}>
+            {/* Header — consistent with other screens */}
+            <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
+                <HapticTouchable onPress={() => router.back()}>
+                    <View style={styles.backButton}>
+                        <ArrowLeft size={24} color="#111" />
+                    </View>
+                </HapticTouchable>
+                <View style={styles.headerCenter}>
+                    <Text style={styles.headerTitle}>Documents</Text>
+                    <Text style={styles.headerSubtitle}>Certificates, ID Cards & Admit Cards</Text>
+                </View>
+                <View style={{ width: 40 }} />
+            </Animated.View>
+
+            {/* Stats row */}
+            <Animated.View entering={FadeInDown.delay(100).duration(500)} style={styles.statsRow}>
                 <View style={[styles.statBadge, { backgroundColor: '#F3E8FF' }]}>
-                    <Award size={16} color="#8B5CF6" />
+                    <Award size={14} color="#8B5CF6" />
                     <Text style={[styles.statText, { color: '#8B5CF6' }]}>
                         {stats.certificates || 0} Certificates
                     </Text>
                 </View>
                 <View style={[styles.statBadge, { backgroundColor: '#D1FAE5' }]}>
-                    <IdCard size={16} color="#10B981" />
+                    <IdCard size={14} color="#10B981" />
                     <Text style={[styles.statText, { color: '#10B981' }]}>
                         {stats.idCards || 0} ID Cards
                     </Text>
                 </View>
                 <View style={[styles.statBadge, { backgroundColor: '#FEF3C7' }]}>
-                    <FileText size={16} color="#F59E0B" />
+                    <FileText size={14} color="#F59E0B" />
                     <Text style={[styles.statText, { color: '#F59E0B' }]}>
                         {stats.admitCards || 0} Admit Cards
                     </Text>
                 </View>
             </Animated.View>
 
-            {/* Child Filter */}
+            {/* Child filter chips */}
             {documentsData?.children?.length > 0 && (
                 <View style={styles.filterContainer}>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterContent}>
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.filterContent}
+                    >
                         <TouchableOpacity
                             style={[styles.filterChip, !selectedChildId && styles.filterChipActive]}
                             onPress={() => setSelectedChildId(null)}
                         >
-                            <Text style={[styles.filterText, !selectedChildId && styles.filterTextActive]}>All Children</Text>
+                            <Text style={[styles.filterText, !selectedChildId && styles.filterTextActive]}>
+                                All Children
+                            </Text>
                         </TouchableOpacity>
                         {documentsData.children.map(child => (
                             <TouchableOpacity
@@ -226,12 +222,20 @@ export default function ParentDocumentsScreen() {
                 </View>
             )}
 
-            {/* Documents List */}
+            {/* Documents list */}
             <ScrollView
                 style={styles.scrollView}
-                contentContainerStyle={styles.scrollContent}
+                contentContainerStyle={[
+                    styles.scrollContent,
+                    { paddingBottom: insets.bottom + 24 }
+                ]}
+                showsVerticalScrollIndicator={false}
                 refreshControl={
-                    <RefreshControl refreshing={isRefetching} onRefresh={refetch} />
+                    <RefreshControl
+                        refreshing={isRefetching}
+                        onRefresh={refetch}
+                        tintColor="#0469ff"
+                    />
                 }
             >
                 {isLoading ? (
@@ -243,27 +247,25 @@ export default function ParentDocumentsScreen() {
                     <Animated.View entering={FadeInUp} style={styles.emptyContainer}>
                         <FileText size={64} color="#ddd" />
                         <Text style={styles.emptyTitle}>No Documents Yet</Text>
-                        <Text style={styles.emptyText}>
+                        <Text style={styles.emptySubtitle}>
                             Documents shared by school will appear here
                         </Text>
                     </Animated.View>
                 ) : (
                     documents.map((doc, index) => {
                         const DocIcon = getDocIcon(doc.type);
-                        const colors = getDocColor(doc.type);
+                        const color = getDocColor(doc.type);
+                        const bgColor = getDocBgColor(doc.type);
 
                         return (
                             <Animated.View
                                 key={doc.id}
-                                entering={FadeInDown.delay(index * 80)}
+                                entering={FadeInDown.delay(index * 80).duration(500)}
                             >
                                 <View style={styles.docCard}>
-                                    <LinearGradient
-                                        colors={colors}
-                                        style={styles.docIconBg}
-                                    >
-                                        <DocIcon size={24} color="#fff" />
-                                    </LinearGradient>
+                                    <View style={[styles.docIconBg, { backgroundColor: bgColor }]}>
+                                        <DocIcon size={22} color={color} />
+                                    </View>
 
                                     <View style={styles.docInfo}>
                                         <Text style={styles.docTitle} numberOfLines={1}>
@@ -271,13 +273,9 @@ export default function ParentDocumentsScreen() {
                                         </Text>
                                         <View style={styles.docMeta}>
                                             <User size={12} color="#888" />
-                                            <Text style={styles.docMetaText}>
-                                                {doc.studentName}
-                                            </Text>
+                                            <Text style={styles.docMetaText}>{doc.studentName}</Text>
                                             <Text style={styles.docDot}>•</Text>
-                                            <Text style={styles.docMetaText}>
-                                                {doc.className}
-                                            </Text>
+                                            <Text style={styles.docMetaText}>{doc.className}</Text>
                                         </View>
                                         <View style={styles.docMeta}>
                                             <Calendar size={12} color="#888" />
@@ -285,25 +283,23 @@ export default function ParentDocumentsScreen() {
                                                 {formatDate(doc.sharedAt || doc.issueDate)}
                                             </Text>
                                         </View>
-                                        <View style={styles.docTypeBadge}>
-                                            <Text style={[styles.docTypeText, { color: colors[0] }]}>
+                                        <View style={[styles.docTypeBadge, { backgroundColor: bgColor }]}>
+                                            <Text style={[styles.docTypeText, { color }]}>
                                                 {getDocLabel(doc.type)}
                                             </Text>
                                         </View>
                                     </View>
 
                                     <View style={styles.docActions}>
-                                        <HapticTouchable
-                                            style={styles.actionBtn}
-                                            onPress={() => handleView(doc)}
-                                        >
-                                            <Eye size={18} color="#0469ff" />
+                                        <HapticTouchable onPress={() => handleView(doc)}>
+                                            <View style={styles.actionBtn}>
+                                                <Eye size={18} color="#0469ff" />
+                                            </View>
                                         </HapticTouchable>
-                                        <HapticTouchable
-                                            style={styles.actionBtn}
-                                            onPress={() => handleShare(doc)}
-                                        >
-                                            <Share2 size={18} color="#10B981" />
+                                        <HapticTouchable onPress={() => handleShare(doc)}>
+                                            <View style={styles.actionBtn}>
+                                                <Share2 size={18} color="#10B981" />
+                                            </View>
                                         </HapticTouchable>
                                     </View>
                                 </View>
@@ -312,45 +308,50 @@ export default function ParentDocumentsScreen() {
                     })
                 )}
             </ScrollView>
-        </View>
+        </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#f8f9fa',
+        backgroundColor: '#fff',
     },
+    // Header — matches all other screens
     header: {
-        paddingTop: 50,
-        paddingBottom: 20,
-        paddingHorizontal: 16,
-    },
-    headerContent: {
         flexDirection: 'row',
         alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 16,
+        paddingTop: 8,
+        paddingBottom: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#f0f0f0',
+        backgroundColor: '#fff',
     },
-    backBtn: {
+    backButton: {
         width: 40,
         height: 40,
         borderRadius: 20,
-        backgroundColor: 'rgba(255,255,255,0.2)',
+        backgroundColor: '#f5f5f5',
         alignItems: 'center',
         justifyContent: 'center',
     },
-    headerText: {
-        marginLeft: 12,
+    headerCenter: {
+        flex: 1,
+        alignItems: 'center',
     },
     headerTitle: {
-        fontSize: 22,
+        fontSize: 18,
         fontWeight: '700',
-        color: '#fff',
+        color: '#111',
     },
     headerSubtitle: {
         fontSize: 13,
-        color: 'rgba(255,255,255,0.8)',
+        color: '#666',
         marginTop: 2,
     },
+    // Stats
     statsRow: {
         flexDirection: 'row',
         paddingHorizontal: 16,
@@ -370,103 +371,9 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: '600',
     },
-    scrollView: {
-        flex: 1,
-    },
-    scrollContent: {
-        padding: 16,
-        paddingBottom: 100,
-    },
-    centered: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 60,
-    },
-    loadingText: {
-        marginTop: 12,
-        color: '#666',
-    },
-    emptyContainer: {
-        alignItems: 'center',
-        paddingVertical: 60,
-    },
-    emptyTitle: {
-        fontSize: 18,
-        fontWeight: '600',
-        color: '#333',
-        marginTop: 16,
-    },
-    emptyText: {
-        fontSize: 14,
-        color: '#888',
-        marginTop: 8,
-        textAlign: 'center',
-    },
-    docCard: {
-        backgroundColor: '#fff',
-        borderRadius: 16,
-        padding: 14,
-        marginBottom: 12,
-        flexDirection: 'row',
-        alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 8,
-        elevation: 2,
-    },
-    docIconBg: {
-        width: 50,
-        height: 50,
-        borderRadius: 14,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    docInfo: {
-        flex: 1,
-        marginLeft: 12,
-    },
-    docTitle: {
-        fontSize: 15,
-        fontWeight: '600',
-        color: '#1a1a1a',
-    },
-    docMeta: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        marginTop: 4,
-    },
-    docMetaText: {
-        fontSize: 12,
-        color: '#888',
-    },
-    docDot: {
-        color: '#ccc',
-        marginHorizontal: 2,
-    },
-    docTypeBadge: {
-        marginTop: 6,
-    },
-    docTypeText: {
-        fontSize: 11,
-        fontWeight: '600',
-    },
-    docActions: {
-        flexDirection: 'row',
-        gap: 8,
-    },
-    actionBtn: {
-        width: 36,
-        height: 36,
-        backgroundColor: '#f0f0f0',
-        borderRadius: 18,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
+    // Filter chips
     filterContainer: {
-        marginBottom: 10,
+        marginBottom: 8,
     },
     filterContent: {
         paddingHorizontal: 16,
@@ -476,7 +383,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 16,
         paddingVertical: 8,
         borderRadius: 20,
-        backgroundColor: '#fff',
+        backgroundColor: '#f5f5f5',
         borderWidth: 1,
         borderColor: '#e5e7eb',
     },
@@ -491,5 +398,111 @@ const styles = StyleSheet.create({
     },
     filterTextActive: {
         color: '#fff',
+    },
+    // Scroll
+    scrollView: {
+        flex: 1,
+    },
+    scrollContent: {
+        padding: 16,
+    },
+    // States
+    centered: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 60,
+    },
+    loadingText: {
+        marginTop: 12,
+        color: '#666',
+        fontSize: 14,
+    },
+    emptyContainer: {
+        alignItems: 'center',
+        paddingVertical: 60,
+    },
+    emptyTitle: {
+        fontSize: 18,
+        fontWeight: '600',
+        color: '#333',
+        marginTop: 16,
+    },
+    emptySubtitle: {
+        fontSize: 14,
+        color: '#888',
+        marginTop: 8,
+        textAlign: 'center',
+        paddingHorizontal: 32,
+    },
+    emptyText: {
+        fontSize: 14,
+        color: '#888',
+        marginTop: 8,
+        textAlign: 'center',
+    },
+    // Doc card
+    docCard: {
+        backgroundColor: '#f8f9fa',
+        borderRadius: 12,
+        padding: 14,
+        marginBottom: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    docIconBg: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    docInfo: {
+        flex: 1,
+        marginLeft: 12,
+    },
+    docTitle: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#111',
+        marginBottom: 4,
+    },
+    docMeta: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginTop: 2,
+    },
+    docMetaText: {
+        fontSize: 12,
+        color: '#888',
+    },
+    docDot: {
+        color: '#ccc',
+        marginHorizontal: 2,
+    },
+    docTypeBadge: {
+        alignSelf: 'flex-start',
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 6,
+        marginTop: 6,
+    },
+    docTypeText: {
+        fontSize: 11,
+        fontWeight: '600',
+    },
+    docActions: {
+        flexDirection: 'row',
+        gap: 8,
+        marginLeft: 8,
+    },
+    actionBtn: {
+        width: 36,
+        height: 36,
+        backgroundColor: '#fff',
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
 });

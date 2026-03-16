@@ -6,7 +6,6 @@ import {
   RefreshControl,
   Alert,
   ActivityIndicator,
-  Platform,
   Modal,
   Image
 } from 'react-native';
@@ -21,44 +20,39 @@ import {
   AlertCircle,
   CreditCard,
   ArrowLeft,
-  ChevronDown,
   Receipt,
   Info,
   X,
-  ArrowRight
+  ArrowRight,
+  Sparkles,
+  TrendingUp,
 } from 'lucide-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
+import Animated, { FadeInDown, FadeInRight, FadeIn } from 'react-native-reanimated';
 import * as SecureStore from 'expo-secure-store';
 import api from '../../lib/api';
 import HapticTouchable from '../components/HapticTouch';
 import { StatusBar } from 'expo-status-bar';
 import RazorpayCheckout from 'react-native-razorpay';
 import PaymentWebView from '../components/PaymentWebView';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function PayFeesScreen() {
   const params = useLocalSearchParams();
+  const insets = useSafeAreaInsets();
   const childData = params.childData ? JSON.parse(params.childData) : null;
 
   const [refreshing, setRefreshing] = useState(false);
   const [selectedInstallments, setSelectedInstallments] = useState([]);
-  const [expandedInstallment, setExpandedInstallment] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
-
-  // Payment WebView state
   const [showPaymentWebView, setShowPaymentWebView] = useState(false);
   const [paymentData, setPaymentData] = useState(null);
-
-  // Payment Confirmation Modal State
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [pendingOrder, setPendingOrder] = useState(null);
 
-  // API base URL for payment
   const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000/api';
-
   const queryClient = useQueryClient();
 
-  // Load user data
   const { data: userData } = useQuery({
     queryKey: ['user-data'],
     queryFn: async () => {
@@ -70,8 +64,6 @@ export default function PayFeesScreen() {
 
   const schoolId = userData?.schoolId;
 
-
-  // Fetch active academic year - ensure fresh fetch on mount
   const { data: academicYear, isLoading: academicYearLoading } = useQuery({
     queryKey: ['academic-year-fees', schoolId],
     queryFn: async () => {
@@ -79,11 +71,10 @@ export default function PayFeesScreen() {
       return res.data?.find(y => y.isActive);
     },
     enabled: !!schoolId,
-    refetchOnMount: 'always', // Always refetch on screen mount to ensure fresh data
+    refetchOnMount: 'always',
     staleTime: 1000 * 60 * 5,
   });
 
-  // Fetch student fee details for active academic year
   const { data: studentFee, isLoading: feeLoading } = useQuery({
     queryKey: ['student-fee', childData?.studentId, academicYear?.id],
     queryFn: async () => {
@@ -92,14 +83,12 @@ export default function PayFeesScreen() {
     },
     enabled: !!childData && !!academicYear?.id,
     staleTime: 1000 * 60 * 2,
-    refetchOnMount: 'always', // Ensure fresh load
+    refetchOnMount: 'always',
   });
 
-  // Fetch school details for branding (name, logo)
   const { data: schoolDetails } = useQuery({
     queryKey: ['school-details', schoolId],
     queryFn: async () => {
-      // Endpoint: /api/schools/get-school/[schoolId]
       const res = await api.get(`/schools/get-school/${schoolId}`);
       return res.data?.school;
     },
@@ -107,14 +96,9 @@ export default function PayFeesScreen() {
     staleTime: Infinity,
   });
 
-  // Payment mutation
   const paymentMutation = useMutation({
     mutationFn: async (paymentData) => {
-      console.log('Submitting payment:', paymentData);
-
       const res = await api.post('/schools/fee/payments/record-offline', paymentData);
-
-      console.log('Payment response:', res.data);
       return res.data;
     },
     onSuccess: (data) => {
@@ -122,30 +106,13 @@ export default function PayFeesScreen() {
         'Payment Successful! 🎉',
         `Receipt: ${data.payment.receiptNumber}\nAmount: ₹${data.payment.amount}\nNew Balance: ₹${data.newBalance}`,
         [
-          {
-            text: 'View Receipt',
-            onPress: () => {
-              // TODO: Navigate to receipt screen
-              console.log('View receipt:', data.payment.receiptNumber);
-            }
-          },
-          {
-            text: 'OK',
-            onPress: () => {
-              // Refresh fee data
-              queryClient.invalidateQueries(['student-fee']);
-              setSelectedInstallments([]);
-            }
-          }
+          { text: 'View Receipt', onPress: () => console.log('View receipt:', data.payment.receiptNumber) },
+          { text: 'OK', onPress: () => { queryClient.invalidateQueries(['student-fee']); setSelectedInstallments([]); } }
         ]
       );
     },
     onError: (error) => {
-      console.error('Payment error:', error);
-      Alert.alert(
-        'Payment Failed',
-        error.response?.data?.error || error.message || 'Something went wrong. Please try again.'
-      );
+      Alert.alert('Payment Failed', error.response?.data?.error || error.message || 'Something went wrong.');
     },
   });
 
@@ -157,26 +124,22 @@ export default function PayFeesScreen() {
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      maximumFractionDigits: 0
+      style: 'currency', currency: 'INR', maximumFractionDigits: 0
     }).format(amount || 0);
   };
 
   const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString('en-IN', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric'
+      day: 'numeric', month: 'short', year: 'numeric'
     });
   };
 
   const getStatusConfig = (status) => {
     const configs = {
-      PAID: { color: '#51CF66', icon: CheckCircle, bg: '#E7F5E9' },
-      PENDING: { color: '#3B82F6', icon: Clock, bg: '#E3F2FD' },
-      PARTIAL: { color: '#FFB020', icon: Clock, bg: '#FFF9E0' },
-      OVERDUE: { color: '#FF6B6B', icon: AlertCircle, bg: '#FFE9E9' },
+      PAID: { color: '#10B981', icon: CheckCircle, bg: '#D1FAE5', label: 'Paid' },
+      PENDING: { color: '#3B82F6', icon: Clock, bg: '#DBEAFE', label: 'Pending' },
+      PARTIAL: { color: '#F59E0B', icon: Clock, bg: '#FEF3C7', label: 'Partial' },
+      OVERDUE: { color: '#EF4444', icon: AlertCircle, bg: '#FEE2E2', label: 'Overdue' },
     };
     return configs[status] || configs.PENDING;
   };
@@ -201,8 +164,6 @@ export default function PayFeesScreen() {
       Alert.alert('No Selection', 'Please select at least one installment to pay');
       return;
     }
-
-    // No need to check isOnlineEnabled - button is only shown when enabled
     Alert.alert(
       'Confirm Payment',
       `Pay ₹${totalPaymentAmount.toLocaleString()} for ${selectedInstallments.length} installment(s) online?`,
@@ -213,10 +174,8 @@ export default function PayFeesScreen() {
     );
   };
 
-  // Step 1: Create Order (Initiate)
   const createOrder = async () => {
     setIsProcessing(true);
-
     try {
       const installmentPayload = studentFee.installments
         .filter(i => selectedInstallments.includes(i.id))
@@ -225,17 +184,15 @@ export default function PayFeesScreen() {
       const res = await api.post('/payment/initiate', {
         studentFeeId: studentFee.id,
         studentId: childData.studentId,
-        schoolId: schoolId,
+        schoolId,
         amount: totalPaymentAmount,
         installments: installmentPayload,
         paymentMode: 'ONLINE',
       });
 
       const result = res.data;
-
       if (result.success) {
         if (result.type === 'RAZORPAY') {
-          // Store order details and show confirmation screen
           setPendingOrder({
             type: 'RAZORPAY',
             keyId: result.keyId,
@@ -255,13 +212,7 @@ export default function PayFeesScreen() {
           });
           setShowConfirmation(true);
         } else if (result.type === 'REDIRECT') {
-          // Redirect flows (open WebView immediately)
-          setPaymentData({
-            redirectUrl: result.redirectUrl,
-            params: result.params,
-            method: result.method,
-            orderId: result.orderId,
-          });
+          setPaymentData({ redirectUrl: result.redirectUrl, params: result.params, method: result.method, orderId: result.orderId });
           setShowPaymentWebView(true);
         } else if (result.type === 'UPI_COLLECT') {
           Alert.alert('UPI Payment', result.message || 'Please approve payment in your UPI app');
@@ -270,21 +221,16 @@ export default function PayFeesScreen() {
         Alert.alert('Error', result.error || 'Failed to initiate payment');
       }
     } catch (error) {
-      console.error('Payment initiation error:', error);
       Alert.alert('Error', error.response?.data?.error || 'Failed to initiate payment');
     } finally {
       setIsProcessing(false);
     }
   };
 
-  // Step 2: Proceed to Actual Payment (Razorpay)
   const proceedToPayment = () => {
     setShowConfirmation(false);
-
     if (!pendingOrder) return;
-
-    setIsProcessing(true); // Start loading for payment flow
-
+    setIsProcessing(true);
     const options = {
       description: pendingOrder.description,
       image: pendingOrder.image,
@@ -296,104 +242,78 @@ export default function PayFeesScreen() {
       prefill: pendingOrder.prefill,
       theme: pendingOrder.theme
     };
-
-    // Delay to allowing Modal to fully dismiss before opening new Native UI
     setTimeout(() => {
-      RazorpayCheckout.open(options).then(async (data) => {
-        // Success: Calls backend verify
-        await handlePaymentComplete('SUCCESS', data);
-      }).catch((error) => {
-        // Failure/Cancel
-        console.log("Razorpay Error", error);
-        setIsProcessing(false); // Stop loading immediately
-
-        if (error.code === 0) {
-          // Just log cancellation, no alert needed usually, or a subtle toast
-          console.log('User cancelled payment');
-        } else {
-          Alert.alert('Payment Failed', error.description || 'Something went wrong.');
-        }
-      });
+      RazorpayCheckout.open(options)
+        .then(async (data) => { await handlePaymentComplete('SUCCESS', data); })
+        .catch((error) => {
+          setIsProcessing(false);
+          if (error.code !== 0) Alert.alert('Payment Failed', error.description || 'Something went wrong.');
+        });
     }, 500);
   };
 
-  // Handle payment completion from WebView or Native SDK
   const handlePaymentComplete = async (status, data) => {
     setShowPaymentWebView(false);
     setPaymentData(null);
-
     if (status === 'SUCCESS') {
-      // Check if it's Razorpay verification data
-      if (data && data.razorpay_signature) {
+      if (data?.razorpay_signature) {
         try {
-          // Keep isProcessing true (it was true from proceedToPayment)
           const verifyRes = await api.post('/payment/razorpay/verify', data);
-
           if (verifyRes.data.success) {
-            // Success!
             queryClient.invalidateQueries(['student-fee']);
             setSelectedInstallments([]);
-
-            Alert.alert(
-              'Payment Successful! 🎉',
-              `Receipt: ${verifyRes.data.payment?.receiptNumber || 'Generated'}\nAmount: ${formatCurrency(verifyRes.data.payment?.amount)}\n\nYour transaction has been recorded successfully.`,
-              [{ text: 'OK' }]
-            );
+            Alert.alert('Payment Successful! 🎉', `Receipt: ${verifyRes.data.payment?.receiptNumber || 'Generated'}\nAmount: ${formatCurrency(verifyRes.data.payment?.amount)}\n\nYour transaction has been recorded successfully.`, [{ text: 'OK' }]);
           } else {
             Alert.alert('Verification Failed', 'Payment verification failed. Please contact support.');
           }
         } catch (error) {
-          console.error('Verification error:', error);
           Alert.alert('Verification Error', error.response?.data?.error || 'Failed to verify payment');
         } finally {
           setIsProcessing(false);
         }
       } else {
-        // Standard redirect success (already verified via polling/webhook)
         Alert.alert('Payment Successful! 🎉', 'Your payment has been processed successfully.');
         queryClient.invalidateQueries(['student-fee']);
         setSelectedInstallments([]);
         setIsProcessing(false);
       }
     } else {
-      // Failed or Cancelled from WebView or other flows
       setIsProcessing(false);
       if (status === 'FAILED') {
-        const msg = (data && data.description) ? data.description : 'The payment could not be completed.';
-        Alert.alert('Payment Failed', msg);
+        Alert.alert('Payment Failed', (data?.description) || 'The payment could not be completed.');
       }
     }
   };
 
+  // ── Progress bar ──────────────────────────────────────────────────────────
+  const paidPct = studentFee
+    ? Math.round((studentFee.paidAmount / studentFee.originalAmount) * 100) || 0
+    : 0;
+
   if (!childData) {
     return (
-      <View style={styles.loaderContainer}>
+      <SafeAreaView style={styles.loaderContainer}>
         <AlertCircle size={48} color="#999" />
         <Text style={styles.noFeeText}>No child selected</Text>
         <HapticTouchable onPress={() => router.back()}>
-          <View style={styles.backButtonCenter}>
-            <Text style={styles.backButtonText}>Go Back</Text>
-          </View>
+          <View style={styles.backButtonCenter}><Text style={styles.backButtonText}>Go Back</Text></View>
         </HapticTouchable>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <StatusBar style="dark" />
+
       {/* Header */}
-      <Animated.View entering={FadeInDown.duration(400)} style={[styles.header, Platform.OS === 'ios' && { paddingTop: 60 }]}>
+      <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
         <HapticTouchable onPress={() => router.back()}>
-          <View style={styles.backButton}>
-            <ArrowLeft size={24} color="#111" />
-          </View>
+          <View style={styles.backButton}><ArrowLeft size={24} color="#111" /></View>
         </HapticTouchable>
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>Fee Payment</Text>
-          <Text style={styles.headerSubtitle}>
-            {childData.name} • {academicYear?.name || 'Current Session'}
-          </Text>
+          <Text style={styles.headerSubtitle}>{childData.name} · {academicYear?.name || 'Current Session'}</Text>
         </View>
         <View style={{ width: 40 }} />
       </Animated.View>
@@ -401,149 +321,173 @@ export default function PayFeesScreen() {
       <ScrollView
         style={styles.content}
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" />
-        }
+        contentContainerStyle={{ paddingBottom: insets.bottom + 120 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" />}
       >
         {(feeLoading || academicYearLoading) ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#0469ff" />
+            <Text style={styles.loadingText}>Loading fee details…</Text>
           </View>
         ) : !studentFee ? (
-          <Animated.View entering={FadeInDown.delay(300)} style={styles.noFeeCard}>
-            <AlertCircle size={48} color="#999" />
+          <Animated.View entering={FadeInDown.delay(200)} style={styles.noFeeCard}>
+            <AlertCircle size={48} color="#ccc" />
             <Text style={styles.noFeeText}>No fee assigned yet</Text>
           </Animated.View>
         ) : (
           <>
-            {/* Summary Cards */}
-            <Animated.View entering={FadeInDown.delay(300).duration(500)}>
-              <View style={styles.summaryGrid}>
-                <LinearGradient colors={['#3B82F6', '#2563EB']} style={styles.summaryCard}>
-                  <DollarSign size={24} color="#fff" />
-                  <Text style={styles.summaryValue}>{formatCurrency(studentFee.originalAmount)}</Text>
-                  <Text style={styles.summaryLabel}>Total Fee</Text>
-                </LinearGradient>
+            {/* ── Hero summary card ───────────────────────────────────────── */}
+            <Animated.View entering={FadeInDown.delay(80).duration(500)}>
+              <LinearGradient
+                colors={['#0469ff', '#0347b8']}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                style={styles.heroCard}
+              >
+                {/* Decorative circles */}
+                <View style={styles.heroCircle1} />
+                <View style={styles.heroCircle2} />
 
-                <LinearGradient colors={['#51CF66', '#37B24D']} style={styles.summaryCard}>
-                  <CheckCircle size={24} color="#fff" />
-                  <Text style={styles.summaryValue}>{formatCurrency(studentFee.paidAmount)}</Text>
-                  <Text style={styles.summaryLabel}>Paid</Text>
-                </LinearGradient>
+                <View style={styles.heroTop}>
+                  <View>
+                    <Text style={styles.heroLabel}>Total Fee</Text>
+                    <Text style={styles.heroAmount}>{formatCurrency(studentFee.originalAmount)}</Text>
+                  </View>
+                  <View style={styles.heroBadge}>
+                    <Sparkles size={14} color="#fff" />
+                    <Text style={styles.heroBadgeText}>{academicYear?.name || 'AY'}</Text>
+                  </View>
+                </View>
 
-                <LinearGradient colors={['#FF6B6B', '#EE5A6F']} style={styles.summaryCard}>
-                  <AlertCircle size={24} color="#fff" />
-                  <Text style={styles.summaryValue}>{formatCurrency(studentFee.balanceAmount)}</Text>
-                  <Text style={styles.summaryLabel}>Fees (Due)</Text>
-                </LinearGradient>
-              </View>
+                {/* Progress bar */}
+                <View style={styles.progressWrap}>
+                  <View style={styles.progressTrack}>
+                    <Animated.View
+                      entering={FadeIn.delay(400).duration(600)}
+                      style={[styles.progressFill, { width: `${paidPct}%` }]}
+                    />
+                  </View>
+                  <Text style={styles.progressPct}>{paidPct}% paid</Text>
+                </View>
+
+                {/* Paid / Due row */}
+                <View style={styles.heroRow}>
+                  <View style={styles.heroStat}>
+                    <CheckCircle size={14} color="rgba(255,255,255,0.7)" />
+                    <View>
+                      <Text style={styles.heroStatLabel}>Paid</Text>
+                      <Text style={styles.heroStatValue}>{formatCurrency(studentFee.paidAmount)}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.heroDivider} />
+                  <View style={styles.heroStat}>
+                    <AlertCircle size={14} color="rgba(255,255,255,0.7)" />
+                    <View>
+                      <Text style={styles.heroStatLabel}>Balance Due</Text>
+                      <Text style={[styles.heroStatValue, studentFee.balanceAmount > 0 && { color: '#FCA5A5' }]}>
+                        {formatCurrency(studentFee.balanceAmount)}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              </LinearGradient>
             </Animated.View>
 
-            {/* Online Payment Disabled Notice */}
+            {/* Online payment disabled notice */}
             {!studentFee.paymentOptions?.onlineEnabled && (
-              <View style={styles.infoCard}>
-                <Info size={18} color="#f59e0b" />
-                <View style={styles.infoContent}>
-                  <Text style={styles.infoTitle}>Online Payment Not Available</Text>
-                  <Text style={styles.infoText}>Please visit the school office to make payments.</Text>
+              <Animated.View entering={FadeInDown.delay(160).duration(400)}>
+                <View style={styles.infoCard}>
+                  <View style={styles.infoIconBg}><Info size={16} color="#F59E0B" /></View>
+                  <View style={styles.infoContent}>
+                    <Text style={styles.infoTitle}>Online Payment Unavailable</Text>
+                    <Text style={styles.infoText}>Please visit the school office to make payments.</Text>
+                  </View>
                 </View>
-              </View>
+              </Animated.View>
             )}
 
-            {/* Installments Table */}
+            {/* ── Payment Schedule ────────────────────────────────────────── */}
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Payment Schedule</Text>
-              <Text style={styles.installmentCount}>{studentFee.installments?.length} Installments</Text>
+              <View style={styles.sectionBadge}>
+                <Text style={styles.sectionBadgeText}>{studentFee.installments?.length} installments</Text>
+              </View>
             </View>
 
-            {/* Table Container */}
-            <Animated.View entering={FadeInDown.delay(400).duration(500)} style={styles.tableContainer}>
-              {/* Table Header */}
+            <Animated.View entering={FadeInDown.delay(240).duration(500)} style={styles.tableContainer}>
+              {/* Table header */}
               <View style={styles.tableHeader}>
-                <Text style={[styles.tableHeaderCell, styles.colMonth]}>Month</Text>
-                <Text style={[styles.tableHeaderCell, styles.colDue]}>Due Date</Text>
-                <Text style={[styles.tableHeaderCell, styles.colAmount]}>Amount</Text>
-                <Text style={[styles.tableHeaderCell, styles.colStatus]}>Status</Text>
-                <Text style={[styles.tableHeaderCell, styles.colSelect]}></Text>
+                <Text style={[styles.thCell, styles.colMonth]}>#</Text>
+                <Text style={[styles.thCell, styles.colDue]}>Due</Text>
+                <Text style={[styles.thCell, styles.colAmount]}>Amount</Text>
+                <Text style={[styles.thCell, styles.colStatus]}>Status</Text>
+                <Text style={[styles.thCell, styles.colSelect]}> </Text>
               </View>
 
-              {/* Table Rows */}
-              {studentFee.installments?.map((installment, index, arr) => {
-                const statusConfig = getStatusConfig(installment.status);
-                const isSelected = selectedInstallments.includes(installment.id);
-                const canSelect = installment.status !== 'PAID' && installment.paidAmount < installment.amount;
-                const dueDate = new Date(installment.dueDate);
+              {studentFee.installments?.map((inst, index, arr) => {
+                const sc = getStatusConfig(inst.status);
+                const isSelected = selectedInstallments.includes(inst.id);
+                const canSelect = inst.status !== 'PAID' && inst.paidAmount < inst.amount;
+                const dueDate = new Date(inst.dueDate);
                 const currentYear = new Date().getFullYear();
                 const isNextYear = dueDate.getFullYear() > currentYear;
-                const monthName = dueDate.toLocaleDateString('en-IN', { month: 'short' });
-
-                // Check if this is the first next year installment (show separator)
                 const prevDueDate = index > 0 ? new Date(arr[index - 1].dueDate) : null;
                 const isFirstNextYear = isNextYear && (!prevDueDate || prevDueDate.getFullYear() <= currentYear);
+                const monthName = dueDate.toLocaleDateString('en-IN', { month: 'short' });
 
                 return (
-                  <View key={installment.id}>
-                    {/* Year Separator for Next Year */}
+                  <View key={inst.id}>
                     {isFirstNextYear && (
                       <View style={styles.yearSeparator}>
-                        <View style={styles.yearSeparatorLine} />
+                        <View style={styles.yearLine} />
                         <View style={styles.yearBadge}>
                           <Text style={styles.yearBadgeText}>{dueDate.getFullYear()}</Text>
                         </View>
-                        <View style={styles.yearSeparatorLine} />
+                        <View style={styles.yearLine} />
                       </View>
                     )}
 
-                    <HapticTouchable
-                      onPress={() => canSelect && toggleInstallment(installment.id)}
-                      disabled={!canSelect}
-                    >
-                      <View
-                        style={[
-                          styles.tableRow,
-                          index % 2 === 1 && styles.tableRowAlt,
-                          installment.status === 'PAID' && styles.tableRowPaid,
-                          installment.isOverdue && styles.tableRowOverdue,
-                          isSelected && styles.tableRowSelected,
-                        ]}
-                      >
-                        {/* Month Column */}
-                        <View style={[styles.tableCell, styles.colMonth]}>
-                          <View style={[styles.monthBadge, { backgroundColor: statusConfig.bg }]}>
-                            <Text style={[styles.monthNumber, { color: statusConfig.color }]}>
-                              {installment.installmentNumber}
-                            </Text>
+                    <HapticTouchable onPress={() => canSelect && toggleInstallment(inst.id)} disabled={!canSelect}>
+                      <View style={[
+                        styles.tableRow,
+                        index % 2 === 1 && styles.tableRowAlt,
+                        inst.status === 'PAID' && styles.tableRowPaid,
+                        inst.isOverdue && styles.tableRowOverdue,
+                        isSelected && styles.tableRowSelected,
+                      ]}>
+                        {/* # + month */}
+                        <View style={[styles.tdCell, styles.colMonth]}>
+                          <View style={[styles.instBadge, { backgroundColor: sc.bg }]}>
+                            <Text style={[styles.instBadgeNum, { color: sc.color }]}>{inst.installmentNumber}</Text>
                           </View>
-                          <Text style={styles.monthName}>{monthName}</Text>
+                          <Text style={styles.instMonth}>{monthName}</Text>
                         </View>
 
-                        {/* Due Date Column */}
-                        <Text style={[styles.tableCell, styles.colDue, styles.cellText]}>
-                          {dueDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}{isNextYear ? ` '${dueDate.getFullYear().toString().slice(-2)}` : ''}
+                        {/* Due date */}
+                        <Text style={[styles.tdCell, styles.colDue, styles.cellText]}>
+                          {dueDate.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+                          {isNextYear ? ` '${dueDate.getFullYear().toString().slice(-2)}` : ''}
                         </Text>
 
-                        {/* Amount Column */}
-                        <Text style={[styles.tableCell, styles.colAmount, styles.amountText]}>
-                          {formatCurrency(installment.amount)}
+                        {/* Amount */}
+                        <Text style={[styles.tdCell, styles.colAmount, styles.amountText]}>
+                          {formatCurrency(inst.amount)}
                         </Text>
 
-                        {/* Status Column */}
-                        <View style={[styles.tableCell, styles.colStatus]}>
-                          <View style={[styles.statusBadge, { backgroundColor: statusConfig.bg }]}>
-                            <Text style={[styles.statusText, { color: statusConfig.color }]}>
-                              {installment.status}
-                            </Text>
+                        {/* Status */}
+                        <View style={[styles.tdCell, styles.colStatus]}>
+                          <View style={[styles.statusChip, { backgroundColor: sc.bg }]}>
+                            <Text style={[styles.statusChipText, { color: sc.color }]}>{sc.label}</Text>
                           </View>
                         </View>
 
-                        {/* Select Column */}
-                        <View style={[styles.tableCell, styles.colSelect]}>
+                        {/* Checkbox */}
+                        <View style={[styles.tdCell, styles.colSelect]}>
                           {canSelect ? (
-                            <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
-                              {isSelected && <CheckCircle size={14} color="#fff" />}
+                            <View style={[styles.checkbox, isSelected && styles.checkboxActive]}>
+                              {isSelected && <CheckCircle size={13} color="#fff" />}
                             </View>
                           ) : (
-                            <CheckCircle size={18} color="#51CF66" />
+                            <CheckCircle size={18} color="#10B981" />
                           )}
                         </View>
                       </View>
@@ -553,90 +497,96 @@ export default function PayFeesScreen() {
               })}
             </Animated.View>
 
-            {/* Fee Components */}
+            {/* ── Fee Components ──────────────────────────────────────────── */}
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Fee Components</Text>
             </View>
-            {studentFee.particulars?.map((particular) => {
-              const statusConfig = getStatusConfig(particular.status);
-              return (
-                <View key={particular.id} style={styles.particularCard}>
-                  <View style={styles.particularCardLeft}>
-                    <Text style={styles.particularCardName}>{particular.name}</Text>
-                    <Text style={styles.particularCardMeta}>
-                      Paid: {formatCurrency(particular.paidAmount)} / {formatCurrency(particular.amount)}
-                    </Text>
-                  </View>
-                  <View style={styles.particularCardRight}>
-                    <Text style={styles.particularCardAmount}>{formatCurrency(particular.amount)}</Text>
-                    <View style={[styles.statusBadge, { backgroundColor: statusConfig.bg }]}>
-                      <Text style={[styles.statusText, { color: statusConfig.color }]}>
-                        {particular.status}
+
+            <Animated.View entering={FadeInDown.delay(320).duration(500)} style={styles.componentsList}>
+              {studentFee.particulars?.map((p, idx) => {
+                const sc = getStatusConfig(p.status);
+                const pct = Math.round((p.paidAmount / p.amount) * 100) || 0;
+                return (
+                  <View key={p.id} style={[styles.componentCard, idx < studentFee.particulars.length - 1 && styles.componentBorder]}>
+                    <View style={styles.componentLeft}>
+                      <Text style={styles.componentName}>{p.name}</Text>
+                      <View style={styles.componentProgressRow}>
+                        <View style={styles.componentTrack}>
+                          <View style={[styles.componentFill, {
+                            width: `${pct}%`,
+                            backgroundColor: sc.color,
+                          }]} />
+                        </View>
+                        <Text style={[styles.componentPct, { color: sc.color }]}>{pct}%</Text>
+                      </View>
+                      <Text style={styles.componentMeta}>
+                        Paid {formatCurrency(p.paidAmount)} of {formatCurrency(p.amount)}
                       </Text>
                     </View>
+                    <View style={styles.componentRight}>
+                      <Text style={styles.componentAmount}>{formatCurrency(p.amount)}</Text>
+                      <View style={[styles.statusChip, { backgroundColor: sc.bg }]}>
+                        <Text style={[styles.statusChipText, { color: sc.color }]}>{sc.label}</Text>
+                      </View>
+                    </View>
                   </View>
-                </View>
-              );
-            })}
-
-            <View style={{ height: 120 }} />
+                );
+              })}
+            </Animated.View>
           </>
         )}
       </ScrollView>
 
-      {/* Floating Payment Button - Always show but disabled when online payment not enabled */}
+      {/* ── Floating pay button ─────────────────────────────────────────────── */}
       {studentFee && studentFee.balanceAmount > 0 && (
-        <View style={styles.floatingButton}>
+        <View style={[styles.floatingBar, { paddingBottom: insets.bottom + 8 }]}>
           {studentFee.paymentOptions?.onlineEnabled ? (
-            <LinearGradient colors={['#0469ff', '#0347b8']} style={styles.payButton}>
-              <HapticTouchable onPress={handlePayment} disabled={isProcessing || selectedInstallments.length === 0}>
-                <View style={styles.payButtonContent}>
-                  {isProcessing ? (
-                    <ActivityIndicator color="#fff" size="small" />
-                  ) : (
-                    <>
-                      <View style={styles.payButtonLeft}>
-                        <CreditCard size={24} color="#fff" />
-                        <View>
-                          <Text style={styles.payButtonLabel}>
-                            {selectedInstallments.length > 0
-                              ? `Pay ${selectedInstallments.length} Installment(s)`
-                              : 'Select Installments to Pay'}
-                          </Text>
-                          <Text style={styles.payButtonAmount}>
-                            {formatCurrency(selectedInstallments.length > 0 ? totalPaymentAmount : studentFee.balanceAmount)}
-                          </Text>
-                        </View>
-                      </View>
-                      <Receipt size={24} color="#fff" />
-                    </>
-                  )}
-                </View>
-              </HapticTouchable>
-            </LinearGradient>
-          ) : (
-            // Disabled state when online payment not available
-            <View style={styles.payButtonDisabled}>
-              <View style={styles.payButtonContent}>
-                <View style={styles.payButtonLeft}>
-                  <CreditCard size={24} color="#999" />
+            <HapticTouchable
+              onPress={handlePayment}
+              disabled={isProcessing || selectedInstallments.length === 0}
+            >
+              <LinearGradient
+                colors={selectedInstallments.length > 0 ? ['#0469ff', '#0347b8'] : ['#94a3b8', '#64748b']}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                style={styles.payBtn}
+              >
+                <View style={styles.payBtnLeft}>
+                  {isProcessing
+                    ? <ActivityIndicator color="#fff" size="small" />
+                    : <CreditCard size={22} color="#fff" />
+                  }
                   <View>
-                    <Text style={styles.payButtonLabelDisabled}>Online Payment Disabled</Text>
-                    <Text style={styles.payButtonAmountDisabled}>
-                      Total Due: {formatCurrency(studentFee.balanceAmount)}
+                    <Text style={styles.payBtnLabel}>
+                      {selectedInstallments.length > 0
+                        ? `Pay ${selectedInstallments.length} Installment${selectedInstallments.length > 1 ? 's' : ''}`
+                        : 'Select installments to pay'}
+                    </Text>
+                    <Text style={styles.payBtnAmount}>
+                      {formatCurrency(selectedInstallments.length > 0 ? totalPaymentAmount : studentFee.balanceAmount)}
                     </Text>
                   </View>
                 </View>
-                <View style={styles.disabledBadge}>
-                  <AlertCircle size={16} color="#f59e0b" />
+                <View style={styles.payBtnArrow}>
+                  <ArrowRight size={20} color="#fff" />
+                </View>
+              </LinearGradient>
+            </HapticTouchable>
+          ) : (
+            <View style={styles.payBtnDisabled}>
+              <View style={styles.payBtnLeft}>
+                <CreditCard size={22} color="#9CA3AF" />
+                <View>
+                  <Text style={styles.payBtnLabelDisabled}>Online Payment Disabled</Text>
+                  <Text style={styles.payBtnAmountDisabled}>Due: {formatCurrency(studentFee.balanceAmount)}</Text>
                 </View>
               </View>
+              <View style={styles.disabledDot}><AlertCircle size={16} color="#F59E0B" /></View>
             </View>
           )}
         </View>
       )}
 
-      {/* Payment WebView Modal */}
+      {/* Payment WebView */}
       <PaymentWebView
         visible={showPaymentWebView}
         paymentData={paymentData}
@@ -645,240 +595,207 @@ export default function PayFeesScreen() {
         apiBaseUrl={API_BASE_URL}
       />
 
-      {/* Confirmation Modal - Replaced with Absolute View to allow Razorpay Native UI 
-          to present correctly on top without ViewController hierarchy conflicts */}
+      {/* Confirmation overlay */}
       {showConfirmation && (
-        <View style={styles.absoluteOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Confirm Payment</Text>
+        <View style={styles.overlay}>
+          <Animated.View entering={FadeInDown.duration(300)} style={styles.confirmCard}>
+            {/* Handle */}
+            <View style={styles.confirmHandle} />
+
+            <View style={styles.confirmHeader}>
+              <Text style={styles.confirmTitle}>Confirm Payment</Text>
               <HapticTouchable onPress={() => setShowConfirmation(false)}>
-                <X size={24} color="#666" />
+                <View style={styles.confirmClose}><X size={20} color="#666" /></View>
               </HapticTouchable>
             </View>
 
-            <View style={styles.modalBody}>
-              <View style={styles.schoolInfo}>
+            <View style={styles.confirmBody}>
+              {/* Logo + school */}
+              <View style={styles.confirmSchoolRow}>
                 {pendingOrder?.image && (
-                  <Image source={{ uri: pendingOrder.image }} style={styles.schoolLogo} />
+                  <Image source={{ uri: pendingOrder.image }} style={styles.confirmLogo} />
                 )}
-                <Text style={styles.schoolName}>{pendingOrder?.schoolName}</Text>
+                <Text style={styles.confirmSchoolName}>{pendingOrder?.schoolName}</Text>
               </View>
 
-              <View style={styles.divider} />
+              <View style={styles.confirmDivider} />
 
-              <View style={styles.orderRow}>
-                <Text style={styles.orderLabel}>Order ID</Text>
-                <Text style={styles.orderValue}>{pendingOrder?.orderId || '...'}</Text>
+              {/* Order details */}
+              <View style={styles.confirmRow}>
+                <Text style={styles.confirmLabel}>Order ID</Text>
+                <Text style={styles.confirmValue} numberOfLines={1}>{pendingOrder?.orderId || '...'}</Text>
+              </View>
+              <View style={styles.confirmRow}>
+                <Text style={styles.confirmLabel}>Student</Text>
+                <Text style={styles.confirmValue}>{childData?.name}</Text>
               </View>
 
-              <View style={styles.orderRow}>
-                <Text style={styles.orderLabel}>Student</Text>
-                <Text style={styles.orderValue}>{childData?.name}</Text>
+              <View style={styles.confirmDivider} />
+
+              <View style={styles.confirmRow}>
+                <Text style={styles.confirmTotalLabel}>Total Amount</Text>
+                <Text style={styles.confirmTotalValue}>{formatCurrency(totalPaymentAmount)}</Text>
               </View>
 
-              <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>Total Amount</Text>
-                <Text style={styles.totalValue}>{formatCurrency(totalPaymentAmount)}</Text>
+              <View style={styles.secureBadge}>
+                <Text style={styles.secureText}>🔒 Secure Payment via Razorpay</Text>
               </View>
-
-              <Text style={styles.secureText}>🔒 Secure Payment via Razorpay</Text>
             </View>
 
-            <View style={styles.modalFooter}>
-              <HapticTouchable onPress={proceedToPayment} style={styles.proceedButton}>
-                <LinearGradient colors={['#0469ff', '#0347b8']} style={styles.gradientButton}>
-                  <Text style={styles.proceedButtonText}>Proceed to Pay</Text>
+            <View style={styles.confirmFooter}>
+              <HapticTouchable onPress={proceedToPayment}>
+                <LinearGradient colors={['#0469ff', '#0347b8']} style={styles.confirmPayBtn}>
+                  <Text style={styles.confirmPayBtnText}>Proceed to Pay</Text>
                   <ArrowRight size={20} color="#fff" />
                 </LinearGradient>
               </HapticTouchable>
             </View>
-          </View>
+          </Animated.View>
         </View>
       )}
-    </View>
+    </SafeAreaView>
   );
 }
 
-// Styles remain the same as before
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
-  loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16 },
+  loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 16, backgroundColor: '#fff' },
   backButtonCenter: { marginTop: 20, paddingHorizontal: 24, paddingVertical: 12, backgroundColor: '#0469ff', borderRadius: 12 },
   backButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 50, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+
+  // Header
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12,
+    borderBottomWidth: 1, borderBottomColor: '#f0f0f0', backgroundColor: '#fff',
+  },
   backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#f5f5f5', alignItems: 'center', justifyContent: 'center' },
   headerCenter: { flex: 1, alignItems: 'center' },
   headerTitle: { fontSize: 18, fontWeight: '700', color: '#111' },
-  headerSubtitle: { fontSize: 13, color: '#666', marginTop: 2 },
-  content: { flex: 1, padding: 16 },
-  loadingContainer: { padding: 40, alignItems: 'center' },
-  noFeeCard: { padding: 40, alignItems: 'center', gap: 12 },
+  headerSubtitle: { fontSize: 13, color: '#888', marginTop: 2 },
+
+  content: { flex: 1, paddingHorizontal: 16 },
+  loadingContainer: { paddingVertical: 60, alignItems: 'center', gap: 12 },
+  loadingText: { fontSize: 14, color: '#888' },
+  noFeeCard: { paddingVertical: 60, alignItems: 'center', gap: 12 },
   noFeeText: { fontSize: 16, color: '#999' },
-  summaryGrid: { flexDirection: 'row', gap: 12, marginBottom: 20 },
-  summaryCard: { flex: 1, padding: 16, borderRadius: 16, alignItems: 'center', gap: 8 },
-  summaryValue: { fontSize: 16, fontWeight: '700', color: '#fff' },
-  summaryLabel: { fontSize: 12, color: 'rgba(255,255,255,0.9)' },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, marginTop: 20 },
-  sectionTitle: { fontSize: 17, fontWeight: '700', color: '#111' },
-  installmentCount: { fontSize: 14, color: '#666', backgroundColor: '#f5f5f5', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
-  installmentCard: { padding: 16, backgroundColor: '#f8f9fa', borderRadius: 12, borderWidth: 2, borderColor: 'transparent', marginBottom: 12 },
-  paidInstallment: { opacity: 0.6 },
-  overdueInstallment: { borderColor: '#FFE9E9', backgroundColor: '#FFF5F5' },
-  selectedInstallment: { borderColor: '#0469ff', backgroundColor: '#E3F2FD' },
-  installmentMainRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  installmentLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
-  installmentNumber: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
-  installmentNumberText: { fontSize: 16, fontWeight: '700' },
-  installmentInfo: { flex: 1, gap: 4 },
-  installmentTitle: { fontSize: 14, fontWeight: '600', color: '#111' },
-  installmentMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  installmentDate: { fontSize: 12, color: '#666' },
-  installmentRight: { alignItems: 'flex-end', gap: 8 },
-  installmentAmount: { fontSize: 16, fontWeight: '700', color: '#111' },
-  statusBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
-  statusText: { fontSize: 11, fontWeight: '600' },
-  checkbox: { width: 24, height: 24, borderRadius: 12, borderWidth: 2, borderColor: '#ccc', alignItems: 'center', justifyContent: 'center' },
-  checkboxSelected: { backgroundColor: '#0469ff', borderColor: '#0469ff' },
-  expandButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, marginTop: 12, borderTopWidth: 1, borderTopColor: '#e5e7eb' },
-  expandButtonText: { fontSize: 13, fontWeight: '600', color: '#0469ff' },
-  particularBreakdown: { marginTop: 8, padding: 12, backgroundColor: '#fff', borderRadius: 8 },
-  breakdownTitle: { fontSize: 13, fontWeight: '600', color: '#666', marginBottom: 8 },
-  particularRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6 },
-  particularName: { fontSize: 13, color: '#111', flex: 1 },
-  particularAmount: { fontSize: 13, fontWeight: '600', color: '#111' },
-  particularDivider: { height: 1, backgroundColor: '#e5e7eb', marginVertical: 8 },
-  particularTotalLabel: { fontSize: 14, fontWeight: '700', color: '#111' },
-  particularTotalAmount: { fontSize: 14, fontWeight: '700', color: '#0469ff' },
-  particularCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 14, backgroundColor: '#f8f9fa', borderRadius: 12, marginBottom: 8 },
-  particularCardLeft: { flex: 1 },
-  particularCardName: { fontSize: 14, fontWeight: '600', color: '#111' },
-  particularCardMeta: { fontSize: 12, color: '#666', marginTop: 4 },
-  particularCardRight: { alignItems: 'flex-end', gap: 6 },
-  particularCardAmount: { fontSize: 16, fontWeight: '700', color: '#111' },
-  floatingButton: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#f0f0f0' },
-  payButton: { borderRadius: 16, overflow: 'hidden' },
-  payButtonContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 18 },
-  payButtonLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  payButtonLabel: { fontSize: 13, color: 'rgba(255,255,255,0.9)', fontWeight: '600' },
-  payButtonAmount: { fontSize: 20, fontWeight: '700', color: '#fff', marginTop: 2 },
 
-  // Disabled button styles
-  payButtonDisabled: { borderRadius: 16, backgroundColor: '#f3f4f6', borderWidth: 1, borderColor: '#e5e7eb' },
-  payButtonLabelDisabled: { fontSize: 13, color: '#9ca3af', fontWeight: '600' },
-  payButtonAmountDisabled: { fontSize: 18, fontWeight: '700', color: '#6b7280', marginTop: 2 },
-  disabledBadge: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#fef3c7', alignItems: 'center', justifyContent: 'center' },
-
-  // Info card styles (online payment disabled notice)
-  infoCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 16, backgroundColor: '#fffbeb', borderRadius: 12, borderWidth: 1, borderColor: '#fcd34d', marginTop: 12 },
-  infoContent: { flex: 1 },
-  infoTitle: { fontSize: 14, fontWeight: '600', color: '#92400e', marginBottom: 2 },
-  infoText: { fontSize: 13, color: '#a16207' },
-
-  // Enhanced Table styles for installments
-  tableContainer: {
-    backgroundColor: '#fff',
-    borderRadius: 16,
+  // Hero card
+  heroCard: {
+    borderRadius: 24, padding: 20, marginTop: 16, marginBottom: 16,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
   },
-  tableHeader: {
-    flexDirection: 'row',
-    backgroundColor: '#1e3a5f',
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-  },
-  tableHeaderCell: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#fff',
-    textTransform: 'uppercase',
-    textAlign: 'center',
-    letterSpacing: 0.5,
-  },
-  tableRow: {
-    flexDirection: 'row',
-    paddingVertical: 16,
-    paddingHorizontal: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-  },
-  tableRowAlt: { backgroundColor: '#f8fafc' },
-  tableRowNextYear: { backgroundColor: '#faf5ff', borderLeftWidth: 3, borderLeftColor: '#a855f7' },
-  tableRowPaid: { opacity: 0.5, backgroundColor: '#f0fdf4' },
-  tableRowOverdue: { backgroundColor: '#fef2f2', borderLeftWidth: 3, borderLeftColor: '#ef4444' },
-  tableRowSelected: { backgroundColor: '#eff6ff', borderLeftWidth: 3, borderLeftColor: '#0469ff' },
-  tableCell: { alignItems: 'center', justifyContent: 'center' },
-  cellText: { fontSize: 13, color: '#374151', textAlign: 'center', fontWeight: '500' },
-  amountText: { fontSize: 14, fontWeight: '700', color: '#111', textAlign: 'center' },
+  heroCircle1: { position: 'absolute', top: -50, right: -50, width: 180, height: 180, borderRadius: 90, backgroundColor: 'rgba(255,255,255,0.07)' },
+  heroCircle2: { position: 'absolute', bottom: -40, left: -30, width: 130, height: 130, borderRadius: 65, backgroundColor: 'rgba(255,255,255,0.05)' },
+  heroTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 },
+  heroLabel: { fontSize: 13, color: 'rgba(255,255,255,0.75)', fontWeight: '500' },
+  heroAmount: { fontSize: 28, fontWeight: '800', color: '#fff', marginTop: 4, letterSpacing: -0.5 },
+  heroBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 },
+  heroBadgeText: { fontSize: 12, color: '#fff', fontWeight: '600' },
+  progressWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 },
+  progressTrack: { flex: 1, height: 6, backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 3, overflow: 'hidden' },
+  progressFill: { height: '100%', backgroundColor: '#fff', borderRadius: 3 },
+  progressPct: { fontSize: 12, color: 'rgba(255,255,255,0.85)', fontWeight: '600', minWidth: 52, textAlign: 'right' },
+  heroRow: { flexDirection: 'row', alignItems: 'center' },
+  heroStat: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  heroDivider: { width: 1, height: 36, backgroundColor: 'rgba(255,255,255,0.2)', marginHorizontal: 16 },
+  heroStatLabel: { fontSize: 11, color: 'rgba(255,255,255,0.7)', marginBottom: 2 },
+  heroStatValue: { fontSize: 15, fontWeight: '700', color: '#fff' },
 
-  // Column widths (flex ratios)
-  colMonth: { flex: 1.3, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  // Info card
+  infoCard: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, backgroundColor: '#FFFBEB', borderRadius: 14, borderWidth: 1, borderColor: '#FDE68A', marginBottom: 16 },
+  infoIconBg: { width: 32, height: 32, borderRadius: 10, backgroundColor: '#FEF3C7', alignItems: 'center', justifyContent: 'center' },
+  infoContent: { flex: 1 },
+  infoTitle: { fontSize: 13, fontWeight: '700', color: '#92400E' },
+  infoText: { fontSize: 12, color: '#B45309', marginTop: 2 },
+
+  // Section header
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, marginTop: 4 },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#111' },
+  sectionBadge: { backgroundColor: '#EEF4FF', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 },
+  sectionBadgeText: { fontSize: 12, fontWeight: '600', color: '#0469ff' },
+
+  // Table
+  tableContainer: { backgroundColor: '#fff', borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: '#e5e7eb', marginBottom: 20 },
+  tableHeader: { flexDirection: 'row', backgroundColor: '#0469ff', paddingVertical: 12, paddingHorizontal: 12 },
+  thCell: { fontSize: 11, fontWeight: '700', color: '#fff', textTransform: 'uppercase', letterSpacing: 0.5, textAlign: 'center' },
+  tableRow: { flexDirection: 'row', paddingVertical: 14, paddingHorizontal: 12, borderBottomWidth: 1, borderBottomColor: '#f3f4f6', alignItems: 'center', backgroundColor: '#fff' },
+  tableRowAlt: { backgroundColor: '#fafafa' },
+  tableRowPaid: { opacity: 0.55, backgroundColor: '#f0fdf4' },
+  tableRowOverdue: { backgroundColor: '#fff5f5', borderLeftWidth: 3, borderLeftColor: '#EF4444' },
+  tableRowSelected: { backgroundColor: '#EEF4FF', borderLeftWidth: 3, borderLeftColor: '#0469ff' },
+  tdCell: { alignItems: 'center', justifyContent: 'center' },
+  cellText: { fontSize: 12, color: '#374151', textAlign: 'center', fontWeight: '500' },
+  amountText: { fontSize: 13, fontWeight: '700', color: '#111', textAlign: 'center' },
+  colMonth: { flex: 1.4, flexDirection: 'row', alignItems: 'center', gap: 6 },
   colDue: { flex: 1.1 },
   colAmount: { flex: 1.2 },
   colStatus: { flex: 1.1 },
   colSelect: { flex: 0.5 },
+  instBadge: { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  instBadgeNum: { fontSize: 12, fontWeight: '700' },
+  instMonth: { fontSize: 12, color: '#374151', fontWeight: '600' },
+  statusChip: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 7 },
+  statusChipText: { fontSize: 10, fontWeight: '700' },
+  checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: '#d1d5db', alignItems: 'center', justifyContent: 'center' },
+  checkboxActive: { backgroundColor: '#0469ff', borderColor: '#0469ff' },
 
-  // Month badge in table
-  monthBadge: { width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
-  monthNumber: { fontSize: 13, fontWeight: '700' },
-  monthName: { fontSize: 13, color: '#374151', fontWeight: '600' },
+  // Year separator
+  yearSeparator: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, paddingHorizontal: 14, backgroundColor: '#f8fafc' },
+  yearLine: { flex: 1, height: 1.5, backgroundColor: '#e5e7eb' },
+  yearBadge: { backgroundColor: '#0469ff', paddingHorizontal: 14, paddingVertical: 4, borderRadius: 12, marginHorizontal: 10 },
+  yearBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
 
-  // Year separator for next year installments
-  yearSeparator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: '#f8fafc',
-  },
-  yearSeparatorLine: {
-    flex: 1,
-    height: 2,
-    backgroundColor: '#e5e7eb',
-  },
-  yearBadge: {
-    backgroundColor: '#0469ff',
-    paddingHorizontal: 16,
-    paddingVertical: 6,
-    borderRadius: 16,
-    marginHorizontal: 12,
-  },
-  yearBadgeText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '700',
-  },
+  // Fee components
+  componentsList: { backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: '#e5e7eb', marginBottom: 20, overflow: 'hidden' },
+  componentCard: { flexDirection: 'row', alignItems: 'center', padding: 14, gap: 12 },
+  componentBorder: { borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
+  componentLeft: { flex: 1, gap: 6 },
+  componentName: { fontSize: 14, fontWeight: '600', color: '#111' },
+  componentProgressRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  componentTrack: { flex: 1, height: 5, backgroundColor: '#f3f4f6', borderRadius: 3, overflow: 'hidden' },
+  componentFill: { height: '100%', borderRadius: 3 },
+  componentPct: { fontSize: 11, fontWeight: '700', minWidth: 32, textAlign: 'right' },
+  componentMeta: { fontSize: 11, color: '#888' },
+  componentRight: { alignItems: 'flex-end', gap: 6 },
+  componentAmount: { fontSize: 15, fontWeight: '700', color: '#111' },
 
-  // Modal Styles
-  absoluteOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 9999, // Ensure it sits on top of everything
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20
+  // Floating bar
+  floatingBar: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    paddingHorizontal: 16, paddingTop: 12,
+    backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#f0f0f0',
   },
-  modalContent: { backgroundColor: '#fff', borderRadius: 24, width: '100%', maxWidth: 400, overflow: 'hidden', elevation: 5, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84 },
-  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 20, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: '#111' },
-  modalBody: { padding: 24, alignItems: 'center' },
-  schoolInfo: { alignItems: 'center', gap: 12, marginBottom: 20 },
-  schoolLogo: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#f5f5f5' },
-  schoolName: { fontSize: 16, fontWeight: '600', color: '#111', textAlign: 'center' },
-  divider: { height: 1, backgroundColor: '#f0f0f0', width: '100%', marginBottom: 20 },
-  orderRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: 12 },
-  orderLabel: { fontSize: 14, color: '#666' },
-  orderValue: { fontSize: 14, fontWeight: '600', color: '#111' },
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginTop: 8, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#f0f0f0' },
-  totalLabel: { fontSize: 16, fontWeight: '700', color: '#111' },
-  totalValue: { fontSize: 20, fontWeight: '700', color: '#0469ff' },
-  secureText: { marginTop: 24, fontSize: 12, color: '#666', flexDirection: 'row', alignItems: 'center' },
-  modalFooter: { padding: 20, borderTopWidth: 1, borderTopColor: '#f0f0f0' },
-  proceedButton: { width: '100%', borderRadius: 16, overflow: 'hidden' },
-  gradientButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, gap: 8 },
-  proceedButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  payBtn: { borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 16, paddingHorizontal: 20 },
+  payBtnLeft: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  payBtnLabel: { fontSize: 13, color: 'rgba(255,255,255,0.85)', fontWeight: '600' },
+  payBtnAmount: { fontSize: 20, fontWeight: '800', color: '#fff', marginTop: 1, letterSpacing: -0.3 },
+  payBtnArrow: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
+  payBtnDisabled: { borderRadius: 16, backgroundColor: '#f3f4f6', borderWidth: 1, borderColor: '#e5e7eb', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 16, paddingHorizontal: 20 },
+  payBtnLabelDisabled: { fontSize: 13, color: '#9CA3AF', fontWeight: '600' },
+  payBtnAmountDisabled: { fontSize: 18, fontWeight: '700', color: '#6B7280', marginTop: 2 },
+  disabledDot: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#FEF3C7', alignItems: 'center', justifyContent: 'center' },
+
+  // Confirmation overlay
+  overlay: { ...StyleSheet.absoluteFillObject, zIndex: 9999, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
+  confirmCard: { backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28, overflow: 'hidden' },
+  confirmHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#e0e0e0', alignSelf: 'center', marginTop: 10, marginBottom: 6 },
+  confirmHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+  confirmTitle: { fontSize: 18, fontWeight: '700', color: '#111' },
+  confirmClose: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#f5f5f5', alignItems: 'center', justifyContent: 'center' },
+  confirmBody: { padding: 24 },
+  confirmSchoolRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20 },
+  confirmLogo: { width: 48, height: 48, borderRadius: 12, backgroundColor: '#f5f5f5' },
+  confirmSchoolName: { fontSize: 16, fontWeight: '700', color: '#111' },
+  confirmDivider: { height: 1, backgroundColor: '#f0f0f0', marginBottom: 16 },
+  confirmRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  confirmLabel: { fontSize: 14, color: '#888' },
+  confirmValue: { fontSize: 14, fontWeight: '600', color: '#111', maxWidth: '60%', textAlign: 'right' },
+  confirmTotalLabel: { fontSize: 16, fontWeight: '700', color: '#111' },
+  confirmTotalValue: { fontSize: 22, fontWeight: '800', color: '#0469ff', letterSpacing: -0.5 },
+  secureBadge: { backgroundColor: '#f0fdf4', borderRadius: 10, paddingVertical: 8, alignItems: 'center', marginTop: 16 },
+  secureText: { fontSize: 12, color: '#16A34A', fontWeight: '600' },
+  confirmFooter: { paddingHorizontal: 20, paddingBottom: 24, paddingTop: 4 },
+  confirmPayBtn: { borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16, gap: 10 },
+  confirmPayBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });

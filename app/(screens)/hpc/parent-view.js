@@ -38,6 +38,7 @@ import * as Sharing from 'expo-sharing';
 import api from '../../../lib/api';
 import HapticTouchable from '../../components/HapticTouch';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const isSmallDevice = SCREEN_WIDTH < 375;
@@ -116,6 +117,7 @@ export default function ParentHPCView() {
     const termNumber = params.termNumber ? Number(params.termNumber) : 1;
 
     const queryClient = useQueryClient();
+    const insets = useSafeAreaInsets();
     const [refreshing, setRefreshing] = useState(false);
     const [downloading, setDownloading] = useState(false);
 
@@ -146,12 +148,12 @@ export default function ParentHPCView() {
     const { data: hpcData, isLoading, error, refetch } = useQuery({
         queryKey: ['parent-hpc-report', schoolId, studentId, academicYearId],
         queryFn: async () => {
-            const params = new URLSearchParams({
+            const queryParams = new URLSearchParams({
                 studentId,
                 ...(academicYearId && { academicYearId }),
                 termNumber: termNumber.toString(),
             });
-            const res = await api.get(`/schools/${schoolId}/hpc/report?${params}`);
+            const res = await api.get(`/schools/${schoolId}/hpc/report?${queryParams}`);
             return res.data;
         },
         enabled: !!schoolId && !!studentId,
@@ -196,8 +198,8 @@ export default function ParentHPCView() {
             const selToScore = { 'EXCELLENT': 100, 'VERY_GOOD': 90, 'GOOD': 80, 'PROFICIENT': 80, 'DEVELOPING': 60, 'SATISFACTORY': 60, 'NEEDS_IMPROVEMENT': 40 };
             let selTotal = 0;
             let selCount = 0;
-            Object.values(sel).forEach((params) => {
-                params.forEach((p) => {
+            Object.values(sel).forEach((selParams) => {
+                selParams.forEach((p) => {
                     if (p.grade && selToScore[p.grade]) {
                         selTotal += selToScore[p.grade];
                         selCount++;
@@ -234,17 +236,17 @@ export default function ParentHPCView() {
     // Loading state
     if (isLoading || isUserLoading || !schoolId) {
         return (
-            <View style={styles.loaderContainer}>
+            <SafeAreaView style={styles.loaderContainer}>
                 <ActivityIndicator size="large" color="#0469ff" />
                 <Text style={styles.loadingText}>Loading progress card...</Text>
-            </View>
+            </SafeAreaView>
         );
     }
 
-    // Error state - only show hard error if API returned error (not just empty data)
+    // Error state
     if (error) {
         return (
-            <View style={styles.loaderContainer}>
+            <SafeAreaView style={styles.loaderContainer}>
                 <AlertCircle size={48} color="#F59E0B" />
                 <Text style={styles.noDataText}>Unable to load Progress Card</Text>
                 <Text style={styles.errorSubtext}>Please try again later</Text>
@@ -253,16 +255,15 @@ export default function ParentHPCView() {
                         <Text style={styles.backBtnText}>Go Back</Text>
                     </View>
                 </HapticTouchable>
-            </View>
+            </SafeAreaView>
         );
     }
-
 
     const student = hpcData?.student || { name: studentName };
     const hpc = hpcData?.hpc || {};
 
     return (
-        <View style={styles.container}>
+        <SafeAreaView style={styles.container} edges={['left', 'right']}>
             <StatusBar style="light" />
 
             {/* Header */}
@@ -270,7 +271,7 @@ export default function ParentHPCView() {
                 colors={['#0469ff', '#0347b8']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
-                style={styles.header}
+                style={[styles.header, { paddingTop: insets.top + 12 }]}
             >
                 {/* Background Pattern */}
                 <Text style={{ position: 'absolute', top: 20, right: 60, fontSize: 28, color: 'rgba(255,255,255,0.08)', fontWeight: 'bold' }}>+</Text>
@@ -328,6 +329,7 @@ export default function ParentHPCView() {
             <ScrollView
                 style={styles.content}
                 showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
                 refreshControl={
                     <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" />
                 }
@@ -407,10 +409,10 @@ export default function ParentHPCView() {
                         iconColor="#EC4899"
                         defaultOpen={false}
                     >
-                        {Object.entries(hpc.behaviorAndSEL).map(([category, params], idx) => (
+                        {Object.entries(hpc.behaviorAndSEL).map(([category, selParams], idx) => (
                             <View key={category} style={[styles.selBlock, idx > 0 && { marginTop: 16 }]}>
                                 <Text style={styles.selCategoryName}>{category}</Text>
-                                {params.map((param, i) => (
+                                {selParams.map((param, i) => (
                                     <View key={i} style={styles.selRow}>
                                         <Text style={styles.selParamName}>{param.parameter}</Text>
                                         <View style={[
@@ -484,12 +486,13 @@ export default function ParentHPCView() {
                             <Text style={styles.emptySubtext}>Check back after assessments are completed</Text>
                         </View>
                     )}
-
-                <View style={{ height: 100 }} />
             </ScrollView>
 
             {/* Sticky Bottom: Submit Feedback Button */}
-            <Animated.View entering={FadeInDown.delay(300).duration(400)} style={styles.stickyBottom}>
+            <Animated.View
+                entering={FadeInDown.delay(300).duration(400)}
+                style={[styles.stickyBottom, { paddingBottom: insets.bottom + 8 }]}
+            >
                 <HapticTouchable
                     onPress={() => router.push({
                         pathname: '/hpc/parent-feedback',
@@ -512,7 +515,7 @@ export default function ParentHPCView() {
                     </LinearGradient>
                 </HapticTouchable>
             </Animated.View>
-        </View>
+        </SafeAreaView>
     );
 }
 
@@ -555,7 +558,6 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     header: {
-        paddingTop: 60,
         paddingHorizontal: 16,
         paddingBottom: 20,
         borderBottomLeftRadius: 28,
@@ -881,7 +883,6 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         padding: 16,
-        paddingBottom: 24,
         backgroundColor: '#f8f9fa',
     },
     feedbackButton: {

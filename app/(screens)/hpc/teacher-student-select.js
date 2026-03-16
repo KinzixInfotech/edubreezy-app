@@ -15,32 +15,26 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
-import {
-    ArrowLeft,
-    Search,
-    Users,
-    Filter,
-} from 'lucide-react-native';
+import { ArrowLeft, Search, Users } from 'lucide-react-native';
 import { StatusBar } from 'expo-status-bar';
 import api from '../../../lib/api';
 import HapticTouchable from '../../components/HapticTouch';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function TeacherStudentSelectScreen() {
     const queryClient = useQueryClient();
     const params = useLocalSearchParams();
+    const insets = useSafeAreaInsets();
     const teacherData = params.teacherData ? JSON.parse(params.teacherData) : {};
 
-    // Robust ID resolving
     const schoolId = params.schoolId || teacherData?.schoolId || teacherData?.school?.id;
     const teacherId = params.teacherId || teacherData?.id;
 
-    // State
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedSectionId, setSelectedSectionId] = useState('all');
 
-    // 1. Fetch Teacher Data (to get fresh sections/classes and ensure ID consistency)
     const { data: fetchedTeacherData } = useQuery({
         queryKey: ['teacher-profile', schoolId, teacherId],
         queryFn: async () => {
@@ -51,73 +45,44 @@ export default function TeacherStudentSelectScreen() {
         enabled: !!schoolId && !!teacherId,
     });
 
-    // Merge passed data with fetched data
     const activeTeacherData = fetchedTeacherData || teacherData;
 
-    // Combine Classes (Class Teacher) and Sections (Subject Teacher) for tabs
     const assignedSections = useMemo(() => {
         if (!activeTeacherData) return [];
-
         const tabs = [];
-
-        // Add assigned sections (with defensive check for id)
         if (activeTeacherData.sectionsAssigned?.length > 0) {
             activeTeacherData.sectionsAssigned.forEach(s => {
-                if (s?.id) {
-                    tabs.push({
-                        id: s.id,
-                        name: s.name || `Section ${s.id}`,
-                        type: 'section',
-                        class: s.class
-                    });
-                }
+                if (s?.id) tabs.push({ id: s.id, name: s.name || `Section ${s.id}`, type: 'section', class: s.class });
             });
         }
-
-        // Add class teacher classes (with unique prefix to avoid ID collision)
         if (activeTeacherData.Class?.length > 0) {
             activeTeacherData.Class.forEach(c => {
-                if (c?.id) {
-                    tabs.push({
-                        id: `class-${c.id}`, // Prefix to ensure uniqueness
-                        classId: c.id, // Store actual classId for filtering
-                        name: `${c.className || 'Class'} (Class Teacher)`,
-                        type: 'class',
-                        class: c
-                    });
-                }
+                if (c?.id) tabs.push({ id: `class-${c.id}`, classId: c.id, name: `${c.className || 'Class'} (Class Teacher)`, type: 'class', class: c });
             });
         }
-
         return tabs;
     }, [activeTeacherData]);
 
-    // Update selected section when sections load
     React.useEffect(() => {
         if (assignedSections.length > 0 && (selectedSectionId === 'all' || !selectedSectionId)) {
             setSelectedSectionId(assignedSections[0].id);
         }
-    }, [assignedSections.length]); // Only run when length changes to avoid reset on every render
+    }, [assignedSections.length]);
 
-    // Fetch students for all assigned sections
     const { data: students, isLoading, refetch } = useQuery({
         queryKey: ['teacher-students-hpc', schoolId, teacherId],
         queryFn: async () => {
             if (!schoolId || !teacherId) return [];
-
             const res = await api.get(`/schools/${schoolId}/teachers/${teacherId}/students`);
-
             return (res.data?.students || []).map(s => ({
-                // API returns: id = user.id, studentId = student.id (actual Student record ID)
-                id: s.studentId, // Use studentId for unique identification
-                studentId: s.studentId, // This is what the assessment API needs
-                userId: s.id, // User ID (for profile pictures, etc.)
+                id: s.studentId,
+                studentId: s.studentId,
+                userId: s.id,
                 name: s.name,
                 email: s.email,
                 profilePicture: s.profilePicture,
                 rollNumber: s.rollNumber,
                 admissionNo: s.admissionNo,
-                // Use flat fields from API response
                 className: s.className || '',
                 classId: s.classId,
                 sectionName: s.sectionName || '',
@@ -129,7 +94,6 @@ export default function TeacherStudentSelectScreen() {
     });
 
     const [refreshing, setRefreshing] = useState(false);
-
     const onRefresh = async () => {
         setRefreshing(true);
         await Promise.all([
@@ -139,27 +103,17 @@ export default function TeacherStudentSelectScreen() {
         setRefreshing(false);
     };
 
-    // Filtering logic
     const filteredStudents = useMemo(() => {
         if (!students) return [];
-
         let result = students;
-
-        // Filter by section/class
         if (selectedSectionId !== 'all') {
-            // Find the selected tab object to know if it's a class or section
             const selectedTab = assignedSections.find(s => s.id == selectedSectionId);
-
             if (selectedTab?.type === 'class') {
-                // Filter by Class ID (use the stored classId, not the prefixed id)
                 result = result.filter(s => s.classId == selectedTab.classId);
             } else {
-                // Filter by Section ID
                 result = result.filter(s => s.sectionId == selectedSectionId);
             }
         }
-
-        // Filter by search
         if (searchQuery) {
             const query = searchQuery.toLowerCase();
             result = result.filter(s =>
@@ -169,35 +123,21 @@ export default function TeacherStudentSelectScreen() {
                 (s.rollNumber && String(s.rollNumber).toLowerCase().includes(query))
             );
         }
-
-        return result.sort((a, b) => {
-            const rollA = parseInt(a.rollNumber) || 9999;
-            const rollB = parseInt(b.rollNumber) || 9999;
-            return rollA - rollB;
-        });
+        return result.sort((a, b) => (parseInt(a.rollNumber) || 9999) - (parseInt(b.rollNumber) || 9999));
     }, [students, selectedSectionId, searchQuery, assignedSections]);
 
     const [selectedTerm, setSelectedTerm] = useState(1);
 
     const handleStudentSelect = (student) => {
-        // Check if we're in narrative feedback mode
         const feedbackMode = params.feedbackMode;
-
         let targetRoute = '/hpc/teacher-assess';
-        if (feedbackMode === 'narrative') {
-            targetRoute = '/hpc/teacher-narrative';
-        } else if (feedbackMode === 'view_feedback') {
-            targetRoute = '/hpc/teacher-feedback-view';
-        }
+        if (feedbackMode === 'narrative') targetRoute = '/hpc/teacher-narrative';
+        else if (feedbackMode === 'view_feedback') targetRoute = '/hpc/teacher-feedback-view';
 
         router.push({
             pathname: targetRoute,
             params: {
-                childData: JSON.stringify({
-                    studentId: student.id,
-                    name: student.name,
-                    ...student
-                }),
+                childData: JSON.stringify({ studentId: student.id, name: student.name, ...student }),
                 termNumber: selectedTerm,
                 ...(feedbackMode === 'view_feedback' && { viewingOnly: 'true' })
             }
@@ -221,13 +161,10 @@ export default function TeacherStudentSelectScreen() {
                     </View>
                     <View style={styles.studentInfo}>
                         <Text style={styles.studentName} numberOfLines={1}>{item.name}</Text>
-                        <Text style={styles.studentDetails}>
-                            Class {item.className}-{item.sectionName} • Roll: {item.rollNumber || 'N/A'}
-                        </Text>
+                        <Text style={styles.studentDetails}>Class {item.className}-{item.sectionName} • Roll: {item.rollNumber || 'N/A'}</Text>
                         <Text style={styles.admissionNo}>Adm: {item.admissionNo}</Text>
                     </View>
                     <View style={styles.arrowContainer}>
-                        {/* Simple chevron or action icon */}
                         <View style={{ width: 8, height: 8, borderTopWidth: 2, borderRightWidth: 2, borderColor: '#ccc', transform: [{ rotate: '45deg' }] }} />
                     </View>
                 </View>
@@ -237,52 +174,40 @@ export default function TeacherStudentSelectScreen() {
 
     if (!teacherData) {
         return (
-            <View style={styles.centerContainer}>
+            <SafeAreaView style={styles.centerContainer}>
                 <Text>No teacher data provided</Text>
-            </View>
+            </SafeAreaView>
         );
     }
 
     return (
-        <View style={styles.container}>
+        <SafeAreaView style={styles.container} edges={['left', 'right']}>
             <StatusBar style="light" />
 
-            {/* Header */}
             <LinearGradient
                 colors={['#8B5CF6', '#7C3AED']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.header}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                style={[styles.header, { paddingTop: insets.top + 12 }]}
             >
                 <View style={styles.headerRow}>
                     <HapticTouchable onPress={() => router.back()}>
-                        <View style={styles.backButton}>
-                            <ArrowLeft size={24} color="#fff" />
-                        </View>
+                        <View style={styles.backButton}><ArrowLeft size={24} color="#fff" /></View>
                     </HapticTouchable>
                     <Text style={styles.headerTitle}>Select Student</Text>
                     <View style={{ width: 40 }} />
                 </View>
 
-                {/* Term Selector */}
                 <View style={styles.termContainer}>
                     <View style={styles.termSelector}>
-                        <TouchableOpacity
-                            style={[styles.termButton, selectedTerm === 1 && styles.termButtonActive]}
-                            onPress={() => setSelectedTerm(1)}
-                        >
+                        <TouchableOpacity style={[styles.termButton, selectedTerm === 1 && styles.termButtonActive]} onPress={() => setSelectedTerm(1)}>
                             <Text style={[styles.termText, selectedTerm === 1 && styles.termTextActive]}>Term 1</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity
-                            style={[styles.termButton, selectedTerm === 2 && styles.termButtonActive]}
-                            onPress={() => setSelectedTerm(2)}
-                        >
+                        <TouchableOpacity style={[styles.termButton, selectedTerm === 2 && styles.termButtonActive]} onPress={() => setSelectedTerm(2)}>
                             <Text style={[styles.termText, selectedTerm === 2 && styles.termTextActive]}>Term 2</Text>
                         </TouchableOpacity>
                     </View>
                 </View>
 
-                {/* Search Bar */}
                 <View style={styles.searchContainer}>
                     <Search size={20} color="#fff" style={{ opacity: 0.7 }} />
                     <TextInput
@@ -295,7 +220,6 @@ export default function TeacherStudentSelectScreen() {
                 </View>
             </LinearGradient>
 
-            {/* Section Filter Tabs */}
             <View style={styles.filterContainer}>
                 <FlatList
                     horizontal
@@ -306,18 +230,9 @@ export default function TeacherStudentSelectScreen() {
                     renderItem={({ item }) => {
                         const isSelected = selectedSectionId === item.id;
                         return (
-                            <TouchableOpacity
-                                onPress={() => setSelectedSectionId(item.id)}
-                                activeOpacity={0.7}
-                            >
-                                <View style={[
-                                    styles.filterChip,
-                                    isSelected && styles.filterChipSelected
-                                ]}>
-                                    <Text style={[
-                                        styles.filterText,
-                                        isSelected && styles.filterTextSelected
-                                    ]}>
+                            <TouchableOpacity onPress={() => setSelectedSectionId(item.id)} activeOpacity={0.7}>
+                                <View style={[styles.filterChip, isSelected && styles.filterChipSelected]}>
+                                    <Text style={[styles.filterText, isSelected && styles.filterTextSelected]}>
                                         {item.name || `${item.class?.className}-${item.sectionName || ''}`}
                                     </Text>
                                 </View>
@@ -327,7 +242,6 @@ export default function TeacherStudentSelectScreen() {
                 />
             </View>
 
-            {/* Student List */}
             {isLoading ? (
                 <View style={styles.loaderContainer}>
                     <ActivityIndicator size="large" color="#8B5CF6" />
@@ -338,16 +252,12 @@ export default function TeacherStudentSelectScreen() {
                     data={filteredStudents}
                     keyExtractor={(item, index) => item?.id ? String(item.id) : `student-${index}`}
                     renderItem={renderStudentItem}
-                    contentContainerStyle={styles.listContent}
-                    refreshControl={
-                        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />
-                    }
+                    contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + 24 }]}
+                    refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#8B5CF6" />}
                     ListEmptyComponent={
                         <View style={styles.emptyContainer}>
                             <Users size={48} color="#ddd" />
-                            <Text style={styles.emptyText}>
-                                {searchQuery ? 'No students found matching your search' : 'No students found'}
-                            </Text>
+                            <Text style={styles.emptyText}>{searchQuery ? 'No students found matching your search' : 'No students found'}</Text>
                             <TouchableOpacity onPress={onRefresh} style={{ marginTop: 20 }}>
                                 <Text style={{ color: '#8B5CF6', fontWeight: '600' }}>Tap to Refresh</Text>
                             </TouchableOpacity>
@@ -355,188 +265,43 @@ export default function TeacherStudentSelectScreen() {
                     }
                 />
             )}
-        </View>
+        </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#f8f9fa',
-    },
-    centerContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    header: {
-        paddingTop: 60,
-        paddingHorizontal: 16,
-        paddingBottom: 20,
-        borderBottomLeftRadius: 24,
-        borderBottomRightRadius: 24,
-    },
-    headerRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 20,
-    },
-    headerTitle: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        color: '#fff',
-    },
-    backButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: 'rgba(255,255,255,0.2)',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    searchContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'rgba(255,255,255,0.2)',
-        borderRadius: 12,
-        paddingHorizontal: 12,
-        height: 46,
-    },
-    searchInput: {
-        flex: 1,
-        marginLeft: 10,
-        color: '#fff',
-        fontSize: 16,
-    },
-    filterContainer: {
-        backgroundColor: '#fff',
-        borderBottomWidth: 1,
-        borderBottomColor: '#f0f0f0',
-    },
-    filterChip: {
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 20,
-        backgroundColor: '#f0f0f0',
-        borderWidth: 1,
-        borderColor: '#eee',
-    },
-    filterChipSelected: {
-        backgroundColor: '#8B5CF6',
-        borderColor: '#8B5CF6',
-    },
-    filterText: {
-        fontSize: 14,
-        color: '#666',
-        fontWeight: '500',
-    },
-    filterTextSelected: {
-        color: '#fff',
-        fontWeight: '600',
-    },
-    termContainer: {
-        marginBottom: 16,
-    },
-    termSelector: {
-        flexDirection: 'row',
-        backgroundColor: 'rgba(255,255,255,0.2)',
-        borderRadius: 12,
-        padding: 4,
-    },
-    termButton: {
-        flex: 1,
-        paddingVertical: 8,
-        alignItems: 'center',
-        borderRadius: 8,
-    },
-    termButtonActive: {
-        backgroundColor: '#fff',
-    },
-    termText: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: 'rgba(255,255,255,0.8)',
-    },
-    termTextActive: {
-        color: '#8B5CF6',
-    },
-    listContent: {
-        padding: 16,
-        paddingBottom: 40,
-    },
-    studentCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#fff',
-        borderRadius: 16,
-        padding: 12,
-        marginBottom: 12,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.05,
-        shadowRadius: 4,
-        elevation: 2,
-    },
-    avatarContainer: {
-        marginRight: 16,
-    },
-    avatar: {
-        width: 50,
-        height: 50,
-        borderRadius: 25,
-        backgroundColor: '#f0f0f0',
-    },
-    avatarPlaceholder: {
-        width: 50,
-        height: 50,
-        borderRadius: 25,
-        backgroundColor: '#F3E8FF',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    avatarInitial: {
-        fontSize: 20,
-        fontWeight: 'bold',
-        color: '#8B5CF6',
-    },
-    studentInfo: {
-        flex: 1,
-    },
-    studentName: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: '#333',
-        marginBottom: 4,
-    },
-    studentDetails: {
-        fontSize: 14,
-        color: '#666',
-        marginBottom: 2,
-    },
-    admissionNo: {
-        fontSize: 12,
-        color: '#999',
-    },
-    arrowContainer: {
-        paddingLeft: 10,
-    },
-    loaderContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    loadingText: {
-        marginTop: 10,
-        color: '#666',
-    },
-    emptyContainer: {
-        marginTop: 60,
-        alignItems: 'center',
-    },
-    emptyText: {
-        marginTop: 16,
-        fontSize: 16,
-        color: '#999',
-    },
+    container: { flex: 1, backgroundColor: '#f8f9fa' },
+    centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+    header: { paddingHorizontal: 16, paddingBottom: 20, borderBottomLeftRadius: 24, borderBottomRightRadius: 24 },
+    headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 },
+    headerTitle: { fontSize: 20, fontWeight: 'bold', color: '#fff' },
+    backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' },
+    searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 12, paddingHorizontal: 12, height: 46 },
+    searchInput: { flex: 1, marginLeft: 10, color: '#fff', fontSize: 16 },
+    filterContainer: { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
+    filterChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#f0f0f0', borderWidth: 1, borderColor: '#eee' },
+    filterChipSelected: { backgroundColor: '#8B5CF6', borderColor: '#8B5CF6' },
+    filterText: { fontSize: 14, color: '#666', fontWeight: '500' },
+    filterTextSelected: { color: '#fff', fontWeight: '600' },
+    termContainer: { marginBottom: 16 },
+    termSelector: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 12, padding: 4 },
+    termButton: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 8 },
+    termButtonActive: { backgroundColor: '#fff' },
+    termText: { fontSize: 14, fontWeight: '600', color: 'rgba(255,255,255,0.8)' },
+    termTextActive: { color: '#8B5CF6' },
+    listContent: { padding: 16 },
+    studentCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 16, padding: 12, marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 2 },
+    avatarContainer: { marginRight: 16 },
+    avatar: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#f0f0f0' },
+    avatarPlaceholder: { width: 50, height: 50, borderRadius: 25, backgroundColor: '#F3E8FF', alignItems: 'center', justifyContent: 'center' },
+    avatarInitial: { fontSize: 20, fontWeight: 'bold', color: '#8B5CF6' },
+    studentInfo: { flex: 1 },
+    studentName: { fontSize: 16, fontWeight: '600', color: '#333', marginBottom: 4 },
+    studentDetails: { fontSize: 14, color: '#666', marginBottom: 2 },
+    admissionNo: { fontSize: 12, color: '#999' },
+    arrowContainer: { paddingLeft: 10 },
+    loaderContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+    loadingText: { marginTop: 10, color: '#666' },
+    emptyContainer: { marginTop: 60, alignItems: 'center' },
+    emptyText: { marginTop: 16, fontSize: 16, color: '#999' },
 });

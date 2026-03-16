@@ -30,6 +30,7 @@ import * as SecureStore from 'expo-secure-store';
 import api from '../../../lib/api';
 import HapticTouchable from '../../components/HapticTouch';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Option Button Component
 const OptionButton = ({ options, value, onChange, label }) => {
@@ -73,6 +74,7 @@ const PARTICIPATION_OPTIONS = [
 
 export default function ParentFeedbackScreen() {
     const params = useLocalSearchParams();
+    const insets = useSafeAreaInsets();
 
     // Support both childData JSON and direct studentId/studentName params
     const childData = params.childData ? JSON.parse(params.childData) :
@@ -99,7 +101,7 @@ export default function ParentFeedbackScreen() {
     });
 
     const schoolId = userData?.schoolId;
-    const parentId = userData?.parentProfileId || userData?.id; // Handle different parent ID structures
+    const parentId = userData?.parentProfileId || userData?.id;
     const studentId = childData?.userId || childData?.studentId;
 
     // Fetch active academic year
@@ -117,13 +119,13 @@ export default function ParentFeedbackScreen() {
     const { data: existingFeedback, isLoading: feedbackLoading } = useQuery({
         queryKey: ['parent-feedback', schoolId, studentId, parentId, academicYear?.id, termNumber],
         queryFn: async () => {
-            const params = new URLSearchParams({
+            const queryParams = new URLSearchParams({
                 studentId,
                 parentId,
                 ...(academicYear?.id && { academicYearId: academicYear.id }),
                 termNumber: termNumber.toString(),
             });
-            const res = await api.get(`/schools/${schoolId}/hpc/parent-feedback?${params}`);
+            const res = await api.get(`/schools/${schoolId}/hpc/parent-feedback?${queryParams}`);
             return res.data?.feedback?.[0] || null;
         },
         enabled: !!schoolId && !!studentId && !!parentId && !!academicYear?.id,
@@ -183,16 +185,16 @@ export default function ParentFeedbackScreen() {
 
     if (isLoading) {
         return (
-            <View style={styles.loaderContainer}>
+            <SafeAreaView style={styles.loaderContainer}>
                 <ActivityIndicator size="large" color="#10B981" />
                 <Text style={styles.loadingText}>Loading feedback form...</Text>
-            </View>
+            </SafeAreaView>
         );
     }
 
     if (!childData) {
         return (
-            <View style={styles.loaderContainer}>
+            <SafeAreaView style={styles.loaderContainer}>
                 <MessageSquare size={48} color="#999" />
                 <Text style={styles.noDataText}>No child selected</Text>
                 <HapticTouchable onPress={() => router.back()}>
@@ -200,7 +202,7 @@ export default function ParentFeedbackScreen() {
                         <Text style={styles.backBtnText}>Go Back</Text>
                     </View>
                 </HapticTouchable>
-            </View>
+            </SafeAreaView>
         );
     }
 
@@ -216,7 +218,7 @@ export default function ParentFeedbackScreen() {
                 colors={['#10B981', '#059669']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
-                style={styles.header}
+                style={[styles.header, { paddingTop: insets.top + 12 }]}
             >
                 {/* Background Pattern */}
                 <Text style={{ position: 'absolute', top: 20, right: 60, fontSize: 28, color: 'rgba(255,255,255,0.08)', fontWeight: 'bold' }}>♡</Text>
@@ -258,6 +260,7 @@ export default function ParentFeedbackScreen() {
             <ScrollView
                 style={styles.content}
                 showsVerticalScrollIndicator={false}
+                contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
                 refreshControl={
                     <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#10B981" />
                 }
@@ -364,8 +367,6 @@ export default function ParentFeedbackScreen() {
                         )}
                     </LinearGradient>
                 </HapticTouchable>
-
-                <View style={{ height: 40 }} />
             </ScrollView>
         </KeyboardAvoidingView>
     );
@@ -405,7 +406,6 @@ const styles = StyleSheet.create({
         fontWeight: '600',
     },
     header: {
-        paddingTop: 60,
         paddingHorizontal: 16,
         paddingBottom: 20,
         borderBottomLeftRadius: 24,

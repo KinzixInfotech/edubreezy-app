@@ -33,17 +33,18 @@ import { StatusBar } from 'expo-status-bar';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const HOMEWORK_LAST_VIEWED_KEY = 'homework_last_viewed';
 
 export default function ParentHomeworkScreen() {
     const params = useLocalSearchParams();
     const queryClient = useQueryClient();
+    const insets = useSafeAreaInsets();
     const [refreshing, setRefreshing] = useState(false);
     const [filterModalVisible, setFilterModalVisible] = useState(false);
-    const [statusFilter, setStatusFilter] = useState('all'); // all, pending, overdue, submitted
+    const [statusFilter, setStatusFilter] = useState('all');
 
-    // Parse child data from params
     const childData = params.childData ? JSON.parse(params.childData) : null;
 
     const { data: userData } = useQuery({
@@ -58,12 +59,10 @@ export default function ParentHomeworkScreen() {
     const schoolId = userData?.schoolId;
     const childId = childData?.studentId || childData?.id;
 
-    // Fetch homework for child
     const { data: homeworkData, isLoading } = useQuery({
         queryKey: ['parent-homework', schoolId, childId],
         queryFn: async () => {
             if (!schoolId || !childId) return { homework: [], total: 0 };
-
             const res = await api.get(`/schools/homework?schoolId=${schoolId}&studentId=${childId}`);
             return res.data;
         },
@@ -73,38 +72,28 @@ export default function ParentHomeworkScreen() {
 
     const homework = homeworkData?.homework || [];
 
-    // Mark homework as viewed when screen is focused (clears badge on home screen)
     useFocusEffect(
         useCallback(() => {
             const markAsViewed = async () => {
                 if (childId) {
-                    // Save timestamp per child
                     const key = `${HOMEWORK_LAST_VIEWED_KEY}_${childId}`;
                     await SecureStore.setItemAsync(key, new Date().toISOString());
-                    // No query invalidation needed - home uses useFocusEffect to refresh timestamps
                 }
             };
             markAsViewed();
         }, [childId])
     );
 
-    // Filter homework
     const filteredHomework = homework.filter(hw => {
         const now = new Date();
         const dueDate = new Date(hw.dueDate);
         const isOverdue = dueDate < now;
         const submission = hw.mySubmission;
 
-        if (statusFilter === 'pending') {
-            return !submission || submission.status === 'PENDING';
-        }
-        if (statusFilter === 'overdue') {
-            return isOverdue && (!submission || submission.status === 'PENDING');
-        }
-        if (statusFilter === 'submitted') {
-            return submission && (submission.status === 'SUBMITTED' || submission.status === 'EVALUATED');
-        }
-        return true; // all
+        if (statusFilter === 'pending') return !submission || submission.status === 'PENDING';
+        if (statusFilter === 'overdue') return isOverdue && (!submission || submission.status === 'PENDING');
+        if (statusFilter === 'submitted') return submission && (submission.status === 'SUBMITTED' || submission.status === 'EVALUATED');
+        return true;
     });
 
     const onRefresh = useCallback(async () => {
@@ -133,36 +122,10 @@ export default function ParentHomeworkScreen() {
         const isOverdue = dueDate < now;
         const submission = hw.mySubmission;
 
-        if (submission?.status === 'EVALUATED') {
-            return {
-                label: 'Evaluated',
-                color: '#10B981',
-                bgColor: '#D1FAE5',
-                icon: CheckCircle2
-            };
-        }
-        if (submission?.status === 'SUBMITTED') {
-            return {
-                label: 'Submitted',
-                color: '#3B82F6',
-                bgColor: '#DBEAFE',
-                icon: CheckCircle2
-            };
-        }
-        if (isOverdue) {
-            return {
-                label: 'Overdue',
-                color: '#EF4444',
-                bgColor: '#FEE2E2',
-                icon: AlertTriangle
-            };
-        }
-        return {
-            label: 'Pending',
-            color: '#F59E0B',
-            bgColor: '#FEF3C7',
-            icon: Clock
-        };
+        if (submission?.status === 'EVALUATED') return { label: 'Evaluated', color: '#10B981', bgColor: '#D1FAE5', icon: CheckCircle2 };
+        if (submission?.status === 'SUBMITTED') return { label: 'Submitted', color: '#3B82F6', bgColor: '#DBEAFE', icon: CheckCircle2 };
+        if (isOverdue) return { label: 'Overdue', color: '#EF4444', bgColor: '#FEE2E2', icon: AlertTriangle };
+        return { label: 'Pending', color: '#F59E0B', bgColor: '#FEF3C7', icon: Clock };
     };
 
     const getDaysLeft = (dueDate) => {
@@ -173,7 +136,6 @@ export default function ParentHomeworkScreen() {
         return `${days} days left`;
     };
 
-    // Stats
     const stats = {
         total: homework.length,
         pending: homework.filter(hw => !hw.mySubmission || hw.mySubmission.status === 'PENDING').length,
@@ -182,7 +144,9 @@ export default function ParentHomeworkScreen() {
             const submission = hw.mySubmission;
             return isOverdue && (!submission || submission.status === 'PENDING');
         }).length,
-        submitted: homework.filter(hw => hw.mySubmission?.status === 'SUBMITTED' || hw.mySubmission?.status === 'EVALUATED').length,
+        submitted: homework.filter(hw =>
+            hw.mySubmission?.status === 'SUBMITTED' || hw.mySubmission?.status === 'EVALUATED'
+        ).length,
     };
 
     const FilterModal = () => (
@@ -194,6 +158,7 @@ export default function ParentHomeworkScreen() {
         >
             <View style={styles.modalOverlay}>
                 <Animated.View entering={FadeInDown.duration(300)} style={styles.modalContent}>
+                    <View style={styles.modalHandle} />
                     <View style={styles.modalHeader}>
                         <Text style={styles.modalTitle}>Filter Homework</Text>
                         <HapticTouchable onPress={() => setFilterModalVisible(false)}>
@@ -203,7 +168,7 @@ export default function ParentHomeworkScreen() {
                         </HapticTouchable>
                     </View>
 
-                    <View style={styles.filterOptions}>
+                    <View style={[styles.filterOptions, { paddingBottom: insets.bottom + 20 }]}>
                         {[
                             { id: 'all', label: 'All Homework', count: stats.total },
                             { id: 'pending', label: 'Pending', count: stats.pending },
@@ -247,7 +212,7 @@ export default function ParentHomeworkScreen() {
     // No child data error state
     if (!childData) {
         return (
-            <View style={styles.container}>
+            <SafeAreaView style={styles.container}>
                 <View style={styles.header}>
                     <HapticTouchable onPress={() => router.back()}>
                         <View style={styles.backButton}>
@@ -266,15 +231,15 @@ export default function ParentHomeworkScreen() {
                         Please select a child from the home screen
                     </Text>
                 </View>
-            </View>
+            </SafeAreaView>
         );
     }
 
     return (
-        <View style={styles.container}>
+        <SafeAreaView style={styles.container}>
             <StatusBar style="dark" />
             {/* Header */}
-            <Animated.View entering={FadeInDown.duration(400)} style={[styles.header, Platform.OS === 'ios' && { paddingTop: 60 }]}>
+            <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>
                     <View style={styles.backButton}>
                         <ArrowLeft size={24} color="#111" />
@@ -461,7 +426,7 @@ export default function ParentHomeworkScreen() {
             </ScrollView>
 
             <FilterModal />
-        </View >
+        </SafeAreaView>
     );
 }
 
@@ -475,7 +440,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 16,
-        paddingTop: 50,
+        paddingTop: 8,
         paddingBottom: 16,
         borderBottomWidth: 1,
         borderBottomColor: '#f0f0f0',
@@ -746,6 +711,15 @@ const styles = StyleSheet.create({
         borderTopLeftRadius: 24,
         borderTopRightRadius: 24,
         maxHeight: '60%',
+    },
+    modalHandle: {
+        width: 36,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: '#e0e0e0',
+        alignSelf: 'center',
+        marginTop: 10,
+        marginBottom: 4,
     },
     modalHeader: {
         flexDirection: 'row',

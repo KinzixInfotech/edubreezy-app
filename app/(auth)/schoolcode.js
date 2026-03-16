@@ -268,10 +268,10 @@ export default function SchoolCodePage() {
   const fetchNearbySchools = async (skipPermissionRequest = false) => {
     try {
       setLocationLoading(true);
+
       if (!skipPermissionRequest) {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
-          console.log('📍 Location permission denied');
           setLocationLoading(false);
           setLocationPermissionGranted(false);
           return;
@@ -279,10 +279,24 @@ export default function SchoolCodePage() {
         setLocationPermissionGranted(true);
       }
 
+      // ✅ Use lastKnownPositionAsync first (instant, no timeout risk)
+      let loc = await Location.getLastKnownPositionAsync({});
 
-      const loc = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Low,
-      });
+      // ✅ Fallback to getCurrentPositionAsync with a manual timeout race
+      if (!loc) {
+        loc = await Promise.race([
+          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Lowest }),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Location timeout')), 10000)
+          ),
+        ]);
+      }
+
+      if (!loc) {
+        console.log('❌ Could not get location');
+        setLocationLoading(false);
+        return;
+      }
 
       const [place] = await Location.reverseGeocodeAsync({
         latitude: loc.coords.latitude,
@@ -291,7 +305,6 @@ export default function SchoolCodePage() {
 
       console.log('📍 Reverse geocode result:', JSON.stringify(place));
 
-      // Try multiple location levels: city, subregion (district), region (state)
       const searchTerms = [
         place?.city,
         place?.subregion,
@@ -306,14 +319,11 @@ export default function SchoolCodePage() {
         return;
       }
 
-      // Search with each term and merge unique results
       const allSchools = new Map();
       for (const term of searchTerms) {
         try {
-          console.log('🔍 Searching schools with term:', term);
           const res = await api.get(`/schools/search?q=${encodeURIComponent(term)}`);
           const schools = res.data?.schools || [];
-          console.log(`✅ Found ${schools.length} schools for "${term}"`);
           schools.forEach((s) => allSchools.set(s.id, s));
         } catch (err) {
           console.log(`⚠️ Search failed for "${term}":`, err.message);
@@ -322,7 +332,7 @@ export default function SchoolCodePage() {
 
       setNearbySchools(Array.from(allSchools.values()));
     } catch (err) {
-      console.log('❌ Location fetch error:', err);
+      console.log('❌ Location fetch error:', err.message);
     } finally {
       setLocationLoading(false);
     }

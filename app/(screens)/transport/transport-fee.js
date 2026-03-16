@@ -1,4 +1,4 @@
-// Transport Fee Payment Screen for Parents
+// Transport Fee Payment Screen for Parents — Modern UI
 import React, { useState, useCallback } from 'react';
 import {
     View,
@@ -17,25 +17,55 @@ import {
     ArrowLeft,
     Bus,
     CreditCard,
-    DollarSign,
     User,
     CheckCircle2,
     Clock,
     AlertCircle,
     Receipt,
     Info,
+    Wallet,
+    TrendingUp,
+    ChevronRight,
+    BadgeCheck,
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+
+// ── Empty state ───────────────────────────────────────────────────────────────
+const EmptyState = ({ icon: Icon, title, subtitle, color = '#0469ff' }) => (
+    <Animated.View entering={FadeInDown.delay(200).duration(400)} style={emptyStyles.wrap}>
+        <View style={[emptyStyles.iconBg, { backgroundColor: color + '15' }]}>
+            <Icon size={36} color={color} />
+        </View>
+        <Text style={emptyStyles.title}>{title}</Text>
+        <Text style={emptyStyles.subtitle}>{subtitle}</Text>
+    </Animated.View>
+);
+
+const emptyStyles = StyleSheet.create({
+    wrap: { alignItems: 'center', paddingVertical: 56, gap: 10 },
+    iconBg: { width: 80, height: 80, borderRadius: 40, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+    title: { fontSize: 16, fontWeight: '700', color: '#111' },
+    subtitle: { fontSize: 13, color: '#888', textAlign: 'center', paddingHorizontal: 40, lineHeight: 19 },
+});
+
+const FREQUENCY_LABEL = {
+    MONTHLY: 'per month',
+    QUARTERLY: 'per quarter',
+    HALF_YEARLY: 'per half-year',
+    YEARLY: 'per year',
+};
 
 export default function TransportFeeScreen() {
     const params = useLocalSearchParams();
     const queryClient = useQueryClient();
+    const insets = useSafeAreaInsets();
     const [refreshing, setRefreshing] = useState(false);
 
-    // Parse child data from params
     const childData = params.childData ? JSON.parse(params.childData) : null;
 
     const { data: userData } = useQuery({
@@ -50,7 +80,6 @@ export default function TransportFeeScreen() {
     const schoolId = userData?.schoolId;
     const studentId = childData?.studentId || childData?.id;
 
-    // Fetch fee details
     const { data: feeData, isLoading: feeLoading } = useQuery({
         queryKey: ['transport-fee', schoolId, studentId],
         queryFn: async () => {
@@ -60,7 +89,6 @@ export default function TransportFeeScreen() {
         enabled: !!schoolId && !!studentId,
     });
 
-    // Fetch payment history
     const { data: paymentsData, isLoading: paymentsLoading } = useQuery({
         queryKey: ['transport-payments', schoolId, studentId],
         queryFn: async () => {
@@ -74,8 +102,11 @@ export default function TransportFeeScreen() {
     const payments = paymentsData?.payments || [];
     const totalPaid = payments.filter(p => p.status === 'PAID').reduce((sum, p) => sum + (p.amount || 0), 0);
     const pendingAmount = Math.max(0, (feeDetails?.amount || 0) - totalPaid);
-
     const isLoading = feeLoading || paymentsLoading;
+
+    const paidPct = feeDetails?.amount > 0
+        ? Math.min(100, Math.round((totalPaid / feeDetails.amount) * 100))
+        : 0;
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
@@ -97,55 +128,41 @@ export default function TransportFeeScreen() {
         );
     };
 
-    const getPaymentStatusInfo = (status) => {
+    const getPaymentCfg = (status) => {
         switch (status) {
-            case 'PAID': return { icon: CheckCircle2, color: '#10B981', bg: '#D1FAE5' };
-            case 'PENDING': return { icon: Clock, color: '#F59E0B', bg: '#FEF3C7' };
-            case 'OVERDUE': return { icon: AlertCircle, color: '#EF4444', bg: '#FEE2E2' };
-            default: return { icon: Clock, color: '#94A3B8', bg: '#F1F5F9' };
+            case 'PAID': return { icon: CheckCircle2, color: '#15803D', bg: '#ECFDF5', border: '#A7F3D0', label: 'Paid' };
+            case 'PENDING': return { icon: Clock, color: '#B45309', bg: '#FFFBEB', border: '#FDE68A', label: 'Pending' };
+            case 'OVERDUE': return { icon: AlertCircle, color: '#B91C1C', bg: '#FFF1F2', border: '#FECDD3', label: 'Overdue' };
+            default: return { icon: Clock, color: '#64748B', bg: '#F8FAFC', border: '#E2E8F0', label: status };
         }
     };
 
-    const frequencyLabel = {
-        MONTHLY: 'per month',
-        QUARTERLY: 'per quarter',
-        HALF_YEARLY: 'per half-year',
-        YEARLY: 'per year',
-    };
-
-    // No child data error state
     if (!childData) {
         return (
-            <View style={styles.container}>
+            <SafeAreaView style={styles.container}>
+                <StatusBar style="dark" backgroundColor="#fff" />
                 <View style={styles.header}>
                     <HapticTouchable onPress={() => router.back()}>
-                        <View style={styles.backButton}>
-                            <ArrowLeft size={24} color="#111" />
-                        </View>
+                        <View style={styles.backButton}><ArrowLeft size={22} color="#0D1117" /></View>
                     </HapticTouchable>
                     <View style={styles.headerCenter}>
                         <Text style={styles.headerTitle}>Transport Fee</Text>
                     </View>
                     <View style={{ width: 40 }} />
                 </View>
-                <View style={styles.emptyState}>
-                    <AlertCircle size={48} color="#ccc" />
-                    <Text style={styles.emptyTitle}>No Child Selected</Text>
-                    <Text style={styles.emptySubtitle}>Please select a child from home screen</Text>
-                </View>
-            </View>
+                <EmptyState icon={AlertCircle} title="No Child Selected" subtitle="Please select a child from the home screen" color="#EF4444" />
+            </SafeAreaView>
         );
     }
 
     return (
-        <View style={styles.container}>
-            <StatusBar style='dark' />
-            {/* Header */}
-            <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
+        <SafeAreaView style={styles.container}>
+            <StatusBar style="dark" backgroundColor="#fff" />
+
+            {/* ── Header ─────────────────────────────────────────────────── */}
+            <Animated.View entering={FadeInDown.duration(350)} style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>
-                    <View style={styles.backButton}>
-                        <ArrowLeft size={24} color="#111" />
-                    </View>
+                    <View style={styles.backButton}><ArrowLeft size={22} color="#0D1117" /></View>
                 </HapticTouchable>
                 <View style={styles.headerCenter}>
                     <Text style={styles.headerTitle}>Transport Fee</Text>
@@ -156,408 +173,379 @@ export default function TransportFeeScreen() {
 
             <ScrollView
                 style={styles.content}
+                contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}
                 showsVerticalScrollIndicator={false}
-                refreshControl={
-                    <RefreshControl
-                        refreshing={refreshing}
-                        onRefresh={onRefresh}
-                        tintColor="#0469ff"
-                    />
-                }
+                refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" />}
             >
-                {/* Child Info Card */}
-                <Animated.View entering={FadeInDown.delay(100).duration(500)}>
-                    <View style={styles.childInfoCard}>
-                        <View style={styles.childInfoIcon}>
-                            <User size={20} color="#0469ff" />
+                {/* ── Hero banner ───────────────────────────────────────────── */}
+                <Animated.View entering={FadeInDown.delay(80).duration(500)}>
+                    <LinearGradient
+                        colors={['#0469ff', '#0347c4']}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.heroBanner}
+                    >
+                        <View style={styles.heroDeco1} />
+                        <View style={styles.heroDeco2} />
+
+                        {/* Child row */}
+                        <View style={styles.heroTop}>
+                            <View style={styles.heroAvatar}>
+                                <User size={22} color="#0469ff" />
+                            </View>
+                            <View style={styles.heroText}>
+                                <Text style={styles.heroName}>{childData.name}</Text>
+                                <Text style={styles.heroClass}>Class {childData.class} · {childData.section}</Text>
+                            </View>
+                            <View style={styles.heroBusIcon}>
+                                <Bus size={20} color="rgba(255,255,255,0.7)" />
+                            </View>
                         </View>
-                        <View style={styles.childInfoContent}>
-                            <Text style={styles.childInfoName}>{childData.name}</Text>
-                            <Text style={styles.childInfoClass}>
-                                Class {childData.class} - {childData.section}
-                            </Text>
+
+                        {/* Amount */}
+                        {feeDetails && (
+                            <>
+                                <View style={styles.heroAmountRow}>
+                                    <Text style={styles.heroAmountLabel}>Total Fee</Text>
+                                    <Text style={styles.heroAmount}>
+                                        ₹{feeDetails.amount?.toLocaleString()}
+                                        <Text style={styles.heroFreq}> {FREQUENCY_LABEL[feeDetails.frequency]}</Text>
+                                    </Text>
+                                </View>
+
+                                {/* Progress bar */}
+                                <View style={styles.progressWrap}>
+                                    <View style={styles.progressBg}>
+                                        <View style={[styles.progressFill, { width: `${paidPct}%` }]} />
+                                    </View>
+                                    <Text style={styles.progressLabel}>{paidPct}% paid</Text>
+                                </View>
+                            </>
+                        )}
+
+                        {/* Stats strip */}
+                        <View style={styles.heroStats}>
+                            <View style={styles.heroStat}>
+                                <Text style={[styles.heroStatVal, { color: '#34D399' }]}>
+                                    ₹{totalPaid.toLocaleString()}
+                                </Text>
+                                <Text style={styles.heroStatLabel}>Paid</Text>
+                            </View>
+                            <View style={styles.heroStatSep} />
+                            <View style={styles.heroStat}>
+                                <Text style={[styles.heroStatVal, { color: pendingAmount > 0 ? '#FDE68A' : '#34D399' }]}>
+                                    ₹{pendingAmount.toLocaleString()}
+                                </Text>
+                                <Text style={styles.heroStatLabel}>Pending</Text>
+                            </View>
                         </View>
-                    </View>
+                    </LinearGradient>
                 </Animated.View>
 
                 {isLoading ? (
                     <View style={styles.loadingContainer}>
                         <ActivityIndicator size="large" color="#0469ff" />
+                        <Text style={styles.loadingText}>Loading fee details…</Text>
                     </View>
                 ) : feeDetails ? (
                     <>
-                        {/* Fee Summary Card */}
-                        <Animated.View entering={FadeInDown.delay(200).duration(500)}>
-                            <View style={styles.feeCard}>
-                                <View style={styles.feeCardHeader}>
-                                    <View style={styles.feeIconContainer}>
-                                        <Bus size={24} color="#10B981" />
+                        {/* ── Fee detail card ─────────────────────────────────── */}
+                        <Animated.View entering={FadeInDown.delay(160).duration(450)}>
+                            <View style={styles.card}>
+                                <View style={styles.cardHeader}>
+                                    <View style={[styles.cardIconBg, { backgroundColor: '#ECFDF5' }]}>
+                                        <Bus size={16} color="#10B981" />
                                     </View>
-                                    <View style={styles.feeCardInfo}>
-                                        <Text style={styles.feeName}>{feeDetails.name}</Text>
-                                        <Text style={styles.feeRoute}>{feeDetails.route?.name || 'All Routes'}</Text>
+                                    <View style={styles.cardHeaderText}>
+                                        <Text style={styles.cardTitle}>{feeDetails.name}</Text>
+                                        <Text style={styles.cardSub}>{feeDetails.route?.name || 'All Routes'}</Text>
                                     </View>
-                                </View>
-
-                                <View style={styles.amountSection}>
-                                    <Text style={styles.amountLabel}>Fee Amount</Text>
-                                    <View style={styles.amountValue}>
-                                        <Text style={styles.currencySymbol}>₹</Text>
-                                        <Text style={styles.amountNumber}>{feeDetails.amount?.toLocaleString()}</Text>
-                                        <Text style={styles.frequencyText}>{frequencyLabel[feeDetails.frequency]}</Text>
-                                    </View>
-                                </View>
-
-                                <View style={styles.statsRow}>
-                                    <View style={styles.statItem}>
-                                        <Text style={styles.statLabel}>Total Paid</Text>
-                                        <Text style={[styles.statValue, { color: '#10B981' }]}>
-                                            ₹{totalPaid.toLocaleString()}
-                                        </Text>
-                                    </View>
-                                    <View style={styles.statDivider} />
-                                    <View style={styles.statItem}>
-                                        <Text style={styles.statLabel}>Pending</Text>
-                                        <Text style={[styles.statValue, { color: pendingAmount > 0 ? '#F59E0B' : '#10B981' }]}>
-                                            ₹{pendingAmount.toLocaleString()}
-                                        </Text>
-                                    </View>
-                                </View>
-
-                                {pendingAmount > 0 && (
-                                    <HapticTouchable onPress={handlePayNow}>
-                                        <View style={styles.payBtn}>
-                                            <CreditCard size={20} color="#fff" />
-                                            <Text style={styles.payBtnText}>Pay Now</Text>
+                                    {pendingAmount === 0 && (
+                                        <View style={styles.paidBadge}>
+                                            <BadgeCheck size={13} color="#15803D" />
+                                            <Text style={styles.paidBadgeText}>Cleared</Text>
                                         </View>
+                                    )}
+                                </View>
+
+                                {/* Info rows */}
+                                {[
+                                    { label: 'Fee Type', value: feeDetails.feeType || 'Transport' },
+                                    { label: 'Frequency', value: FREQUENCY_LABEL[feeDetails.frequency] || feeDetails.frequency },
+                                    {
+                                        label: 'Due Date', value: feeDetails.dueDate
+                                            ? new Date(feeDetails.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                                            : 'N/A'
+                                    },
+                                ].map(row => (
+                                    <View key={row.label} style={styles.infoRow}>
+                                        <Text style={styles.infoLabel}>{row.label}</Text>
+                                        <Text style={styles.infoValue}>{row.value}</Text>
+                                    </View>
+                                ))}
+
+                                {/* Pay now button */}
+                                {pendingAmount > 0 && (
+                                    <HapticTouchable onPress={handlePayNow} style={{ marginTop: 16 }}>
+                                        <LinearGradient
+                                            colors={['#0469ff', '#0347c4']}
+                                            start={{ x: 0, y: 0 }}
+                                            end={{ x: 1, y: 0 }}
+                                            style={styles.payBtn}
+                                        >
+                                            <CreditCard size={18} color="#fff" />
+                                            <Text style={styles.payBtnText}>Pay ₹{pendingAmount.toLocaleString()}</Text>
+                                            <ChevronRight size={18} color="rgba(255,255,255,0.7)" style={{ marginLeft: 'auto' }} />
+                                        </LinearGradient>
                                     </HapticTouchable>
                                 )}
                             </View>
                         </Animated.View>
                     </>
                 ) : (
-                    <Animated.View entering={FadeInDown.delay(200).duration(500)}>
-                        <View style={styles.noFeeCard}>
-                            <Info size={48} color="#ccc" />
-                            <Text style={styles.noFeeTitle}>No Transport Fee Assigned</Text>
-                            <Text style={styles.noFeeText}>
-                                Contact admin for fee details
-                            </Text>
-                        </View>
+                    <Animated.View entering={FadeInDown.delay(160).duration(450)}>
+                        <EmptyState
+                            icon={Info}
+                            title="No Transport Fee Assigned"
+                            subtitle="Contact your school admin for fee details"
+                            color="#8B5CF6"
+                        />
                     </Animated.View>
                 )}
 
-                {/* Payment History */}
+                {/* ── Payment history ───────────────────────────────────────── */}
                 <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Payment History</Text>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Payment History</Text>
+                        <View style={styles.sectionBadge}>
+                            <Text style={styles.sectionBadgeText}>{payments.length}</Text>
+                        </View>
+                    </View>
 
                     {payments.length > 0 ? (
                         payments.map((payment, index) => {
-                            const statusInfo = getPaymentStatusInfo(payment.status);
-                            const StatusIcon = statusInfo.icon;
-
+                            const cfg = getPaymentCfg(payment.status);
+                            const StatusIcon = cfg.icon;
                             return (
                                 <Animated.View
                                     key={payment.id}
-                                    entering={FadeInRight.delay(300 + index * 80).duration(500)}
+                                    entering={FadeInRight.delay(260 + index * 70).duration(450)}
                                 >
-                                    <View style={styles.paymentCard}>
-                                        <View style={[styles.paymentIconContainer, { backgroundColor: statusInfo.bg }]}>
-                                            <StatusIcon size={18} color={statusInfo.color} />
+                                    <View style={[styles.paymentCard, { borderColor: cfg.border }]}>
+                                        <View style={[styles.cardAccent, { backgroundColor: cfg.color }]} />
+                                        <View style={[styles.paymentIconBox, { backgroundColor: cfg.bg }]}>
+                                            <StatusIcon size={18} color={cfg.color} />
                                         </View>
                                         <View style={styles.paymentInfo}>
                                             <Text style={styles.paymentAmount}>₹{payment.amount?.toLocaleString()}</Text>
                                             <Text style={styles.paymentDate}>
                                                 {new Date(payment.paymentDate || payment.createdAt).toLocaleDateString('en-IN', {
-                                                    day: 'numeric',
-                                                    month: 'short',
-                                                    year: 'numeric',
+                                                    day: 'numeric', month: 'short', year: 'numeric',
                                                 })}
                                             </Text>
                                         </View>
-                                        <View style={[styles.statusBadge, { backgroundColor: statusInfo.bg }]}>
-                                            <Text style={[styles.statusText, { color: statusInfo.color }]}>
-                                                {payment.status}
-                                            </Text>
+                                        <View style={[styles.statusPill, { backgroundColor: cfg.bg, borderColor: cfg.border }]}>
+                                            <Text style={[styles.statusPillText, { color: cfg.color }]}>{cfg.label}</Text>
                                         </View>
                                     </View>
                                 </Animated.View>
                             );
                         })
                     ) : (
-                        <Animated.View entering={FadeInDown.delay(400).duration(500)}>
-                            <View style={styles.emptyState}>
-                                <Receipt size={48} color="#ccc" />
-                                <Text style={styles.emptyTitle}>No Payment Records</Text>
-                                <Text style={styles.emptySubtitle}>
-                                    Payment history will appear here
-                                </Text>
-                            </View>
-                        </Animated.View>
+                        <EmptyState
+                            icon={Receipt}
+                            title="No Payment Records"
+                            subtitle="Payment history will appear here once payments are made"
+                            color="#0469ff"
+                        />
                     )}
                 </View>
-
-                <View style={{ height: 40 }} />
             </ScrollView>
-        </View>
+
+            {/* ── Sticky pay footer ─────────────────────────────────────────── */}
+            {!isLoading && feeDetails && pendingAmount > 0 && (
+                <View style={[styles.stickyFooter, { paddingBottom: insets.bottom + 8 }]}>
+                    <View style={styles.footerLeft}>
+                        <Text style={styles.footerLabel}>Balance Due</Text>
+                        <Text style={styles.footerAmount}>₹{pendingAmount.toLocaleString()}</Text>
+                    </View>
+                    <HapticTouchable onPress={handlePayNow} style={{ flex: 1 }}>
+                        <LinearGradient
+                            colors={['#0469ff', '#0347c4']}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 0 }}
+                            style={styles.footerPayBtn}
+                        >
+                            <CreditCard size={18} color="#fff" />
+                            <Text style={styles.footerPayBtnText}>Pay Now</Text>
+                        </LinearGradient>
+                    </HapticTouchable>
+                </View>
+            )}
+        </SafeAreaView>
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#fff',
-    },
+    container: { flex: 1, backgroundColor: '#F7F9FC' },
+
+    // ── Header ────────────────────────────────────────────────────────────────
     header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingTop: 50,
-        paddingBottom: 16,
-        borderBottomWidth: 1,
-        borderBottomColor: '#f0f0f0',
+        flexDirection: 'row', alignItems: 'center',
+        paddingHorizontal: 16, paddingTop: 8, paddingBottom: 12,
         backgroundColor: '#fff',
+        borderBottomWidth: 1, borderBottomColor: '#F0F3F8',
     },
     backButton: {
-        width: 40,
-        height: 40,
+        width: 40, height: 40, borderRadius: 20,
+        backgroundColor: '#F3F6FA', alignItems: 'center', justifyContent: 'center',
+    },
+    headerCenter: { flex: 1, alignItems: 'center' },
+    headerTitle: { fontSize: 17, fontWeight: '800', color: '#0D1117', letterSpacing: -0.3 },
+    headerSubtitle: { fontSize: 12, color: '#8A97B0', marginTop: 1 },
+
+    content: { flex: 1, paddingHorizontal: 16 },
+
+    // ── Hero ──────────────────────────────────────────────────────────────────
+    heroBanner: {
+        borderRadius: 22, padding: 20,
+        marginTop: 16, marginBottom: 16,
+        overflow: 'hidden', position: 'relative',
+    },
+    heroDeco1: {
+        position: 'absolute', width: 140, height: 140, borderRadius: 70,
+        backgroundColor: 'rgba(255,255,255,0.07)', top: -40, right: -30,
+    },
+    heroDeco2: {
+        position: 'absolute', width: 80, height: 80, borderRadius: 40,
+        backgroundColor: 'rgba(255,255,255,0.05)', bottom: -20, left: 40,
+    },
+    heroTop: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 18 },
+    heroAvatar: {
+        width: 46, height: 46, borderRadius: 23,
+        backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center',
+    },
+    heroText: { flex: 1 },
+    heroName: { fontSize: 16, fontWeight: '800', color: '#fff', letterSpacing: -0.2 },
+    heroClass: { fontSize: 12, color: 'rgba(255,255,255,0.7)', marginTop: 2 },
+    heroBusIcon: {
+        width: 40, height: 40, borderRadius: 20,
+        backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center',
+    },
+    heroAmountRow: { marginBottom: 12 },
+    heroAmountLabel: { fontSize: 11, color: 'rgba(255,255,255,0.6)', fontWeight: '500', marginBottom: 4 },
+    heroAmount: { fontSize: 34, fontWeight: '900', color: '#fff', letterSpacing: -1 },
+    heroFreq: { fontSize: 14, fontWeight: '400', color: 'rgba(255,255,255,0.65)' },
+
+    progressWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 },
+    progressBg: {
+        flex: 1, height: 6, borderRadius: 3,
+        backgroundColor: 'rgba(255,255,255,0.25)',
+        overflow: 'hidden',
+    },
+    progressFill: { height: '100%', borderRadius: 3, backgroundColor: '#34D399' },
+    progressLabel: { fontSize: 11, color: 'rgba(255,255,255,0.75)', fontWeight: '600', minWidth: 50 },
+
+    heroStats: {
+        flexDirection: 'row',
+        backgroundColor: 'rgba(255,255,255,0.14)',
+        borderRadius: 14, padding: 14,
+    },
+    heroStat: { flex: 1, alignItems: 'center' },
+    heroStatVal: { fontSize: 20, fontWeight: '900', letterSpacing: -0.5 },
+    heroStatLabel: { fontSize: 11, color: 'rgba(255,255,255,0.65)', marginTop: 2, fontWeight: '500' },
+    heroStatSep: { width: 1, backgroundColor: 'rgba(255,255,255,0.2)' },
+
+    loadingContainer: { padding: 60, alignItems: 'center', gap: 12 },
+    loadingText: { fontSize: 14, color: '#8A97B0' },
+
+    // ── Cards ─────────────────────────────────────────────────────────────────
+    card: {
+        backgroundColor: '#fff',
+        borderRadius: 18, borderWidth: 1, borderColor: '#F0F3F8',
+        padding: 16, marginBottom: 14,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.04, shadowRadius: 6, elevation: 1,
+    },
+    cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
+    cardIconBg: {
+        width: 40, height: 40, borderRadius: 12,
+        alignItems: 'center', justifyContent: 'center',
+    },
+    cardHeaderText: { flex: 1 },
+    cardTitle: { fontSize: 15, fontWeight: '700', color: '#0D1117' },
+    cardSub: { fontSize: 12, color: '#8A97B0', marginTop: 2 },
+    paidBadge: {
+        flexDirection: 'row', alignItems: 'center', gap: 4,
+        backgroundColor: '#ECFDF5', paddingHorizontal: 9, paddingVertical: 4,
         borderRadius: 20,
-        backgroundColor: '#f5f5f5',
-        alignItems: 'center',
-        justifyContent: 'center',
     },
-    headerCenter: {
-        flex: 1,
-        alignItems: 'center',
+    paidBadgeText: { fontSize: 11, fontWeight: '700', color: '#15803D' },
+
+    infoRow: {
+        flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+        paddingVertical: 10,
+        borderTopWidth: 1, borderTopColor: '#F4F6FA',
     },
-    headerTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#111',
-    },
-    headerSubtitle: {
-        fontSize: 13,
-        color: '#666',
-        marginTop: 2,
-    },
-    content: {
-        flex: 1,
-        padding: 16,
-    },
-    childInfoCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 14,
-        backgroundColor: '#f8f9fa',
-        borderRadius: 12,
-        marginBottom: 16,
-        gap: 12,
-    },
-    childInfoIcon: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        backgroundColor: '#E3F2FD',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    childInfoContent: {
-        flex: 1,
-    },
-    childInfoName: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: '#111',
-    },
-    childInfoClass: {
-        fontSize: 13,
-        color: '#666',
-        marginTop: 2,
-    },
-    loadingContainer: {
-        padding: 60,
-        alignItems: 'center',
-    },
-    feeCard: {
-        backgroundColor: '#f8f9fa',
-        borderRadius: 16,
-        padding: 20,
-        marginBottom: 20,
-    },
-    feeCardHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 20,
-    },
-    feeIconContainer: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        backgroundColor: '#D1FAE5',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    feeCardInfo: {
-        marginLeft: 14,
-    },
-    feeName: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#111',
-    },
-    feeRoute: {
-        fontSize: 14,
-        color: '#666',
-        marginTop: 2,
-    },
-    amountSection: {
-        alignItems: 'center',
-        paddingVertical: 20,
-        borderTopWidth: 1,
-        borderBottomWidth: 1,
-        borderColor: '#e5e7eb',
-    },
-    amountLabel: {
-        fontSize: 13,
-        color: '#94A3B8',
-        marginBottom: 4,
-    },
-    amountValue: {
-        flexDirection: 'row',
-        alignItems: 'baseline',
-    },
-    currencySymbol: {
-        fontSize: 24,
-        fontWeight: '600',
-        color: '#10B981',
-    },
-    amountNumber: {
-        fontSize: 36,
-        fontWeight: '800',
-        color: '#111',
-        marginLeft: 2,
-    },
-    frequencyText: {
-        fontSize: 14,
-        color: '#666',
-        marginLeft: 8,
-    },
-    statsRow: {
-        flexDirection: 'row',
-        paddingVertical: 16,
-    },
-    statItem: {
-        flex: 1,
-        alignItems: 'center',
-    },
-    statDivider: {
-        width: 1,
-        backgroundColor: '#e5e7eb',
-    },
-    statLabel: {
-        fontSize: 12,
-        color: '#94A3B8',
-    },
-    statValue: {
-        fontSize: 18,
-        fontWeight: '700',
-        marginTop: 4,
-    },
+    infoLabel: { fontSize: 13, color: '#8A97B0' },
+    infoValue: { fontSize: 13, fontWeight: '700', color: '#0D1117' },
+
     payBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 10,
-        paddingVertical: 14,
-        marginTop: 8,
-        borderRadius: 12,
-        backgroundColor: '#0469ff',
+        flexDirection: 'row', alignItems: 'center',
+        paddingVertical: 15, paddingHorizontal: 18,
+        borderRadius: 14, gap: 10,
     },
-    payBtnText: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: '#fff',
+    payBtnText: { fontSize: 15, fontWeight: '800', color: '#fff' },
+
+    // ── Section ───────────────────────────────────────────────────────────────
+    section: { marginBottom: 8 },
+    sectionHeader: {
+        flexDirection: 'row', alignItems: 'center',
+        justifyContent: 'space-between', marginBottom: 14,
     },
-    noFeeCard: {
-        alignItems: 'center',
-        padding: 40,
-        backgroundColor: '#f8f9fa',
-        borderRadius: 16,
-        marginBottom: 20,
+    sectionTitle: { fontSize: 15, fontWeight: '800', color: '#0D1117', letterSpacing: -0.2 },
+    sectionBadge: {
+        backgroundColor: '#EEF4FF', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10,
     },
-    noFeeTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-        color: '#111',
-        marginTop: 16,
-    },
-    noFeeText: {
-        fontSize: 14,
-        color: '#666',
-        marginTop: 8,
-    },
-    section: {
-        marginBottom: 20,
-    },
-    sectionTitle: {
-        fontSize: 17,
-        fontWeight: '700',
-        color: '#111',
-        marginBottom: 12,
-    },
+    sectionBadgeText: { fontSize: 12, fontWeight: '700', color: '#0469ff' },
+
+    // ── Payment cards ─────────────────────────────────────────────────────────
     paymentCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#f8f9fa',
-        borderRadius: 12,
-        padding: 14,
-        marginBottom: 10,
-        gap: 12,
+        flexDirection: 'row', alignItems: 'center',
+        backgroundColor: '#fff', borderRadius: 16, borderWidth: 1,
+        marginBottom: 8, overflow: 'hidden',
+        shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.03, shadowRadius: 4, elevation: 1,
     },
-    paymentIconContainer: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        alignItems: 'center',
-        justifyContent: 'center',
+    cardAccent: { width: 4, alignSelf: 'stretch' },
+    paymentIconBox: {
+        width: 42, height: 42, borderRadius: 21,
+        alignItems: 'center', justifyContent: 'center',
+        marginLeft: 12, marginVertical: 12,
     },
-    paymentInfo: {
-        flex: 1,
+    paymentInfo: { flex: 1, paddingLeft: 10 },
+    paymentAmount: { fontSize: 15, fontWeight: '800', color: '#0D1117' },
+    paymentDate: { fontSize: 12, color: '#8A97B0', marginTop: 2 },
+    statusPill: {
+        paddingHorizontal: 10, paddingVertical: 5,
+        borderRadius: 20, borderWidth: 1,
+        marginRight: 14,
     },
-    paymentAmount: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: '#111',
+    statusPillText: { fontSize: 10, fontWeight: '800' },
+
+    // ── Sticky footer ─────────────────────────────────────────────────────────
+    stickyFooter: {
+        flexDirection: 'row', alignItems: 'center',
+        backgroundColor: '#fff',
+        borderTopWidth: 1, borderTopColor: '#F0F3F8',
+        paddingTop: 12, paddingHorizontal: 16, gap: 14,
     },
-    paymentDate: {
-        fontSize: 13,
-        color: '#94A3B8',
-        marginTop: 2,
+    footerLeft: {},
+    footerLabel: { fontSize: 11, color: '#8A97B0', fontWeight: '500' },
+    footerAmount: { fontSize: 20, fontWeight: '900', color: '#0D1117', letterSpacing: -0.5 },
+    footerPayBtn: {
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+        gap: 8, paddingVertical: 14, borderRadius: 14,
     },
-    statusBadge: {
-        paddingHorizontal: 10,
-        paddingVertical: 5,
-        borderRadius: 8,
-    },
-    statusText: {
-        fontSize: 11,
-        fontWeight: '700',
-    },
-    emptyState: {
-        alignItems: 'center',
-        paddingVertical: 60,
-        gap: 12,
-    },
-    emptyTitle: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: '#111',
-    },
-    emptySubtitle: {
-        fontSize: 14,
-        color: '#666',
-        textAlign: 'center',
-        paddingHorizontal: 32,
-    },
+    footerPayBtnText: { fontSize: 15, fontWeight: '800', color: '#fff' },
 });

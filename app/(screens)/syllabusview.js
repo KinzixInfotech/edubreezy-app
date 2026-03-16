@@ -43,12 +43,15 @@ import * as Sharing from 'expo-sharing';
 
 import api from '../../lib/api';
 import HapticTouchable from '../components/HapticTouch';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function SyllabusScreen() {
     const params = useLocalSearchParams();
     const queryClient = useQueryClient();
+    const insets = useSafeAreaInsets();
+
     const [refreshing, setRefreshing] = useState(false);
     const [filterModalVisible, setFilterModalVisible] = useState(false);
     const [selectedClass, setSelectedClass] = useState('');
@@ -133,15 +136,14 @@ export default function SyllabusScreen() {
             Alert.alert("Error", "Failed to open PDF");
         }
     };
+
     const handleDownloadSyllabus = async (syllabus) => {
         try {
             setDownloading(true);
 
-            // Create file name
             const fileName = syllabus.filename || `Syllabus_${syllabus.Class?.className || 'Unknown'}.pdf`;
 
             if (Platform.OS === 'android') {
-                // For Android: Use Storage Access Framework (works on all versions)
                 const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
 
                 if (!permissions.granted) {
@@ -150,16 +152,13 @@ export default function SyllabusScreen() {
                     return;
                 }
 
-                // Download to temp location first
                 const tempUri = FileSystem.cacheDirectory + fileName;
                 const downloadResult = await FileSystem.downloadAsync(syllabus.fileUrl, tempUri);
 
-                // Read file as base64
                 const fileContent = await FileSystem.readAsStringAsync(downloadResult.uri, {
                     encoding: FileSystem.EncodingType.Base64,
                 });
 
-                // Save to user-selected directory (usually Downloads)
                 const newUri = await FileSystem.StorageAccessFramework.createFileAsync(
                     permissions.directoryUri,
                     fileName,
@@ -227,6 +226,7 @@ export default function SyllabusScreen() {
             );
         }
     };
+
     const handleShareSyllabus = async (syllabus) => {
         try {
             setDownloading(true);
@@ -238,7 +238,6 @@ export default function SyllabusScreen() {
                 return;
             }
 
-            // Download to temp location first
             const fileName = syllabus.filename || `Syllabus_${syllabus.Class?.className}.pdf`;
             const fileUri = FileSystem.cacheDirectory + fileName;
 
@@ -273,7 +272,10 @@ export default function SyllabusScreen() {
             >
                 <Animated.View
                     entering={FadeInDown.duration(300)}
-                    style={styles.actionModalContent}
+                    style={[
+                        styles.actionModalContent,
+                        { paddingBottom: insets.bottom + 8 }
+                    ]}
                 >
                     <View style={styles.actionModalHeader}>
                         <Text style={styles.actionModalTitle}>Choose Action</Text>
@@ -347,7 +349,11 @@ export default function SyllabusScreen() {
             onRequestClose={() => setFilterModalVisible(false)}
         >
             <View style={styles.modalOverlay}>
-                <Animated.View entering={FadeInDown.duration(300)} style={styles.modalContent}>
+                <Animated.View
+                    entering={FadeInDown.duration(300)}
+                    style={styles.modalContent}
+                >
+                    <View style={styles.modalHandle} />
                     <View style={styles.modalHeader}>
                         <Text style={styles.modalTitle}>Filter by Class</Text>
                         <HapticTouchable onPress={() => setFilterModalVisible(false)}>
@@ -357,7 +363,12 @@ export default function SyllabusScreen() {
                         </HapticTouchable>
                     </View>
 
-                    <ScrollView style={styles.modalScroll}>
+                    <ScrollView
+                        style={styles.modalScroll}
+                        contentContainerStyle={{ paddingBottom: insets.bottom + 20 }}
+                        showsVerticalScrollIndicator={false}
+                        bounces={false}
+                    >
                         <HapticTouchable onPress={() => {
                             setSelectedClass('');
                             setFilterModalVisible(false);
@@ -409,7 +420,7 @@ export default function SyllabusScreen() {
     );
 
     return (
-        <View style={styles.container}>
+        <SafeAreaView style={styles.container}>
             <StatusBar style="dark" />
             {/* Header - UNCHANGED */}
             <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
@@ -521,7 +532,7 @@ export default function SyllabusScreen() {
                                         </View>
                                     </HapticTouchable>
 
-                                    {/* NEW: More Options Button */}
+                                    {/* More Options Button */}
                                     <HapticTouchable
                                         onPress={() => openActionModal(syllabus)}
                                         style={styles.syllabusAction}
@@ -554,7 +565,7 @@ export default function SyllabusScreen() {
 
             <FilterModal />
             <ActionModal />
-        </View>
+        </SafeAreaView>
     );
 }
 
@@ -568,7 +579,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 16,
-        paddingTop: 60,
+        paddingTop: 8,
         paddingBottom: 16,
         borderBottomWidth: 1,
         borderBottomColor: '#f0f0f0',
@@ -779,6 +790,16 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         paddingHorizontal: 32,
     },
+    // Modal shared
+    modalHandle: {
+        width: 36,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: '#e0e0e0',
+        alignSelf: 'center',
+        marginTop: 10,
+        marginBottom: 4,
+    },
     // Filter Modal Styles
     modalOverlay: {
         flex: 1,
@@ -837,7 +858,7 @@ const styles = StyleSheet.create({
     filterOptionTextActive: {
         color: '#0469ff',
     },
-    // NEW: Action Modal Styles
+    // Action Modal Styles
     actionModalOverlay: {
         flex: 1,
         backgroundColor: 'rgba(0,0,0,0.5)',

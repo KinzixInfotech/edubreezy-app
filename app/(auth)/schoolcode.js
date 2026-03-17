@@ -269,6 +269,7 @@ export default function SchoolCodePage() {
     try {
       setLocationLoading(true);
 
+      // ─── Permission ───
       if (!skipPermissionRequest) {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
@@ -279,10 +280,9 @@ export default function SchoolCodePage() {
         setLocationPermissionGranted(true);
       }
 
-      // ✅ Use lastKnownPositionAsync first (instant, no timeout risk)
+      // ─── Get Location ───
       let loc = await Location.getLastKnownPositionAsync({});
 
-      // ✅ Fallback to getCurrentPositionAsync with a manual timeout race
       if (!loc) {
         loc = await Promise.race([
           Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Lowest }),
@@ -298,39 +298,68 @@ export default function SchoolCodePage() {
         return;
       }
 
+      // ─── Reverse Geocode ───
       const [place] = await Location.reverseGeocodeAsync({
         latitude: loc.coords.latitude,
         longitude: loc.coords.longitude,
       });
 
-      console.log('📍 Reverse geocode result:', JSON.stringify(place));
+      console.log("📍 PLACE:", place);
 
-      const searchTerms = [
-        place?.city,
-        place?.subregion,
-        place?.region,
-      ].filter(Boolean);
+      // ─── Extract Location (BEST LOGIC) ───
+      const district =
+        place?.district ||
+        place?.subregion ||
+        place?.city ||
+        place?.name;
 
-      const displayCity = place?.city || place?.subregion || place?.region || '';
-      setUserCity(displayCity);
+      const state = place?.region;
 
-      if (searchTerms.length === 0) {
-        setLocationLoading(false);
-        return;
-      }
+      const cleanDistrict = district?.replace(/ district/i, '');
 
-      const allSchools = new Map();
-      for (const term of searchTerms) {
+      let finalSchools = [];
+      let usedLocation = "";
+
+      // ─── 1. Try District + State ───
+      if (cleanDistrict) {
+        const query1 = [cleanDistrict, state].filter(Boolean).join(" ");
+
         try {
-          const res = await api.get(`/schools/search?q=${encodeURIComponent(term)}`);
-          const schools = res.data?.schools || [];
-          schools.forEach((s) => allSchools.set(s.id, s));
+          const res1 = await api.get(
+            `/schools/search?q=${encodeURIComponent(query1)}`
+          );
+
+          finalSchools = res1.data?.schools || [];
+
+          if (finalSchools.length > 0) {
+            usedLocation = cleanDistrict; // ✅ show district
+          }
         } catch (err) {
-          console.log(`⚠️ Search failed for "${term}":`, err.message);
+          console.log("⚠️ District search failed:", err.message);
         }
       }
 
-      setNearbySchools(Array.from(allSchools.values()));
+      // ─── 2. Fallback → State ───
+      if (finalSchools.length === 0 && state) {
+        try {
+          const res2 = await api.get(
+            `/schools/search?q=${encodeURIComponent(state)}`
+          );
+
+          finalSchools = res2.data?.schools || [];
+
+          if (finalSchools.length > 0) {
+            usedLocation = state; // ✅ fallback UI
+          }
+        } catch (err) {
+          console.log("⚠️ State search failed:", err.message);
+        }
+      }
+
+      // ─── Set Data ───
+      setNearbySchools(finalSchools);
+      setUserCity(usedLocation || "Nearby");
+
     } catch (err) {
       console.log('❌ Location fetch error:', err.message);
     } finally {

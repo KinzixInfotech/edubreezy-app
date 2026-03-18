@@ -1,4 +1,4 @@
-// Bus Tracking Screen for Parents - Modern UI, same logic
+// Bus Tracking Screen for Parents - with Live Google Maps
 import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
 import {
     View,
@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
-import Animated, { FadeInDown, FadeInRight, FadeIn } from 'react-native-reanimated';
+import Animated, { FadeInDown, FadeInRight } from 'react-native-reanimated';
 import {
     ArrowLeft,
     RefreshCw,
@@ -26,13 +26,13 @@ import {
     Navigation,
     CheckCircle2,
     AlertCircle,
+    Sun,
+    Moon,
     ZoomIn,
     ZoomOut,
     Locate,
-    ChevronRight,
-    Radio,
-    Gauge,
-    Route,
+    School,
+    Home,
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
@@ -43,28 +43,39 @@ import { calculateETA, resetETAState } from '../../../lib/eta-service';
 import { getSchoolLocation } from '../../../lib/geofence-service';
 import { useRealtimeLocation } from '../../../hooks/useRealtimeLocation';
 import { StatusBar } from 'expo-status-bar';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 
 const { height, width } = Dimensions.get('window');
 
-// Clean map style — minimal, roads only
+// Blinkit-style clean map — hides EVERYTHING except roads
 const CLEAN_MAP_STYLE = [
-    { featureType: "all", elementType: "labels.text", stylers: [{ visibility: "off" }] },
+    // Hide ALL points of interest
+    {
+        featureType: "all",
+        elementType: "labels.text",
+        stylers: [{ visibility: "off" }]
+    },
+    // Hide ALL transit
     { featureType: 'transit', elementType: 'all', stylers: [{ visibility: 'off' }] },
+    // Hide ALL road labels and icons
     { featureType: 'road', elementType: 'labels', stylers: [{ visibility: 'on' }] },
+    // Hide ALL administrative labels (city names, neighborhoods, etc.)
     { featureType: 'administrative', elementType: 'labels', stylers: [{ visibility: 'off' }] },
+    // Hide water labels
     { featureType: 'water', elementType: 'labels', stylers: [{ visibility: 'on' }] },
-    { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#e0e0e0' }] },
-    { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#d0d0d0' }] },
-    { featureType: 'road.arterial', elementType: 'geometry', stylers: [{ color: '#ebebeb' }] },
-    { featureType: 'road.local', elementType: 'geometry', stylers: [{ color: '#f4f4f4' }] },
-    { featureType: 'landscape', elementType: 'geometry', stylers: [{ color: '#f8f8f8' }] },
+    // Subtle road colors
+    { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#dadada' }] },
+    { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#cfcfcf' }] },
+    { featureType: 'road.arterial', elementType: 'geometry', stylers: [{ color: '#e8e8e8' }] },
+    { featureType: 'road.local', elementType: 'geometry', stylers: [{ color: '#f0f0f0' }] },
+    // Very light landscape
+    { featureType: 'landscape', elementType: 'geometry', stylers: [{ color: '#f7f7f7' }] },
+    // Subtle water
     { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#dbeafe' }] },
+    // Subtle parks
     { featureType: 'poi.park', elementType: 'geometry', stylers: [{ visibility: 'on' }, { color: '#e8f5e9' }] },
 ];
 
-// Bus marker
+// Blinkit-inspired bus marker — uses Text for guaranteed Android rendering
 const BusMarkerView = memo(({ status, isStale, licensePlate }) => {
     const bgColor = isStale ? '#F97316' :
         status === 'MOVING' ? '#22C55E' :
@@ -72,6 +83,7 @@ const BusMarkerView = memo(({ status, isStale, licensePlate }) => {
 
     return (
         <View style={{ width: 120, height: 85, alignItems: 'center', justifyContent: 'flex-end' }}>
+            {/* License Plate Badge */}
             {licensePlate ? (
                 <View style={{
                     backgroundColor: '#1E293B',
@@ -84,6 +96,7 @@ const BusMarkerView = memo(({ status, isStale, licensePlate }) => {
                     </Text>
                 </View>
             ) : null}
+            {/* Pin Circle with emoji (guaranteed to render on Android) */}
             <View style={{
                 width: 42, height: 42, borderRadius: 21,
                 backgroundColor: bgColor,
@@ -93,12 +106,14 @@ const BusMarkerView = memo(({ status, isStale, licensePlate }) => {
             }}>
                 <Text style={{ fontSize: 20 }}>🚌</Text>
             </View>
+            {/* Pointer */}
             <View style={{
                 width: 0, height: 0,
                 borderLeftWidth: 7, borderRightWidth: 7, borderTopWidth: 8,
                 borderLeftColor: 'transparent', borderRightColor: 'transparent',
                 borderTopColor: '#fff', marginTop: -2,
             }} />
+            {/* Shadow dot */}
             <View style={{
                 width: 14, height: 5, borderRadius: 7,
                 backgroundColor: 'rgba(0,0,0,0.15)',
@@ -108,37 +123,20 @@ const BusMarkerView = memo(({ status, isStale, licensePlate }) => {
     );
 });
 
-// ── Section card wrapper ──────────────────────────────────────────────────────
-const Card = ({ children, style }) => (
-    <View style={[styles.card, style]}>{children}</View>
-);
-
-// ── Info row inside card ──────────────────────────────────────────────────────
-const InfoRow = ({ icon: Icon, iconColor = '#64748B', label, value, valueStyle }) => (
-    <View style={styles.infoRow}>
-        <View style={[styles.infoIconBox, { backgroundColor: iconColor + '15' }]}>
-            <Icon size={15} color={iconColor} />
-        </View>
-        <View style={styles.infoRowText}>
-            <Text style={styles.infoLabel}>{label}</Text>
-            <Text style={[styles.infoValue, valueStyle]}>{value}</Text>
-        </View>
-    </View>
-);
-
 export default function BusTrackingScreen() {
     const params = useLocalSearchParams();
     const queryClient = useQueryClient();
-    const insets = useSafeAreaInsets();
     const [refreshing, setRefreshing] = useState(false);
     const mapRef = useRef(null);
     const markerRef = useRef(null);
     const [routePolyline, setRoutePolyline] = useState(null);
     const [googleETA, setGoogleETA] = useState(null);
     const [zoomLevel, setZoomLevel] = useState(0.015);
-    const [schoolLocation, setSchoolLocation] = useState(null);
+    const [schoolLocation, setSchoolLocation] = useState(null); // Cost-optimized ETA result
+    // true on mount so marker renders, then false to stop flashing on every GPS tick
     const [tracksViewChanges, setTracksViewChanges] = useState(true);
 
+    // Parse child data from params
     const childData = params.childData ? JSON.parse(params.childData) : null;
 
     const { data: userData } = useQuery({
@@ -149,9 +147,11 @@ export default function BusTrackingScreen() {
         },
         staleTime: Infinity,
     });
+    console.log("profile", userData);
 
     const schoolId = userData?.schoolId;
 
+    // Fetch child's transport assignment - cached for 5 mins (doesn't change often)
     const { data: assignmentData, isLoading: assignmentLoading } = useQuery({
         queryKey: ['child-transport', schoolId, childData?.studentId],
         queryFn: async () => {
@@ -159,23 +159,31 @@ export default function BusTrackingScreen() {
             return res.data;
         },
         enabled: !!schoolId && !!childData?.studentId,
-        staleTime: 1000 * 60 * 5,
-        gcTime: 1000 * 60 * 30,
+        staleTime: 1000 * 60 * 5, // 5 minutes - route assignments rarely change
+        gcTime: 1000 * 60 * 30, // Keep in cache 30 mins
     });
 
     const assignment = assignmentData?.assignments?.[0];
     const vehicleId = assignment?.vehicle?.id || assignment?.route?.vehicle?.id;
 
+    // Fetch school location for map marker
     useEffect(() => {
         if (schoolId) {
+            console.log('[BusTracking] Fetching school location for schoolId:', schoolId);
             getSchoolLocation(schoolId, API_BASE_URL)
                 .then(loc => {
+                    console.log('[BusTracking] School location result:', JSON.stringify(loc));
                     if (loc?.latitude && loc?.longitude) setSchoolLocation(loc);
+                    else console.warn('[BusTracking] School location missing lat/lng:', loc);
                 })
-                .catch(() => { });
+                .catch((err) => {
+                    console.error('[BusTracking] School location fetch failed:', err);
+                });
         }
     }, [schoolId]);
 
+    // tracksViewChanges: true on mount → false after render to stop flashing.
+    // Re-enable briefly when status changes so color update is captured.
     useEffect(() => {
         const t = setTimeout(() => setTracksViewChanges(false), 500);
         return () => clearTimeout(t);
@@ -187,6 +195,7 @@ export default function BusTrackingScreen() {
         return () => clearTimeout(t);
     }, [status]);
 
+    // Fetch bus location metadata once (no polling — Realtime handles updates)
     const { data: locationData, isLoading: locationLoading, refetch } = useQuery({
         queryKey: ['bus-location-meta', vehicleId],
         queryFn: async () => {
@@ -195,9 +204,11 @@ export default function BusTrackingScreen() {
             return res.data;
         },
         enabled: !!vehicleId && vehicleId !== 'undefined',
-        staleTime: 1000 * 60 * 5,
+        staleTime: 1000 * 60 * 5, // Cache for 5 min (metadata doesn't change often)
+        // NO refetchInterval — Supabase Realtime handles live location
     });
 
+    // 🔴 REALTIME: Subscribe to live vehicle location via Supabase
     const {
         location: realtimeLocation,
         isConnected: isRealtimeConnected,
@@ -205,20 +216,24 @@ export default function BusTrackingScreen() {
     } = useRealtimeLocation(vehicleId, { enabled: !!vehicleId && vehicleId !== 'undefined' });
 
     const vehicle = locationData?.vehicle || assignment?.vehicle || assignment?.route?.vehicle;
+    // Use realtime location if available, fall back to API-fetched location
     const location = realtimeLocation || locationData?.currentLocation;
     const activeTrip = locationData?.activeTrip;
     const status = isRealtimeConnected && realtimeLocation ? 'LIVE' : (locationData?.status || 'OFFLINE');
     const secondsAgo = realtimeSecondsAgo ?? locationData?.secondsAgo;
     const stops = activeTrip?.route?.busStops || [];
 
+    // EDGE CASE: Driver/Conductor from permanent assignment if no active trip
     const driver = locationData?.driver || activeTrip?.driver || assignment?.route?.vehicle?.routeAssignments?.[0]?.driver;
     const conductor = locationData?.conductor || activeTrip?.conductor || assignment?.route?.vehicle?.routeAssignments?.[0]?.conductor;
+    const schoolProfilePicture = locationData?.schoolProfilePicture;
 
+    // Edge Case #19: Detect stale data despite "MOVING" status
     const isStale = secondsAgo > 60 && status === 'MOVING';
-    const busIsActive = status === 'MOVING' || status === 'IDLE';
 
+    // Haversine formula to calculate distance in km
     const getDistanceKm = (lat1, lon1, lat2, lon2) => {
-        const R = 6371;
+        const R = 6371; // Earth radius in km
         const dLat = (lat2 - lat1) * Math.PI / 180;
         const dLon = (lon2 - lon1) * Math.PI / 180;
         const a = Math.sin(dLat / 2) ** 2 +
@@ -227,30 +242,42 @@ export default function BusTrackingScreen() {
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     };
 
+    // Calculate ETA to child's stop
     const childStop = assignment?.stop;
+    console.log('[BusTracking] childStop:', childStop?.name, childStop?.latitude, childStop?.longitude);
+    console.log('[BusTracking] assignment:', assignment?.id, 'vehicle:', vehicle?.licensePlate);
     const distanceToStop = (location?.latitude && childStop?.latitude)
         ? getDistanceKm(location.latitude, location.longitude, childStop.latitude, childStop.longitude)
         : null;
 
-    const realtimeSpeed = location?.speed;
-    const speedKmh = realtimeSpeed && realtimeSpeed > 0.5 ? realtimeSpeed * 3.6 : 25;
-    const roadDistance = distanceToStop ? distanceToStop * 1.3 : null;
+    // Estimate arrival time — prefer calculateETA result (googleETA), fall back to inline
+    const realtimeSpeed = location?.speed; // m/s from GPS / Realtime
+    const speedKmh = realtimeSpeed && realtimeSpeed > 0.5 ? realtimeSpeed * 3.6 : 25; // Default 25 km/h
+    const roadDistance = distanceToStop ? distanceToStop * 1.3 : null; // 1.3x road factor
     const inlineEtaMinutes = (roadDistance && speedKmh > 0)
         ? Math.round((roadDistance / speedKmh) * 60)
         : null;
+    // Use googleETA (from calculateETA with 3-tier logic) when available, else inline
     const etaMinutes = googleETA?.etaMinutes ?? inlineEtaMinutes;
+
+    // Calculate arrival time
     const arrivalTime = etaMinutes
         ? new Date(Date.now() + etaMinutes * 60 * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         : null;
 
+    // Auto-fit map to show relevant markers on initial load
     useEffect(() => {
         if (!mapRef.current) return;
+
         if (busIsActive && location?.latitude && childStop?.latitude) {
+            // Active: fit to bus + child stop + optional school
             const coords = [
                 { latitude: location.latitude, longitude: location.longitude },
                 { latitude: childStop.latitude, longitude: childStop.longitude },
             ];
-            if (schoolLocation?.latitude) coords.push({ latitude: schoolLocation.latitude, longitude: schoolLocation.longitude });
+            if (schoolLocation?.latitude) {
+                coords.push({ latitude: schoolLocation.latitude, longitude: schoolLocation.longitude });
+            }
             setTimeout(() => {
                 mapRef.current?.fitToCoordinates(coords, {
                     edgePadding: { top: 80, right: 60, bottom: 60, left: 60 },
@@ -258,8 +285,11 @@ export default function BusTrackingScreen() {
                 });
             }, 500);
         } else if (childStop?.latitude) {
+            // Offline: fit to home + school (if available), else just center on home
             const coords = [{ latitude: childStop.latitude, longitude: childStop.longitude }];
-            if (schoolLocation?.latitude) coords.push({ latitude: schoolLocation.latitude, longitude: schoolLocation.longitude });
+            if (schoolLocation?.latitude) {
+                coords.push({ latitude: schoolLocation.latitude, longitude: schoolLocation.longitude });
+            }
             setTimeout(() => {
                 if (coords.length > 1) {
                     mapRef.current?.fitToCoordinates(coords, {
@@ -278,6 +308,7 @@ export default function BusTrackingScreen() {
         }
     }, [!!location, !!childStop, !!schoolLocation, busIsActive]);
 
+    // Track bus position only when active
     useEffect(() => {
         if (busIsActive && location?.latitude && location?.longitude && mapRef.current) {
             mapRef.current.animateToRegion({
@@ -291,14 +322,26 @@ export default function BusTrackingScreen() {
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
-        await refetch();
-        setRefreshing(false);
-    }, [refetch]);
+        try {
+            await Promise.all([
+                queryClient.invalidateQueries({ queryKey: ['child-transport', schoolId, childData?.studentId] }),
+                queryClient.invalidateQueries({ queryKey: ['bus-location-meta', vehicleId] })
+            ]);
+            await refetch();
+        } catch (error) {
+            console.error('Refresh failed:', error);
+        } finally {
+            setRefreshing(false);
+        }
+    }, [queryClient, schoolId, childData?.studentId, vehicleId, refetch]);
 
     const handleCall = (phoneNumber) => {
-        if (phoneNumber) Linking.openURL(`tel:${phoneNumber}`);
+        if (phoneNumber) {
+            Linking.openURL(`tel:${phoneNumber}`);
+        }
     };
 
+    // Zoom controls
     const handleZoomIn = async () => {
         if (!mapRef.current) return;
         try {
@@ -315,6 +358,7 @@ export default function BusTrackingScreen() {
         } catch (e) { }
     };
 
+    // Focus on bus
     const focusOnBus = () => {
         if (!location?.latitude || !mapRef.current) return;
         mapRef.current.animateToRegion({
@@ -327,763 +371,1017 @@ export default function BusTrackingScreen() {
 
     const isLoading = assignmentLoading || locationLoading;
 
+    // Format time ago with helpful messages for offline status
     const formatTimeAgo = (seconds, busStatus) => {
-        if (!seconds && seconds !== 0) return busStatus === 'OFFLINE' ? 'No data' : 'N/A';
+        if (!seconds && seconds !== 0) {
+            return busStatus === 'OFFLINE' ? 'No data yet' : 'N/A';
+        }
         if (seconds < 60) return `${seconds}s ago`;
         if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
         return `${Math.floor(seconds / 3600)}h ago`;
     };
 
+    // ====== BLINKIT-STYLE POLYLINE LOGIC ======
+    // When bus is ACTIVE (MOVING/IDLE) → solid blue road-following polyline from bus → child stop
+    // When bus is OFFLINE → dashed line from school → child stop
+    const busIsActive = status === 'MOVING' || status === 'IDLE';
+
+    // Fetch Google Directions route (only when bus is active)
     useEffect(() => {
         if (!busIsActive || !location?.latitude || !childStop?.latitude) {
             setRoutePolyline(null);
             return;
         }
+
         const origin = { latitude: location.latitude, longitude: location.longitude };
         const destination = { latitude: childStop.latitude, longitude: childStop.longitude };
         const cacheKey = `route_${Math.round(origin.latitude * 100)}_${Math.round(origin.longitude * 100)}_${Math.round(destination.latitude * 100)}`;
+
         fetchRouteDirections([origin, destination], cacheKey)
-            .then(result => { if (result?.polyline?.length) setRoutePolyline(result.polyline); })
+            .then(result => {
+                if (result?.polyline?.length) {
+                    setRoutePolyline(result.polyline);
+                }
+            })
             .catch(() => { });
+
         return () => resetETAState();
     }, [busIsActive, location?.latitude, location?.longitude, childStop?.latitude]);
 
+    // Cost-optimized ETA calculation (Google Distance Matrix within 3km, speed/haversine fallback)
     useEffect(() => {
-        if (!location?.latitude || !childStop?.latitude) { setGoogleETA(null); return; }
+        if (!location?.latitude || !childStop?.latitude) {
+            setGoogleETA(null);
+            return;
+        }
         calculateETA(
             { latitude: location.latitude, longitude: location.longitude, speed: location.speed },
             childStop
-        ).then(eta => setGoogleETA(eta)).catch(() => setGoogleETA(null));
+        )
+            .then(eta => setGoogleETA(eta))
+            .catch(() => setGoogleETA(null));
     }, [location?.latitude, location?.longitude, childStop?.id]);
 
-    // Status config
-    const getStatusCfg = () => {
-        if (isStale) return { label: 'Delayed', color: '#F97316', bg: '#FFF7ED', border: '#FED7AA', dot: '#F97316' };
-        if (status === 'MOVING') return { label: 'Moving', color: '#16A34A', bg: '#F0FDF4', border: '#BBF7D0', dot: '#16A34A' };
-        if (status === 'IDLE') return { label: 'Idle', color: '#D97706', bg: '#FFFBEB', border: '#FDE68A', dot: '#D97706' };
-        return { label: 'Offline', color: '#DC2626', bg: '#FFF1F2', border: '#FECDD3', dot: '#DC2626' };
-    };
-    const statusCfg = getStatusCfg();
-
+    // No child data error state
     if (!childData) {
         return (
-            <SafeAreaView style={styles.container}>
-                <StatusBar style="dark" />
+            <View style={styles.container}>
                 <View style={styles.header}>
                     <HapticTouchable onPress={() => router.back()}>
-                        <View style={styles.backButton}><ArrowLeft size={22} color="#111" /></View>
+                        <View style={styles.backButton}>
+                            <ArrowLeft size={24} color="#111" />
+                        </View>
                     </HapticTouchable>
                     <Text style={styles.headerTitle}>Bus Tracking</Text>
                     <View style={{ width: 40 }} />
                 </View>
                 <View style={styles.centerContent}>
                     <AlertCircle size={48} color="#EF4444" />
-                    <Text style={styles.emptyTitle}>No student selected</Text>
+                    <Text style={styles.errorText}>No student selected</Text>
                 </View>
-            </SafeAreaView>
+            </View>
         );
     }
 
-    return (
-        <View style={[styles.container, { paddingTop: insets.top }]}>
-            <StatusBar style="dark" />
 
-            {/* ── Header ─────────────────────────────────────────────────── */}
-            <Animated.View entering={FadeInDown.duration(350)} style={styles.header}>
+
+
+    return (
+        <View style={styles.container}>
+            <StatusBar style='dark' />
+            {/* Header */}
+            <View style={styles.header}>
                 <HapticTouchable onPress={() => router.back()}>
-                    <View style={styles.backButton}><ArrowLeft size={22} color="#0D1117" /></View>
+                    <View style={styles.backButton}>
+                        <ArrowLeft size={24} color="#111" />
+                    </View>
                 </HapticTouchable>
                 <View style={styles.headerCenter}>
                     <Text style={styles.headerTitle}>{childData.name}'s Bus</Text>
                     {vehicle && <Text style={styles.headerSubtitle}>{vehicle.licensePlate}</Text>}
                 </View>
                 <HapticTouchable onPress={onRefresh} disabled={refreshing}>
-                    <View style={[styles.refreshButton, refreshing && { backgroundColor: '#DBEAFE' }]}>
-                        {refreshing
-                            ? <ActivityIndicator size="small" color="#0469ff" />
-                            : <RefreshCw size={18} color="#0469ff" />}
+                    <View style={styles.refreshButton}>
+                        {refreshing ? (
+                            <ActivityIndicator size="small" color="#2563EB" />
+                        ) : (
+                            <RefreshCw size={20} color="#2563EB" />
+                        )}
                     </View>
                 </HapticTouchable>
-            </Animated.View>
+            </View>
 
             {isLoading && !locationData ? (
-                <View style={styles.centerContent}>
-                    <ActivityIndicator size="large" color="#0469ff" />
-                    <Text style={styles.loadingText}>Locating bus…</Text>
+                <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color="#2563EB" />
+                    <Text style={styles.loadingText}>Locating bus...</Text>
                 </View>
             ) : !assignment && !isLoading ? (
                 <View style={styles.centerContent}>
-                    <View style={styles.emptyIconWrap}>
-                        <Bus size={40} color="#CBD5E1" />
-                    </View>
+                    <Bus size={64} color="#CBD5E1" />
                     <Text style={styles.emptyTitle}>No Bus Assigned</Text>
-                    <Text style={styles.emptyText}>{childData.name} doesn't have an assigned bus route yet.</Text>
+                    <Text style={styles.emptyText}>
+                        {childData.name} does not have an assigned bus route yet.
+                    </Text>
                 </View>
             ) : (
-                <ScrollView
-                    style={{ flex: 1 }}
-                    showsVerticalScrollIndicator={false}
-                    contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}
-                    refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" />}
-                >
-                    {/* ── Map ──────────────────────────────────────────────── */}
-                    <View style={styles.mapWrapper}>
-                        {!location ? (
-                            <View style={styles.mapPlaceholder}>
-                                <View style={styles.mapPlaceholderInner}>
-                                    <MapPin size={30} color="#94A3B8" />
-                                    <Text style={styles.mapPlaceholderTitle}>Awaiting location…</Text>
-                                    <Text style={styles.mapPlaceholderSub}>Bus hasn't sent data yet</Text>
+                <View style={styles.contentContainer}>
+                    {/* Map View */}
+                    <ScrollView
+                        style={styles.detailsContainer}
+                        showsVerticalScrollIndicator={false}
+                        contentContainerStyle={{ paddingBottom: 40 }}
+                        refreshControl={
+                            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#2563EB']} />
+                        }
+                    >
+                        <View style={{ borderRadius: 10, marginBottom: 20, overflow: 'hidden', borderWidth: 1, borderColor: '#E2E8F0' }}>
+                            <View style={styles.mapContainer}>
+                                {!location ? (
+                                    <View style={styles.mapPlaceholder}>
+                                        <View style={styles.mapOverlay}>
+                                            <MapPin size={32} color="#64748B" />
+                                            <Text style={styles.mapOverlayTitle}>Waiting for live location...</Text>
+                                            <Text style={styles.mapOverlayText}>Bus has not sent location data yet.</Text>
+                                        </View>
+                                    </View>
+                                ) : (
+                                    <MapView
+                                        ref={mapRef}
+                                        provider={PROVIDER_GOOGLE}
+                                        googleRenderer={'LEGACY'}
+                                        style={styles.map}
+                                        mapType="standard"
+                                        customMapStyle={CLEAN_MAP_STYLE}
+                                        showsPointsOfInterest={false}
+                                        showsBuildings={false}
+                                        showsTraffic={false}
+                                        showsIndoors={false}
+                                        toolbarEnabled={false}
+                                        initialRegion={{
+                                            latitude: location.latitude,
+                                            longitude: location.longitude,
+                                            latitudeDelta: 0.015,
+                                            longitudeDelta: 0.015,
+                                        }}
+                                        showsUserLocation={false}
+                                        showsMyLocationButton={false}
+                                        rotateEnabled={false}
+                                        onRegionChangeComplete={(region) => setZoomLevel(region.latitudeDelta)}
+                                    >
+                                        {/* ====== BUS MARKER ====== */}
+                                        {busIsActive && (
+                                            <Marker
+                                                ref={markerRef}
+                                                coordinate={{
+                                                    latitude: location.latitude,
+                                                    longitude: location.longitude,
+                                                }}
+                                                anchor={{ x: 0.5, y: 0.5 }}
+                                                tracksViewChanges={tracksViewChanges}
+                                                title={`🚌 ${vehicle?.licensePlate || 'Bus'}`}
+                                                description={status === 'MOVING' ? 'On the way' : 'Idle'}
+                                            >
+                                                <View style={{
+                                                    width: 36, height: 36, borderRadius: 18,
+                                                    backgroundColor: isStale ? '#F97316' : status === 'MOVING' ? '#22C55E' : status === 'IDLE' ? '#F59E0B' : '#EF4444',
+                                                    alignItems: 'center', justifyContent: 'center',
+                                                    borderWidth: 2, borderColor: '#fff',
+                                                    elevation: 5,
+                                                }}>
+                                                    <Text style={{ fontSize: 18, lineHeight: 22, textAlign: 'center', textAlignVertical: 'center' }}>🚌</Text>
+                                                </View>
+                                            </Marker>
+                                        )}
+
+                                        {/* ====== HOME / STOP MARKER (native pin) ====== */}
+                                        {childStop?.latitude && childStop?.longitude && (
+                                            <Marker
+                                                coordinate={{ latitude: childStop.latitude, longitude: childStop.longitude }}
+                                                tracksViewChanges={false}
+                                                pinColor="blue"
+                                                title={`🏠 ${childStop.name || 'Stop'}`}
+                                                description="Child's bus stop"
+                                            />
+                                        )}
+
+                                        {/* ====== POLYLINES ====== */}
+                                        {busIsActive && routePolyline?.length > 1 && (
+                                            <Polyline
+                                                coordinates={routePolyline}
+                                                strokeColor="rgba(0,0,0,0.08)"
+                                                strokeWidth={12}
+                                            />
+                                        )}
+                                        {busIsActive && routePolyline?.length > 1 && (
+                                            <Polyline
+                                                coordinates={routePolyline}
+                                                strokeColor="#2563EB"
+                                                strokeWidth={5}
+                                            />
+                                        )}
+                                        {busIsActive && !routePolyline && childStop?.latitude && (
+                                            <Polyline
+                                                coordinates={[
+                                                    { latitude: location.latitude, longitude: location.longitude },
+                                                    { latitude: childStop.latitude, longitude: childStop.longitude },
+                                                ]}
+                                                strokeColor="#2563EB"
+                                                strokeWidth={4}
+                                            />
+                                        )}
+                                        {!busIsActive && childStop?.latitude && schoolLocation?.latitude && (
+                                            <Polyline
+                                                coordinates={[
+                                                    { latitude: schoolLocation.latitude, longitude: schoolLocation.longitude },
+                                                    { latitude: childStop.latitude, longitude: childStop.longitude },
+                                                ]}
+                                                strokeColor="#94A3B8"
+                                                strokeWidth={3}
+                                                lineDashPattern={[12, 6]}
+                                            />
+                                        )}
+
+                                        {/* ====== SCHOOL MARKER (native pin) ====== */}
+                                        {schoolLocation?.latitude && schoolLocation?.longitude && (
+                                            <Marker
+                                                coordinate={{
+                                                    latitude: Number(schoolLocation.latitude),
+                                                    longitude: Number(schoolLocation.longitude),
+                                                }}
+                                                tracksViewChanges={false}
+                                                pinColor="black"
+                                                title={`🏫 ${userData?.school?.name || 'School'}`}
+                                                description="School location"
+                                            />
+                                        )}
+                                    </MapView>
+                                )}
+
+                                {/* Status Overlay */}
+                                <View style={styles.statusOverlay}>
+                                    <View style={[styles.statusBadge,
+                                    isStale ? styles.statusBadgeOffline :
+                                        status === 'MOVING' ? styles.statusBadgeMoving :
+                                            status === 'IDLE' ? styles.statusBadgeIdle :
+                                                styles.statusBadgeOffline
+                                    ]}>
+                                        <View style={[styles.statusDot,
+                                        isStale ? styles.statusDotOffline :
+                                            status === 'MOVING' ? styles.statusDotMoving :
+                                                status === 'IDLE' ? styles.statusDotIdle :
+                                                    styles.statusDotOffline
+                                        ]} />
+                                        <Text style={[styles.statusText,
+                                        isStale ? styles.statusTextOffline :
+                                            status === 'MOVING' ? styles.statusTextMoving :
+                                                status === 'IDLE' ? styles.statusTextIdle :
+                                                    styles.statusTextOffline
+                                        ]}>
+                                            {isStale ? 'Delayed Update' :
+                                                status === 'MOVING' ? 'Moving' :
+                                                    status === 'IDLE' ? 'Idle' : 'Offline'}
+                                        </Text>
+                                    </View>
+                                    <View style={styles.timeBadge}>
+                                        <Clock size={12} color="#64748B" />
+                                        <Text style={styles.timeText}>Updated: {formatTimeAgo(secondsAgo, status)}</Text>
+                                    </View>
+                                </View>
+
+                                {/* Map Controls — Zoom In/Out + Focus on Bus */}
+                                <View style={styles.mapControlsContainer}>
+                                    <HapticTouchable onPress={handleZoomIn} style={styles.mapControlBtn}>
+                                        <ZoomIn size={18} color="#334155" />
+                                    </HapticTouchable>
+                                    <HapticTouchable onPress={handleZoomOut} style={styles.mapControlBtn}>
+                                        <ZoomOut size={18} color="#334155" />
+                                    </HapticTouchable>
+                                    {location && (
+                                        <HapticTouchable onPress={focusOnBus} style={[styles.mapControlBtn, { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' }]}>
+                                            <Locate size={18} color="#2563EB" />
+                                        </HapticTouchable>
+                                    )}
                                 </View>
                             </View>
-                        ) : (
-                            <MapView
-                                ref={mapRef}
-                                provider={PROVIDER_GOOGLE}
-                                googleRenderer={'LEGACY'}
-                                style={StyleSheet.absoluteFill}
-                                mapType="standard"
-                                customMapStyle={CLEAN_MAP_STYLE}
-                                showsPointsOfInterest={false}
-                                showsBuildings={false}
-                                showsTraffic={false}
-                                showsIndoors={false}
-                                toolbarEnabled={false}
-                                initialRegion={{
-                                    latitude: location.latitude,
-                                    longitude: location.longitude,
-                                    latitudeDelta: 0.015,
-                                    longitudeDelta: 0.015,
-                                }}
-                                showsUserLocation={false}
-                                showsMyLocationButton={false}
-                                rotateEnabled={false}
-                                onRegionChangeComplete={(region) => setZoomLevel(region.latitudeDelta)}
-                            >
-                                {busIsActive && (
-                                    <Marker
-                                        ref={markerRef}
-                                        coordinate={{ latitude: location.latitude, longitude: location.longitude }}
-                                        anchor={{ x: 0.5, y: 0.5 }}
-                                        tracksViewChanges={tracksViewChanges}
-                                        title={`🚌 ${vehicle?.licensePlate || 'Bus'}`}
-                                        description={status === 'MOVING' ? 'On the way' : 'Idle'}
-                                    >
-                                        <View style={{
-                                            width: 36, height: 36, borderRadius: 18,
-                                            backgroundColor: isStale ? '#F97316' : status === 'MOVING' ? '#22C55E' : '#F59E0B',
-                                            alignItems: 'center', justifyContent: 'center',
-                                            borderWidth: 2.5, borderColor: '#fff', elevation: 6,
-                                        }}>
-                                            <Text style={{ fontSize: 18, lineHeight: 22, textAlign: 'center', textAlignVertical: 'center' }}>🚌</Text>
-                                        </View>
-                                    </Marker>
-                                )}
+                        </View>
 
-                                {childStop?.latitude && childStop?.longitude && (
-                                    <Marker
-                                        coordinate={{ latitude: childStop.latitude, longitude: childStop.longitude }}
-                                        tracksViewChanges={false}
-                                        pinColor="blue"
-                                        title={`🏠 ${childStop.name || 'Stop'}`}
-                                        description="Child's bus stop"
-                                    />
-                                )}
+                        {/* Info Cards ScrollView */}
 
-                                {busIsActive && routePolyline?.length > 1 && (
-                                    <Polyline coordinates={routePolyline} strokeColor="rgba(4,105,255,0.15)" strokeWidth={14} />
-                                )}
-                                {busIsActive && routePolyline?.length > 1 && (
-                                    <Polyline coordinates={routePolyline} strokeColor="#0469ff" strokeWidth={4} />
-                                )}
-                                {busIsActive && !routePolyline && childStop?.latitude && (
-                                    <Polyline
-                                        coordinates={[
-                                            { latitude: location.latitude, longitude: location.longitude },
-                                            { latitude: childStop.latitude, longitude: childStop.longitude },
-                                        ]}
-                                        strokeColor="#0469ff" strokeWidth={4}
-                                    />
-                                )}
-                                {!busIsActive && childStop?.latitude && schoolLocation?.latitude && (
-                                    <Polyline
-                                        coordinates={[
-                                            { latitude: schoolLocation.latitude, longitude: schoolLocation.longitude },
-                                            { latitude: childStop.latitude, longitude: childStop.longitude },
-                                        ]}
-                                        strokeColor="#94A3B8" strokeWidth={3} lineDashPattern={[12, 6]}
-                                    />
-                                )}
-
-                                {schoolLocation?.latitude && schoolLocation?.longitude && (
-                                    <Marker
-                                        coordinate={{ latitude: Number(schoolLocation.latitude), longitude: Number(schoolLocation.longitude) }}
-                                        tracksViewChanges={false}
-                                        pinColor="black"
-                                        title={`🏫 ${userData?.school?.name || 'School'}`}
-                                        description="School location"
-                                    />
-                                )}
-                            </MapView>
+                        {/* Driver Card */}
+                        {driver && (
+                            <View style={styles.card}>
+                                <View style={styles.cardHeader}>
+                                    <User size={16} color="#64748B" />
+                                    <Text style={styles.cardTitle}>Driver</Text>
+                                    {!activeTrip && <Text style={styles.badgeText}>Assigned</Text>}
+                                </View>
+                                <View style={styles.driverRow}>
+                                    <View style={styles.driverAvatar}>
+                                        {driver.profilePicture && driver.profilePicture !== 'default.png' ? (
+                                            <Image
+                                                source={{ uri: driver.profilePicture }}
+                                                style={styles.driverAvatarImage}
+                                            />
+                                        ) : (
+                                            <Text style={styles.driverInitials}>{driver.name?.charAt(0) || 'D'}</Text>
+                                        )}
+                                    </View>
+                                    <View style={styles.driverInfo}>
+                                        <Text style={styles.driverName}>{driver.name}</Text>
+                                        <Text style={styles.driverLicense}>Lic: {driver.licenseNumber || 'N/A'}</Text>
+                                    </View>
+                                    {driver.contactNumber && (
+                                        <HapticTouchable onPress={() => handleCall(driver.contactNumber)}>
+                                            <View style={styles.callButton}>
+                                                <Phone size={20} color="#fff" />
+                                            </View>
+                                        </HapticTouchable>
+                                    )}
+                                </View>
+                            </View>
                         )}
 
-                        {/* Status pill — top left */}
-                        <View style={styles.mapTopRow}>
-                            <View style={[styles.statusPill, { backgroundColor: statusCfg.bg, borderColor: statusCfg.border }]}>
-                                <View style={[styles.statusDot, { backgroundColor: statusCfg.dot }]} />
-                                <Text style={[styles.statusPillText, { color: statusCfg.color }]}>{statusCfg.label}</Text>
-                            </View>
-                            <View style={styles.timePill}>
-                                <Clock size={11} color="#64748B" />
-                                <Text style={styles.timePillText}>{formatTimeAgo(secondsAgo, status)}</Text>
-                            </View>
-                        </View>
-
-                        {/* Map controls — bottom right */}
-                        <View style={styles.mapControls}>
-                            <HapticTouchable onPress={handleZoomIn}>
-                                <View style={styles.mapCtrlBtn}><ZoomIn size={17} color="#334155" /></View>
-                            </HapticTouchable>
-                            <HapticTouchable onPress={handleZoomOut}>
-                                <View style={styles.mapCtrlBtn}><ZoomOut size={17} color="#334155" /></View>
-                            </HapticTouchable>
-                            {location && (
-                                <HapticTouchable onPress={focusOnBus}>
-                                    <View style={[styles.mapCtrlBtn, { backgroundColor: '#EEF4FF', borderColor: '#BFDBFE' }]}>
-                                        <Locate size={17} color="#0469ff" />
-                                    </View>
-                                </HapticTouchable>
-                            )}
-                        </View>
-                    </View>
-
-                    {/* ── ETA Banner ─────────────────────────────────────────── */}
-                    {status === 'MOVING' && (googleETA || etaMinutes !== null) && (
-                        <Animated.View entering={FadeInDown.delay(100).duration(400)}>
-                            <LinearGradient
-                                colors={['#0469ff', '#0347c4']}
-                                start={{ x: 0, y: 0 }}
-                                end={{ x: 1, y: 1 }}
-                                style={styles.etaBanner}
-                            >
-                                <View style={styles.etaBannerDeco} />
-                                <View style={styles.etaRow}>
-                                    <View style={styles.etaCell}>
-                                        <Text style={styles.etaCellVal}>
-                                            {googleETA ? `${(googleETA.distance / 1000).toFixed(1)}` : distanceToStop?.toFixed(1)}
-                                            <Text style={styles.etaCellUnit}> km</Text>
-                                        </Text>
-                                        <Text style={styles.etaCellLabel}>Distance</Text>
-                                    </View>
-                                    <View style={styles.etaSep} />
-                                    <View style={styles.etaCell}>
-                                        <Text style={styles.etaCellVal}>
-                                            {googleETA ? googleETA.etaMinutes : etaMinutes}
-                                            <Text style={styles.etaCellUnit}> min</Text>
-                                        </Text>
-                                        <Text style={styles.etaCellLabel}>ETA</Text>
-                                    </View>
-                                    <View style={styles.etaSep} />
-                                    <View style={styles.etaCell}>
-                                        <Text style={styles.etaCellVal}>{arrivalTime}</Text>
-                                        <Text style={styles.etaCellLabel}>Arrives at</Text>
-                                    </View>
-                                </View>
-                                <View style={styles.etaFooter}>
-                                    <MapPin size={11} color="rgba(255,255,255,0.7)" />
-                                    <Text style={styles.etaFooterText}>
-                                        To: {childStop?.name || 'Your Stop'}
-                                    </Text>
+                        {/* ETA Card - Show when bus is moving and we have ETA data */}
+                        {status === 'MOVING' && (googleETA || etaMinutes !== null) && (
+                            <View style={styles.etaCard}>
+                                <View style={styles.etaHeader}>
+                                    <Clock size={20} color="#2563EB" />
+                                    <Text style={styles.etaTitle}>Arriving Soon!</Text>
                                     {googleETA?.source && (
-                                        <View style={styles.etaSourceBadge}>
-                                            <Text style={styles.etaSourceText}>
+                                        <View style={{ backgroundColor: googleETA.source === 'google' ? '#DBEAFE' : '#F3F4F6', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8, marginLeft: 'auto' }}>
+                                            <Text style={{ fontSize: 9, fontWeight: '600', color: googleETA.source === 'google' ? '#2563EB' : '#6B7280' }}>
                                                 {googleETA.source === 'google' ? '🚦 Traffic' : googleETA.source === 'speed' ? '📡 GPS' : '📏 Est.'}
                                             </Text>
                                         </View>
                                     )}
                                 </View>
-                            </LinearGradient>
-                        </Animated.View>
-                    )}
-
-                    {/* ── Cards ─────────────────────────────────────────────── */}
-                    <View style={styles.cardsArea}>
-
-                        {/* Driver */}
-                        {driver ? (
-                            <Animated.View entering={FadeInDown.delay(140).duration(400)}>
-                                <Card>
-                                    <View style={styles.cardHeader}>
-                                        <View style={styles.cardHeaderLeft}>
-                                            <View style={[styles.cardIconBg, { backgroundColor: '#EEF4FF' }]}>
-                                                <User size={15} color="#0469ff" />
-                                            </View>
-                                            <Text style={styles.cardTitle}>Driver</Text>
-                                        </View>
-                                        {!activeTrip && (
-                                            <View style={styles.assignedBadge}>
-                                                <Text style={styles.assignedBadgeText}>Assigned</Text>
-                                            </View>
-                                        )}
+                                <View style={styles.etaContent}>
+                                    <View style={styles.etaItem}>
+                                        <Text style={styles.etaValue}>
+                                            {googleETA ? `${(googleETA.distance / 1000).toFixed(1)} km` : `${distanceToStop?.toFixed(1)} km`}
+                                        </Text>
+                                        <Text style={styles.etaLabel}>Distance</Text>
                                     </View>
-                                    <View style={styles.personRow}>
-                                        <View style={styles.personAvatar}>
-                                            {driver.profilePicture && driver.profilePicture !== 'default.png' ? (
-                                                <Image source={{ uri: driver.profilePicture }} style={styles.personAvatarImg} />
-                                            ) : (
-                                                <Text style={styles.personInitial}>{driver.name?.charAt(0) || 'D'}</Text>
-                                            )}
-                                        </View>
-                                        <View style={styles.personInfo}>
-                                            <Text style={styles.personName}>{driver.name}</Text>
-                                            <Text style={styles.personSub}>Lic: {driver.licenseNumber || 'N/A'}</Text>
-                                        </View>
-                                        {driver.contactNumber && (
-                                            <HapticTouchable onPress={() => handleCall(driver.contactNumber)}>
-                                                <LinearGradient colors={['#0469ff', '#0347c4']} style={styles.callBtn}>
-                                                    <Phone size={18} color="#fff" />
-                                                </LinearGradient>
-                                            </HapticTouchable>
-                                        )}
+                                    <View style={styles.etaDivider} />
+                                    <View style={styles.etaItem}>
+                                        <Text style={styles.etaValue}>
+                                            {googleETA ? `${googleETA.etaMinutes} min` : `${etaMinutes} min`}
+                                        </Text>
+                                        <Text style={styles.etaLabel}>ETA</Text>
                                     </View>
-                                </Card>
-                            </Animated.View>
-                        ) : (
-                            <Animated.View entering={FadeInDown.delay(140).duration(400)}>
-                                <Card style={styles.warningCard}>
-                                    <View style={styles.cardHeader}>
-                                        <View style={styles.cardHeaderLeft}>
-                                            <View style={[styles.cardIconBg, { backgroundColor: '#FEF9C3' }]}>
-                                                <AlertCircle size={15} color="#CA8A04" />
-                                            </View>
-                                            <Text style={[styles.cardTitle, { color: '#92400E' }]}>No Driver Assigned</Text>
-                                        </View>
+                                    <View style={styles.etaDivider} />
+                                    <View style={styles.etaItem}>
+                                        <Text style={styles.etaValue}>{arrivalTime}</Text>
+                                        <Text style={styles.etaLabel}>Arrives</Text>
                                     </View>
-                                    <Text style={styles.warningText}>No driver details available for this vehicle yet.</Text>
-                                </Card>
-                            </Animated.View>
-                        )}
-
-                        {/* Conductor */}
-                        {conductor && (
-                            <Animated.View entering={FadeInDown.delay(180).duration(400)}>
-                                <Card>
-                                    <View style={styles.cardHeader}>
-                                        <View style={styles.cardHeaderLeft}>
-                                            <View style={[styles.cardIconBg, { backgroundColor: '#F3EEFF' }]}>
-                                                <User size={15} color="#8B5CF6" />
-                                            </View>
-                                            <Text style={styles.cardTitle}>Conductor</Text>
-                                        </View>
-                                    </View>
-                                    <View style={styles.personRow}>
-                                        <View style={[styles.personAvatar, { backgroundColor: '#F3E8FF' }]}>
-                                            {conductor.profilePicture && conductor.profilePicture !== 'default.png' ? (
-                                                <Image source={{ uri: conductor.profilePicture }} style={styles.personAvatarImg} />
-                                            ) : (
-                                                <Text style={[styles.personInitial, { color: '#9333EA' }]}>{conductor.name?.charAt(0) || 'C'}</Text>
-                                            )}
-                                        </View>
-                                        <View style={styles.personInfo}>
-                                            <Text style={styles.personName}>{conductor.name}</Text>
-                                            <Text style={styles.personSub}>Conductor</Text>
-                                        </View>
-                                        {conductor.contactNumber && (
-                                            <HapticTouchable onPress={() => handleCall(conductor.contactNumber)}>
-                                                <LinearGradient colors={['#8B5CF6', '#7C3AED']} style={styles.callBtn}>
-                                                    <Phone size={18} color="#fff" />
-                                                </LinearGradient>
-                                            </HapticTouchable>
-                                        )}
-                                    </View>
-                                </Card>
-                            </Animated.View>
-                        )}
-
-                        {/* Active Trip */}
-                        {activeTrip && (
-                            <Animated.View entering={FadeInDown.delay(220).duration(400)}>
-                                <Card>
-                                    <View style={styles.cardHeader}>
-                                        <View style={styles.cardHeaderLeft}>
-                                            <View style={[styles.cardIconBg, { backgroundColor: '#ECFDF5' }]}>
-                                                <Route size={15} color="#10B981" />
-                                            </View>
-                                            <Text style={styles.cardTitle}>Active Trip</Text>
-                                        </View>
-                                        <View style={[styles.tripTypeBadge]}>
-                                            <Text style={styles.tripTypeBadgeText}>{activeTrip.tripType}</Text>
-                                        </View>
-                                    </View>
-                                    <View style={styles.tripMetaRow}>
-                                        <View style={styles.tripMeta}>
-                                            <Text style={styles.tripMetaLabel}>Started</Text>
-                                            <Text style={styles.tripMetaVal}>
-                                                {activeTrip.startedAt
-                                                    ? new Date(activeTrip.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                                                    : 'N/A'}
-                                            </Text>
-                                        </View>
-                                    </View>
-                                </Card>
-                            </Animated.View>
-                        )}
-
-                        {/* Route stops */}
-                        {stops.length > 0 && (
-                            <Animated.View entering={FadeInDown.delay(260).duration(400)}>
-                                <Card>
-                                    <View style={styles.cardHeader}>
-                                        <View style={styles.cardHeaderLeft}>
-                                            <View style={[styles.cardIconBg, { backgroundColor: '#FFF7ED' }]}>
-                                                <MapPin size={15} color="#F97316" />
-                                            </View>
-                                            <Text style={styles.cardTitle}>Route Stops</Text>
-                                        </View>
-                                        <View style={styles.countBadge}>
-                                            <Text style={styles.countBadgeText}>{stops.length}</Text>
-                                        </View>
-                                    </View>
-                                    <View>
-                                        {stops.map((stop, index) => (
-                                            <View key={stop.id} style={styles.stopItem}>
-                                                <View style={[
-                                                    styles.stopDot,
-                                                    index === 0 ? { backgroundColor: '#10B981' } :
-                                                        index === stops.length - 1 ? { backgroundColor: '#EF4444' } :
-                                                            { backgroundColor: '#0469ff' }
-                                                ]}>
-                                                    <Text style={styles.stopDotText}>{index + 1}</Text>
-                                                </View>
-                                                {index < stops.length - 1 && <View style={styles.stopLine} />}
-                                                <View style={styles.stopContent}>
-                                                    <Text style={styles.stopName}>{stop.name}</Text>
-                                                    <Text style={styles.stopTime}>
-                                                        {activeTrip?.tripType === 'PICKUP' ? stop.pickupTime : stop.dropTime}
-                                                    </Text>
-                                                </View>
-                                            </View>
-                                        ))}
-                                    </View>
-                                </Card>
-                            </Animated.View>
-                        )}
-
-                        {/* Vehicle Info */}
-                        {vehicle && (
-                            <Animated.View entering={FadeInDown.delay(300).duration(400)}>
-                                <Card>
-                                    <View style={styles.cardHeader}>
-                                        <View style={styles.cardHeaderLeft}>
-                                            <View style={[styles.cardIconBg, { backgroundColor: '#F0F9FF' }]}>
-                                                <Bus size={15} color="#0284C7" />
-                                            </View>
-                                            <Text style={styles.cardTitle}>Vehicle Info</Text>
-                                        </View>
-                                        <View style={[styles.tripTypeBadge, {
-                                            backgroundColor: status === 'MOVING' ? '#DCFCE7' : status === 'IDLE' ? '#FEF9C3' : '#FEE2E2',
-                                        }]}>
-                                            <Text style={[styles.tripTypeBadgeText, {
-                                                color: status === 'MOVING' ? '#16A34A' : status === 'IDLE' ? '#CA8A04' : '#DC2626'
-                                            }]}>{status}</Text>
-                                        </View>
-                                    </View>
-                                    <View style={styles.vehicleGrid}>
-                                        {[
-                                            { label: 'Model', value: vehicle.model || 'N/A' },
-                                            { label: 'Capacity', value: vehicle.capacity ? `${vehicle.capacity} seats` : 'N/A' },
-                                            { label: 'License', value: vehicle.licensePlate || 'N/A' },
-                                        ].map(item => (
-                                            <View key={item.label} style={styles.vehicleCell}>
-                                                <Text style={styles.vehicleCellLabel}>{item.label}</Text>
-                                                <Text style={styles.vehicleCellVal}>{item.value}</Text>
-                                            </View>
-                                        ))}
-                                    </View>
-                                </Card>
-                            </Animated.View>
-                        )}
-
-                        {/* Route summary */}
-                        {assignment && (
-                            <Animated.View entering={FadeInDown.delay(340).duration(400)}>
-                                <Card>
-                                    <View style={styles.cardHeader}>
-                                        <View style={styles.cardHeaderLeft}>
-                                            <View style={[styles.cardIconBg, { backgroundColor: '#EEF4FF' }]}>
-                                                <Navigation size={15} color="#0469ff" />
-                                            </View>
-                                            <Text style={styles.cardTitle}>Route Information</Text>
-                                        </View>
-                                    </View>
-                                    {[
-                                        { icon: MapPin, color: '#0469ff', label: 'Stop', value: assignment.stop?.name || 'Not Assigned' },
-                                        { icon: Clock, color: '#10B981', label: 'Pickup Time', value: assignment.stop?.pickupTime || 'N/A' },
-                                        { icon: Clock, color: '#EF4444', label: 'Drop Time', value: assignment.stop?.dropTime || 'N/A' },
-                                    ].map(item => (
-                                        <InfoRow key={item.label} icon={item.icon} iconColor={item.color} label={item.label} value={item.value} />
-                                    ))}
-                                </Card>
-                            </Animated.View>
-                        )}
-
-                        {/* Tips */}
-                        <Animated.View entering={FadeInDown.delay(380).duration(400)}>
-                            <View style={styles.tipsCard}>
-                                <View style={styles.tipsHeader}>
-                                    <Radio size={14} color="#0469ff" />
-                                    <Text style={styles.tipsTitle}>Live Tracking</Text>
                                 </View>
-                                {[
-                                    'Location updates every 10s when bus is moving',
-                                    'Tap the call button to contact driver directly',
-                                    'Pull down to refresh for latest location',
-                                ].map((tip, i) => (
-                                    <View key={i} style={styles.tipRow}>
-                                        <View style={styles.tipDot} />
-                                        <Text style={styles.tipText}>{tip}</Text>
-                                    </View>
-                                ))}
+                                <Text style={styles.etaNote}>📍 To: {childStop?.name || 'Your Stop'}</Text>
                             </View>
-                        </Animated.View>
+                        )}
 
-                    </View>
-                </ScrollView>
-            )}
-        </View>
+                        {!driver && (
+                            <View style={[styles.card, styles.warningCard]}>
+                                <View style={styles.cardHeader}>
+                                    <AlertCircle size={16} color="#EAB308" />
+                                    <Text style={[styles.cardTitle, { color: '#B45309' }]}>No Driver Assigned</Text>
+                                </View>
+                                <Text style={styles.warningText}>No driver details available for this vehicle yet.</Text>
+                            </View>
+                        )}
+
+                        {/* Conductor Card */}
+                        {conductor && (
+                            <View style={styles.card}>
+                                <View style={styles.cardHeader}>
+                                    <User size={16} color="#64748B" />
+                                    <Text style={styles.cardTitle}>Conductor</Text>
+                                </View>
+                                <View style={styles.driverRow}>
+                                    <View style={[styles.driverAvatar, { backgroundColor: conductor.profilePicture && conductor.profilePicture !== 'default.png' ? 'transparent' : '#F3E8FF' }]}>
+                                        {conductor.profilePicture && conductor.profilePicture !== 'default.png' ? (
+                                            <Image
+                                                source={{ uri: conductor.profilePicture }}
+                                                style={styles.driverAvatarImage}
+                                            />
+                                        ) : (
+                                            <Text style={[styles.driverInitials, { color: '#9333EA' }]}>{conductor.name?.charAt(0) || 'C'}</Text>
+                                        )}
+                                    </View>
+                                    <View style={styles.driverInfo}>
+                                        <Text style={styles.driverName}>{conductor.name}</Text>
+                                        <Text style={styles.driverLicense}>Conductor</Text>
+                                    </View>
+                                    {conductor.contactNumber && (
+                                        <HapticTouchable onPress={() => handleCall(conductor.contactNumber)}>
+                                            <View style={styles.callButton}>
+                                                <Phone size={20} color="#fff" />
+                                            </View>
+                                        </HapticTouchable>
+                                    )}
+                                </View>
+                            </View>
+                        )}
+
+                        {/* Trip Info */}
+                        {activeTrip && (
+                            <View style={styles.card}>
+                                <View style={styles.cardHeader}>
+                                    <Navigation size={16} color="#64748B" />
+                                    <Text style={styles.cardTitle}>Active Trip</Text>
+                                </View>
+                                <View style={styles.tripRow}>
+                                    <View style={styles.tripInfoItem}>
+                                        <Text style={styles.tripLabel}>Type</Text>
+                                        <View style={styles.tripBadge}>
+                                            <Text style={styles.tripBadgeText}>{activeTrip.tripType}</Text>
+                                        </View>
+                                    </View>
+                                    <View style={styles.tripInfoItem}>
+                                        <Text style={styles.tripLabel}>Started</Text>
+                                        <Text style={styles.tripValue}>
+                                            {activeTrip.startedAt ? new Date(activeTrip.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A'}
+                                        </Text>
+                                    </View>
+                                </View>
+                            </View>
+                        )}
+
+                        {/* Route Stops */}
+                        {stops.length > 0 && (
+                            <View style={styles.card}>
+                                <View style={styles.cardHeader}>
+                                    <MapPin size={16} color="#64748B" />
+                                    <Text style={styles.cardTitle}>Route Stops ({stops.length})</Text>
+                                </View>
+                                <View style={styles.stopsList}>
+                                    {stops.map((stop, index) => (
+                                        <View key={stop.id} style={styles.stopItem}>
+                                            <View style={[styles.stopNumber,
+                                            index === 0 ? { backgroundColor: '#10B981' } :
+                                                index === stops.length - 1 ? { backgroundColor: '#EF4444' } :
+                                                    { backgroundColor: '#3B82F6' }
+                                            ]}>
+                                                <Text style={styles.stopNumberText}>{index + 1}</Text>
+                                            </View>
+                                            <View style={styles.stopContent}>
+                                                <Text style={styles.stopName}>{stop.name}</Text>
+                                                <Text style={styles.stopTime}>
+                                                    {activeTrip?.tripType === 'PICKUP' ? stop.pickupTime : stop.dropTime}
+                                                </Text>
+                                            </View>
+                                        </View>
+                                    ))}
+                                </View>
+                            </View>
+                        )}
+
+                        {/* Vehicle Info Card */}
+                        {vehicle && (
+                            <View style={styles.card}>
+                                <View style={styles.cardHeader}>
+                                    <Bus size={16} color="#64748B" />
+                                    <Text style={styles.cardTitle}>Vehicle Info</Text>
+                                </View>
+                                <View style={styles.vehicleInfoGrid}>
+                                    <View style={styles.vehicleInfoItem}>
+                                        <Text style={styles.vehicleInfoLabel}>Model</Text>
+                                        <Text style={styles.vehicleInfoValue}>{vehicle.model || 'N/A'}</Text>
+                                    </View>
+                                    <View style={styles.vehicleInfoItem}>
+                                        <Text style={styles.vehicleInfoLabel}>Capacity</Text>
+                                        <Text style={styles.vehicleInfoValue}>{vehicle.capacity ? `${vehicle.capacity} seats` : 'N/A'}</Text>
+                                    </View>
+                                    <View style={styles.vehicleInfoItem}>
+                                        <Text style={styles.vehicleInfoLabel}>License</Text>
+                                        <Text style={styles.vehicleInfoValue}>{vehicle.licensePlate || 'N/A'}</Text>
+                                    </View>
+                                    <View style={styles.vehicleInfoItem}>
+                                        <Text style={styles.vehicleInfoLabel}>Status</Text>
+                                        <View style={[styles.tripBadge,
+                                        status === 'MOVING' ? { backgroundColor: '#DCFCE7' } :
+                                            status === 'IDLE' ? { backgroundColor: '#FEF9C3' } :
+                                                { backgroundColor: '#FEE2E2' }
+                                        ]}>
+                                            <Text style={[styles.tripBadgeText,
+                                            status === 'MOVING' ? { color: '#16A34A' } :
+                                                status === 'IDLE' ? { color: '#CA8A04' } :
+                                                    { color: '#DC2626' }
+                                            ]}>{status}</Text>
+                                        </View>
+                                    </View>
+                                </View>
+                            </View>
+                        )}
+
+                        {/* Route Summary Card - show even without active trip */}
+                        {assignment && (
+                            <View style={styles.card}>
+                                <View style={styles.cardHeader}>
+                                    <Navigation size={16} color="#64748B" />
+                                    <Text style={styles.cardTitle}>Route Information</Text>
+                                </View>
+                                <View style={styles.routeSummary}>
+                                    <View style={styles.routeSummaryItem}>
+                                        <MapPin size={18} color="#3B82F6" />
+                                        <View style={styles.routeSummaryText}>
+                                            <Text style={styles.routeSummaryLabel}>Stop</Text>
+                                            <Text style={styles.routeSummaryValue}>{assignment.stop?.name || 'Not Assigned'}</Text>
+                                        </View>
+                                    </View>
+                                    <View style={styles.routeSummaryItem}>
+                                        <Clock size={18} color="#10B981" />
+                                        <View style={styles.routeSummaryText}>
+                                            <Text style={styles.routeSummaryLabel}>Pickup Time</Text>
+                                            <Text style={styles.routeSummaryValue}>{assignment.stop?.pickupTime || 'N/A'}</Text>
+                                        </View>
+                                    </View>
+                                    <View style={styles.routeSummaryItem}>
+                                        <Clock size={18} color="#EF4444" />
+                                        <View style={styles.routeSummaryText}>
+                                            <Text style={styles.routeSummaryLabel}>Drop Time</Text>
+                                            <Text style={styles.routeSummaryValue}>{assignment.stop?.dropTime || 'N/A'}</Text>
+                                        </View>
+                                    </View>
+                                </View>
+                            </View>
+                        )}
+
+                        {/* Helpful Tips */}
+                        <View style={styles.tipsCard}>
+                            <Text style={styles.tipsTitle}>💡 Tracking Tips</Text>
+                            <Text style={styles.tipsText}>• Location updates every 10 seconds when bus is moving</Text>
+                            <Text style={styles.tipsText}>• Tap the call button to contact driver directly</Text>
+                            <Text style={styles.tipsText}>• Pull down to refresh for latest location</Text>
+                        </View>
+                    </ScrollView>
+                </View >
+            )
+            }
+        </View >
     );
 }
 
-const MAP_HEIGHT = height * 0.46;
-
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#F7F9FC' },
-
-    // Header
+    container: {
+        flex: 1,
+        backgroundColor: '#F8FAFC',
+    },
     header: {
-        flexDirection: 'row', alignItems: 'center',
-        paddingHorizontal: 16, paddingVertical: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingTop: Platform.OS === 'ios' ? 65 : 48,
+        paddingBottom: 16,
+        paddingHorizontal: 20,
         backgroundColor: '#fff',
-        borderBottomWidth: 1, borderBottomColor: '#F0F3F8',
+        borderBottomWidth: 1,
+        borderBottomColor: '#E2E8F0',
     },
     backButton: {
-        width: 40, height: 40, borderRadius: 20,
-        backgroundColor: '#F3F6FA',
-        alignItems: 'center', justifyContent: 'center',
-    },
-    headerCenter: { flex: 1, alignItems: 'center' },
-    headerTitle: { fontSize: 17, fontWeight: '800', color: '#0D1117', letterSpacing: -0.3 },
-    headerSubtitle: { fontSize: 12, color: '#8A97B0', marginTop: 1 },
-    refreshButton: {
-        width: 40, height: 40, borderRadius: 20,
-        backgroundColor: '#EEF4FF',
-        alignItems: 'center', justifyContent: 'center',
-    },
-
-    centerContent: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 40 },
-    emptyIconWrap: {
-        width: 88, height: 88, borderRadius: 44,
+        padding: 8,
+        borderRadius: 20,
         backgroundColor: '#F1F5F9',
-        alignItems: 'center', justifyContent: 'center',
     },
-    emptyTitle: { fontSize: 17, fontWeight: '700', color: '#334155' },
-    emptyText: { fontSize: 13, color: '#64748B', textAlign: 'center', lineHeight: 20 },
-    loadingText: { fontSize: 14, color: '#8A97B0', marginTop: 8 },
-
-    // Map
-    mapWrapper: {
-        height: MAP_HEIGHT, width: '100%',
-        backgroundColor: '#E8EEF4',
+    headerCenter: {
+        flex: 1,
+        marginLeft: 12,
+    },
+    headerTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: '#0F172A',
+    },
+    headerSubtitle: {
+        fontSize: 12,
+        color: '#64748B',
+    },
+    refreshButton: {
+        padding: 8,
+        borderRadius: 20,
+        backgroundColor: '#EFF6FF',
+    },
+    loadingContainer: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    loadingText: {
+        marginTop: 12,
+        color: '#64748B',
+    },
+    centerContent: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 40,
+    },
+    emptyTitle: {
+        fontSize: 18,
+        fontWeight: '600',
+        color: '#334155',
+        marginTop: 16,
+    },
+    emptyText: {
+        textAlign: 'center',
+        color: '#64748B',
+        marginTop: 8,
+        lineHeight: 20,
+    },
+    errorText: {
+        fontSize: 16,
+        color: '#EF4444',
+        marginTop: 12,
+    },
+    contentContainer: {
+        flex: 1,
+    },
+    mapContainer: {
+        height: height * 0.50,
+        width: '100%',
         position: 'relative',
-        overflow: 'hidden',
+    },
+    map: {
+        ...StyleSheet.absoluteFillObject,
     },
     mapPlaceholder: {
-        flex: 1, alignItems: 'center', justifyContent: 'center',
-        backgroundColor: '#EEF2F8',
+        flex: 1,
+        backgroundColor: '#E2E8F0',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    mapPlaceholderInner: {
-        backgroundColor: '#fff', borderRadius: 18,
-        padding: 24, alignItems: 'center', gap: 8,
-        shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08, shadowRadius: 8, elevation: 4,
+    mapOverlay: {
+        backgroundColor: 'rgba(255, 255, 255, 0.9)',
+        padding: 24,
+        borderRadius: 16,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
     },
-    mapPlaceholderTitle: { fontSize: 15, fontWeight: '700', color: '#334155' },
-    mapPlaceholderSub: { fontSize: 12, color: '#94A3B8' },
-
-    // Status pill
-    mapTopRow: {
-        position: 'absolute', top: 14, left: 14, right: 14,
-        flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    mapOverlayTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#334155',
+        marginTop: 12,
     },
-    statusPill: {
-        flexDirection: 'row', alignItems: 'center', gap: 6,
-        paddingHorizontal: 12, paddingVertical: 6,
-        borderRadius: 20, borderWidth: 1,
-        shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.08, shadowRadius: 4, elevation: 3,
+    mapOverlayText: {
+        fontSize: 12,
+        color: '#64748B',
+        marginTop: 4,
     },
-    statusDot: { width: 7, height: 7, borderRadius: 4 },
-    statusPillText: { fontSize: 12, fontWeight: '700' },
-    timePill: {
-        flexDirection: 'row', alignItems: 'center', gap: 5,
-        backgroundColor: 'rgba(255,255,255,0.92)',
-        paddingHorizontal: 11, paddingVertical: 6, borderRadius: 20,
-        shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.08, shadowRadius: 4, elevation: 3,
+    mapControlsContainer: {
+        position: 'absolute',
+        right: 12,
+        bottom: 16,
+        gap: 8,
     },
-    timePillText: { fontSize: 11, color: '#475569', fontWeight: '500' },
-
-    // Map controls
-    mapControls: {
-        position: 'absolute', right: 12, bottom: 16, gap: 8,
-    },
-    mapCtrlBtn: {
-        width: 40, height: 40, borderRadius: 20,
-        backgroundColor: '#fff', borderWidth: 1, borderColor: '#E2E8F0',
-        alignItems: 'center', justifyContent: 'center',
-        shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1, shadowRadius: 3, elevation: 3,
-        marginTop: 6,
-    },
-
-    // ETA Banner
-    etaBanner: {
-        marginHorizontal: 16, marginTop: 16,
-        borderRadius: 22, padding: 20,
-        overflow: 'hidden', position: 'relative',
-    },
-    etaBannerDeco: {
-        position: 'absolute', width: 120, height: 120, borderRadius: 60,
-        backgroundColor: 'rgba(255,255,255,0.07)',
-        top: -30, right: -20,
-    },
-    etaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', marginBottom: 14 },
-    etaCell: { flex: 1, alignItems: 'center' },
-    etaCellVal: { fontSize: 26, fontWeight: '900', color: '#fff', letterSpacing: -0.5 },
-    etaCellUnit: { fontSize: 14, fontWeight: '500', color: 'rgba(255,255,255,0.75)' },
-    etaCellLabel: { fontSize: 11, color: 'rgba(255,255,255,0.65)', marginTop: 3, fontWeight: '500' },
-    etaSep: { width: 1, height: 36, backgroundColor: 'rgba(255,255,255,0.2)' },
-    etaFooter: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-    etaFooterText: { fontSize: 12, color: 'rgba(255,255,255,0.75)', flex: 1 },
-    etaSourceBadge: {
-        backgroundColor: 'rgba(255,255,255,0.18)',
-        paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8,
-    },
-    etaSourceText: { fontSize: 10, color: '#fff', fontWeight: '600' },
-
-    // Cards area
-    cardsArea: { paddingHorizontal: 16, paddingTop: 14, gap: 12 },
-
-    card: {
+    mapControlBtn: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
         backgroundColor: '#fff',
-        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
         borderWidth: 1,
-        borderColor: '#F0F3F8',
-        padding: 16,
+        borderColor: '#E2E8F0',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.04,
-        shadowRadius: 6,
-        elevation: 1,
+        shadowOpacity: 0.15,
+        shadowRadius: 3,
+        elevation: 3,
     },
-    warningCard: { backgroundColor: '#FFFBEB', borderColor: '#FDE68A' },
-
+    statusOverlay: {
+        position: 'absolute',
+        top: 16,
+        left: 16,
+        right: 16,
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    statusBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#fff',
+        paddingVertical: 6,
+        paddingHorizontal: 12,
+        borderRadius: 20,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+        elevation: 3,
+    },
+    statusBadgeMoving: { backgroundColor: '#F0FDF4', borderWidth: 1, borderColor: '#DCFCE7' },
+    statusBadgeIdle: { backgroundColor: '#FEFCE8', borderWidth: 1, borderColor: '#FEF9C3' },
+    statusBadgeOffline: { backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FEE2E2' },
+    statusDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        marginRight: 6,
+    },
+    statusDotMoving: { backgroundColor: '#16A34A' },
+    statusDotIdle: { backgroundColor: '#CA8A04' },
+    statusDotOffline: { backgroundColor: '#DC2626' },
+    statusText: {
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    statusTextMoving: { color: '#16A34A' },
+    statusTextIdle: { color: '#CA8A04' },
+    statusTextOffline: { color: '#DC2626' },
+    timeBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: 'rgba(255, 255, 255, 0.9)',
+        paddingVertical: 6,
+        paddingHorizontal: 12,
+        borderRadius: 20,
+        gap: 6,
+    },
+    timeText: {
+        fontSize: 11,
+        color: '#334155',
+        fontWeight: '500',
+    },
+    detailsContainer: {
+        flex: 1,
+        backgroundColor: '#F8FAFC',
+        paddingTop: 12,
+        paddingHorizontal: 16,
+        paddingBottom: 40,
+    },
+    card: {
+        backgroundColor: '#fff',
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+        padding: 16,
+        marginBottom: 12,
+    },
+    warningCard: {
+        backgroundColor: '#FEFCE8',
+        borderColor: '#FEF9C3',
+    },
     cardHeader: {
-        flexDirection: 'row', alignItems: 'center',
-        justifyContent: 'space-between', marginBottom: 14,
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 12,
     },
-    cardHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-    cardIconBg: {
-        width: 32, height: 32, borderRadius: 10,
-        alignItems: 'center', justifyContent: 'center',
+    cardTitle: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#475569',
+        marginLeft: 8,
     },
-    cardTitle: { fontSize: 14, fontWeight: '700', color: '#0D1117' },
-
-    assignedBadge: {
-        backgroundColor: '#F1F5F9', paddingHorizontal: 9, paddingVertical: 3, borderRadius: 10,
-    },
-    assignedBadgeText: { fontSize: 10, fontWeight: '600', color: '#64748B' },
-
-    // Person (driver / conductor)
-    personRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-    personAvatar: {
-        width: 46, height: 46, borderRadius: 23,
-        backgroundColor: '#DBEAFE',
-        alignItems: 'center', justifyContent: 'center',
+    badgeText: {
+        marginLeft: 'auto',
+        fontSize: 10,
+        backgroundColor: '#E2E8F0',
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 10,
+        color: '#64748B',
         overflow: 'hidden',
     },
-    personAvatarImg: { width: 46, height: 46, borderRadius: 23 },
-    personInitial: { fontSize: 18, fontWeight: '800', color: '#2563EB' },
-    personInfo: { flex: 1 },
-    personName: { fontSize: 15, fontWeight: '700', color: '#0D1117' },
-    personSub: { fontSize: 12, color: '#8A97B0', marginTop: 2 },
-    callBtn: {
-        width: 42, height: 42, borderRadius: 21,
-        alignItems: 'center', justifyContent: 'center',
+    driverRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
     },
-    warningText: { fontSize: 13, color: '#92400E', lineHeight: 18 },
-
-    // Trip
-    tripTypeBadge: {
-        backgroundColor: '#ECFDF5',
-        paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10,
+    driverAvatar: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: '#DBEAFE',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
+        overflow: 'hidden',
     },
-    tripTypeBadgeText: { fontSize: 11, fontWeight: '700', color: '#15803D' },
-    tripMetaRow: { flexDirection: 'row', gap: 16 },
-    tripMeta: {},
-    tripMetaLabel: { fontSize: 11, color: '#8A97B0', marginBottom: 2 },
-    tripMetaVal: { fontSize: 14, fontWeight: '600', color: '#0D1117' },
-
-    // Stops
+    driverAvatarImage: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+    },
+    driverInitials: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#2563EB',
+    },
+    driverInfo: {
+        flex: 1,
+    },
+    driverName: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#0F172A',
+    },
+    driverLicense: {
+        fontSize: 12,
+        color: '#64748B',
+        marginTop: 2,
+    },
+    callButton: {
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: '#2563EB',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    tripRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+    },
+    tripInfoItem: {
+        flex: 1,
+    },
+    tripLabel: {
+        fontSize: 12,
+        color: '#64748B',
+        marginBottom: 4,
+    },
+    tripBadge: {
+        backgroundColor: '#DBEAFE',
+        alignSelf: 'flex-start',
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 6,
+    },
+    tripBadgeText: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#1E40AF',
+    },
+    tripValue: {
+        fontSize: 14,
+        fontWeight: '500',
+        color: '#0F172A',
+    },
+    stopsList: {
+        maxHeight: 200,
+    },
     stopItem: {
-        flexDirection: 'row', alignItems: 'flex-start',
-        marginBottom: 14, position: 'relative',
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 12,
     },
-    stopDot: {
-        width: 26, height: 26, borderRadius: 13,
-        alignItems: 'center', justifyContent: 'center',
-        marginRight: 12, marginTop: 1,
-        flexShrink: 0,
+    stopNumber: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 12,
     },
-    stopDotText: { color: '#fff', fontSize: 10, fontWeight: '800' },
-    stopLine: {
-        position: 'absolute', left: 12, top: 28,
-        width: 2, height: 12, backgroundColor: '#E2E8F0',
+    stopNumberText: {
+        color: '#fff',
+        fontSize: 10,
+        fontWeight: 'bold',
     },
-    stopContent: { flex: 1 },
-    stopName: { fontSize: 13, fontWeight: '600', color: '#0D1117' },
-    stopTime: { fontSize: 11, color: '#8A97B0', marginTop: 2 },
+    stopContent: {
+        flex: 1,
+    },
+    stopName: {
+        fontSize: 14,
+        color: '#1E293B',
+        fontWeight: '500',
+    },
+    stopTime: {
+        fontSize: 12,
+        color: '#64748B',
+    },
+    warningText: {
+        fontSize: 13,
+        color: '#B45309',
+    },
 
-    countBadge: {
-        backgroundColor: '#FFF7ED', paddingHorizontal: 9, paddingVertical: 3, borderRadius: 10,
+    // Vehicle Info Grid
+    vehicleInfoGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
     },
-    countBadgeText: { fontSize: 11, fontWeight: '700', color: '#F97316' },
-
-    // Vehicle grid
-    vehicleGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 0 },
-    vehicleCell: { width: '50%', paddingVertical: 8, paddingRight: 8 },
-    vehicleCellLabel: { fontSize: 11, color: '#8A97B0', marginBottom: 2 },
-    vehicleCellVal: { fontSize: 13, fontWeight: '700', color: '#0D1117' },
-
-    // Info row
-    infoRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 10 },
-    infoIconBox: {
-        width: 32, height: 32, borderRadius: 10,
-        alignItems: 'center', justifyContent: 'center',
+    vehicleInfoItem: {
+        width: '50%',
+        paddingVertical: 8,
     },
-    infoRowText: { flex: 1 },
-    infoLabel: { fontSize: 11, color: '#8A97B0' },
-    infoValue: { fontSize: 14, fontWeight: '600', color: '#0D1117', marginTop: 1 },
+    vehicleInfoLabel: {
+        fontSize: 11,
+        color: '#64748B',
+        marginBottom: 2,
+    },
+    vehicleInfoValue: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#0F172A',
+    },
 
-    // Tips
+    // Route Summary
+    routeSummary: {
+        gap: 12,
+    },
+    routeSummaryItem: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        backgroundColor: '#F8FAFC',
+        borderRadius: 10,
+    },
+    routeSummaryText: {
+        marginLeft: 12,
+    },
+    routeSummaryLabel: {
+        fontSize: 11,
+        color: '#64748B',
+    },
+    routeSummaryValue: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#0F172A',
+    },
+
+    // Tips Card
     tipsCard: {
-        backgroundColor: '#EEF4FF',
-        borderRadius: 18, padding: 16,
-        borderWidth: 1, borderColor: '#DBEAFE',
+        backgroundColor: '#EFF6FF',
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: '#DBEAFE',
     },
-    tipsHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
-    tipsTitle: { fontSize: 13, fontWeight: '800', color: '#1E40AF' },
-    tipRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 6 },
-    tipDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: '#93C5FD', marginTop: 5, flexShrink: 0 },
-    tipText: { fontSize: 12, color: '#3B82F6', lineHeight: 18, flex: 1 },
+    tipsTitle: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#1E40AF',
+        marginBottom: 8,
+    },
+    tipsText: {
+        fontSize: 12,
+        color: '#3B82F6',
+        lineHeight: 20,
+    },
+
+    // ETA Card Styles
+    etaCard: {
+        backgroundColor: '#F5F5F5',
+        borderRadius: 16,
+        padding: 16,
+        marginBottom: 16,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    etaHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 12,
+    },
+    etaTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#1E40AF',
+        marginLeft: 8,
+    },
+    etaContent: {
+        flexDirection: 'row',
+        justifyContent: 'space-around',
+        alignItems: 'center',
+        backgroundColor: '#fff',
+        borderRadius: 12,
+        paddingVertical: 16,
+        paddingHorizontal: 8,
+        borderWidth: 1,
+        borderColor: '#E5E7EB',
+    },
+    etaItem: {
+        alignItems: 'center',
+        flex: 1,
+    },
+    etaValue: {
+        fontSize: 24,
+        fontWeight: '900',
+        color: '#1E40AF',
+    },
+    etaLabel: {
+        fontSize: 11,
+        color: '#6B7280',
+        marginTop: 4,
+        fontWeight: '500',
+    },
+    etaDivider: {
+        width: 1,
+        height: 30,
+        backgroundColor: '#E5E7EB',
+    },
+    etaNote: {
+        fontSize: 12,
+        color: '#374151',
+        marginTop: 12,
+        textAlign: 'center',
+        fontWeight: '500',
+    },
 });

@@ -340,7 +340,7 @@ export default function GalleryScreen() {
                                     style={mLandscape ? { flex: 1 } : undefined}
                                     showsVerticalScrollIndicator={false}
                                 >
-                                    <View style={styles.modalInfo}>
+                                    <View style={[styles.modalInfo, { paddingBottom: 20 + insets.bottom }]}>
                                         {/* Album / event name */}
                                         {(selectedImage.album?.title || selectedAlbum?.title) && (
                                             <View style={styles.modalEventBadge}>

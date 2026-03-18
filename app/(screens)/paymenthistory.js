@@ -358,37 +358,65 @@ export default function PaymentHistoryScreen() {
                             {/* Fee Details header */}
                             <View style={styles.feeDetailsHeader}>
                                 <Text style={styles.feeDetailsTitle}>
-                                    Installment Schedule {studentFee.globalFeeStructure?.mode ? `(${studentFee.globalFeeStructure.mode})` : ''}
+                                    Monthly Fee Ledger
                                 </Text>
                             </View>
 
-                            {/* No installments fallback */}
-                            {(!studentFee.installments || studentFee.installments.length === 0) ? (
-                                <EmptyState
-                                    icon={Calendar}
-                                    title="No Installments"
-                                    subtitle="Installment schedule has not been set up yet"
-                                    color="#3B82F6"
-                                />
-                            ) : (
-                                studentFee.installments.map((inst) => {
-                                    const dueDate = new Date(inst.dueDate);
-                                    const monthName = dueDate.toLocaleDateString('en-IN', { month: 'short' }).toUpperCase();
-                                    const balance = inst.amount - inst.paidAmount;
+                            {/* Ledger-based month cards */}
+                            {(() => {
+                                const ledger = studentFee.ledger || [];
+                                if (ledger.length === 0) {
                                     return (
-                                        <View key={inst.id} style={styles.installmentCardWrap}>
+                                        <EmptyState
+                                            icon={Calendar}
+                                            title="No Ledger Entries"
+                                            subtitle="Fee ledger will be generated once a fee structure is assigned"
+                                            color="#3B82F6"
+                                        />
+                                    );
+                                }
+
+                                // Group ledger entries by monthLabel
+                                const grouped = {};
+                                ledger.forEach((entry) => {
+                                    const key = entry.monthLabel || 'Unknown';
+                                    if (!grouped[key]) grouped[key] = { entries: [], month: entry.month };
+                                    grouped[key].entries.push(entry);
+                                });
+
+                                // Sort by month date
+                                const sortedMonths = Object.entries(grouped).sort((a, b) =>
+                                    new Date(a[1].month) - new Date(b[1].month)
+                                );
+
+                                return sortedMonths.map(([monthLabel, data]) => {
+                                    const totalDue = data.entries.reduce((s, e) => s + (e.netAmount || 0), 0);
+                                    const totalPaid = data.entries.reduce((s, e) => s + (e.paidAmount || 0), 0);
+                                    const balance = totalDue - totalPaid;
+
+                                    // Determine status
+                                    const allPaid = data.entries.every(e => e.status === 'LEDGER_PAID');
+                                    const anyPaid = data.entries.some(e => e.paidAmount > 0);
+                                    const status = allPaid ? 'PAID' : anyPaid ? 'PARTIAL' : 'DUE';
+
+                                    // Short month name from monthLabel (e.g. "October 2024" → "OCT")
+                                    const shortMonth = monthLabel.split(' ')[0]?.slice(0, 3)?.toUpperCase() || '';
+
+                                    return (
+                                        <View key={monthLabel} style={styles.installmentCardWrap}>
                                             <View style={styles.monthCol}>
-                                                <Text style={styles.monthColText}>{monthName}</Text>
+                                                <Text style={styles.monthColText}>{shortMonth}</Text>
                                             </View>
                                             <View style={styles.installmentCardContent}>
+                                                <Text style={{ fontSize: 11, color: '#888', marginBottom: 6, fontWeight: '500' }}>{monthLabel}</Text>
                                                 <View style={styles.installmentRowTop}>
                                                     <View style={[styles.instDataBox, { borderColor: '#EF4444' }]}>
                                                         <Text style={styles.instDataLabel}>Due</Text>
-                                                        <Text style={styles.instDataValue}>{formatCurrency(inst.amount)}</Text>
+                                                        <Text style={styles.instDataValue}>{formatCurrency(totalDue)}</Text>
                                                     </View>
                                                     <View style={[styles.instDataBox, { borderColor: '#10B981' }]}>
                                                         <Text style={styles.instDataLabel}>Paid</Text>
-                                                        <Text style={styles.instDataValue}>{formatCurrency(inst.paidAmount)}</Text>
+                                                        <Text style={styles.instDataValue}>{formatCurrency(totalPaid)}</Text>
                                                     </View>
                                                 </View>
                                                 {balance > 0 && (
@@ -396,13 +424,10 @@ export default function PaymentHistoryScreen() {
                                                         <Text style={styles.balanceText}>Balance {formatCurrency(balance)}</Text>
                                                     </View>
                                                 )}
-                                                {inst.paidDate && (
-                                                    <Text style={styles.paidDateText}>Paid on {formatDate(inst.paidDate)}</Text>
-                                                )}
                                             </View>
                                             <View style={styles.stampCol}>
-                                                {renderStamp(inst.status)}
-                                                {inst.paidAmount > 0 && (
+                                                {renderStamp(status)}
+                                                {totalPaid > 0 && (
                                                     <HapticTouchable onPress={() => setActiveTab('RECEIPTS')} style={styles.instReceiptBtn}>
                                                         <LinearGradient colors={['#3b82f6', '#2563eb']} style={styles.instReceiptIcon}>
                                                             <FileText size={12} color="#fff" />
@@ -412,8 +437,8 @@ export default function PaymentHistoryScreen() {
                                             </View>
                                         </View>
                                     );
-                                })
-                            )}
+                                });
+                            })()}
                         </Animated.View>
                     )
                 ) : (

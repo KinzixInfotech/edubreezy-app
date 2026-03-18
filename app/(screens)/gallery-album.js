@@ -244,7 +244,7 @@ export default function GalleryAlbumScreen() {
                                     showsVerticalScrollIndicator={false}
                                     bounces={false}
                                 >
-                                    <View style={styles.modalInfo}>
+                                    <View style={[styles.modalInfo, { paddingBottom: 20 + insets.bottom }]}>
                                         {/* Album badge */}
                                         {album?.title && (
                                             <View style={styles.modalAlbumBadge}>

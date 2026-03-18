@@ -83,8 +83,9 @@ const formatISTTime = (dateString) => {
 };
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const CALENDAR_WIDTH = SCREEN_WIDTH - 32;
-const CALENDAR_DAY_SIZE = CALENDAR_WIDTH / 7;
+// Account for outer padding (16*2) + calendar card padding (16*2) + card border (1*2) = 66
+const CALENDAR_WIDTH = SCREEN_WIDTH - 66;
+const CALENDAR_DAY_SIZE = Math.floor(CALENDAR_WIDTH / 7);
 
 export default function TeacherClassAttendance() {
     const queryClient = useQueryClient();
@@ -169,19 +170,13 @@ export default function TeacherClassAttendance() {
     const studentId = selectedStudent?.userId || selectedStudent?.id;
 
     const { data: studentStatsData, isLoading: studentStatsLoading } = useQuery({
-        // Cache key uses studentId only - we load all 6 months data at once
-        queryKey: ['student-attendance-detail-6months', studentId],
+        // Cache key uses studentId only - we load full academic year data at once
+        queryKey: ['student-attendance-fullYear', studentId],
         queryFn: async () => {
             if (!studentId) return null;
-            // Calculate date range: 3 months back to 3 months forward
-            const now = new Date();
-            const startMonth = now.getMonth() - 2; // 3 months back (including current)
-            const startYear = now.getFullYear() + Math.floor(startMonth / 12);
-            const actualStartMonth = ((startMonth % 12) + 12) % 12 + 1;
-
-            // Get 6 months of data in one request
+            // Use fullYear=true to get all attendance records for the entire academic year
             const res = await api.get(
-                `/schools/${schoolId}/attendance/stats?userId=${studentId}&months=6`
+                `/schools/${schoolId}/attendance/stats?userId=${studentId}&fullYear=true`
             );
             return res.data;
         },
@@ -204,8 +199,9 @@ export default function TeacherClassAttendance() {
 
     const students = studentsData?.students || [];
     const classStats = classStatsData?.classStats;
-    const studentDetailStats = studentStatsData?.monthlyStats;
-    const studentRecentAttendance = studentStatsData?.recentAttendance || [];
+    // fullYear API returns overallStats (totals) and allAttendance (individual records)
+    const studentDetailStats = studentStatsData?.overallStats;
+    const studentRecentAttendance = studentStatsData?.allAttendance || [];
 
     // Filter students by search query
     // Filter and Sort students
@@ -301,7 +297,7 @@ export default function TeacherClassAttendance() {
         await Promise.all([
             queryClient.invalidateQueries({ queryKey: ['class-students-list'] }),
             queryClient.invalidateQueries({ queryKey: ['class-attendance-stats'] }),
-            queryClient.invalidateQueries({ queryKey: ['student-attendance-detail-6months'] }),
+            queryClient.invalidateQueries({ queryKey: ['student-attendance-fullYear'] }),
         ]);
         setRefreshing(false);
     }, [queryClient]);

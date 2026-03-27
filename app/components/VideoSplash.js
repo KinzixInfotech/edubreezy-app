@@ -3,7 +3,8 @@ import { StyleSheet, View } from 'react-native';
 import { Video, ResizeMode } from 'expo-av';
 
 // Time to hold on last frame after video ends (in milliseconds)
-const HOLD_DURATION_MS = 1000;
+// Video is ~5s + 100ms init + 900ms hold = ~6s total
+const HOLD_DURATION_MS = 900;
 
 /**
  * VideoSplash - Fullscreen video splash screen component

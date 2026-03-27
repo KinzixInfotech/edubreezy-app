@@ -16,6 +16,10 @@ export default {
             backgroundColor: "#ffffff"
         },
         ios: {
+            splash: {
+                image: "./assets/splash_ios.png",
+                resizeMode: "cover",
+            },
             supportsTablet: true,
             bundleIdentifier: "com.kinzix.edubreezy",
             googleServicesFile: "./GoogleService-Info.plist" || process.env.GOOGLE_SERVICE_INFO_PLIST,

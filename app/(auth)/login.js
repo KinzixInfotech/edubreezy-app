@@ -273,6 +273,7 @@ export default function LoginScreen() {
     const [showPassword, setShowPassword] = useState(false);
     const [keyboardVisible, setKeyboardVisible] = useState(false);
     const [keyboardHeight, setKeyboardHeight] = useState(0);
+    const [googleLoading, setGoogleLoading] = useState(false);
 
     const buttonScale = useSharedValue(1);
 
@@ -562,6 +563,168 @@ export default function LoginScreen() {
         transform: [{ scale: buttonScale.value }],
     }));
 
+    const handleGoogleLogin = async () => {
+        try {
+            setGoogleLoading(true);
+            setErrors({});
+
+            // Clear any old tokens
+            await SecureStore.deleteItemAsync('token');
+
+            const { data: oauthData, error: oauthError } = await supabase.auth.signInWithOAuth({
+                provider: 'google',
+                options: {
+                    redirectTo: 'edubreezy://',
+                    skipBrowserRedirect: true,
+                },
+            });
+
+            if (oauthError) throw oauthError;
+
+            if (!oauthData?.url) {
+                setErrors({ general: 'Failed to initiate Google sign-in.' });
+                return;
+            }
+
+            // Open browser for Google OAuth
+            const result = await WebBrowser.openAuthSessionAsync(oauthData.url, 'edubreezy://');
+
+            if (result.type !== 'success' || !result.url) {
+                // User cancelled or browser closed
+                setGoogleLoading(false);
+                return;
+            }
+
+            // Extract tokens from redirect URL
+            // URL format: edubreezy://#access_token=...&refresh_token=...&...
+            const urlFragment = result.url.split('#')[1];
+            if (!urlFragment) {
+                setErrors({ general: 'Authentication failed. Please try again.' });
+                return;
+            }
+
+            const params = new URLSearchParams(urlFragment);
+            const access_token = params.get('access_token');
+            const refresh_token = params.get('refresh_token');
+
+            if (!access_token || !refresh_token) {
+                setErrors({ general: 'Authentication failed. Missing tokens.' });
+                return;
+            }
+
+            // Set the session in Supabase client
+            const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
+                access_token,
+                refresh_token,
+            });
+
+            if (sessionError || !sessionData?.user) {
+                setErrors({ general: sessionError?.message || 'Failed to establish session.' });
+                return;
+            }
+
+            console.log('✅ Google OAuth session established for:', sessionData.user.email);
+
+            // Fetch user from backend (same as email/password login)
+            const user = await fetchUser(sessionData.user.id, access_token);
+
+            if (!user) {
+                // User authenticated with Google but doesn't exist in our backend
+                await supabase.auth.signOut();
+                setErrors({ general: 'No account found for this Google email. Please contact your school admin to create your account.' });
+                return;
+            }
+
+            // Block ADMIN role from mobile app
+            if (user.role?.name === 'ADMIN') {
+                await supabase.auth.signOut();
+                Alert.alert(
+                    'Web Only',
+                    'Admin accounts can only access the web dashboard at atlas.edubreezy.com.',
+                    [{ text: 'OK' }]
+                );
+                setGoogleLoading(false);
+                return;
+            }
+
+            // Store user data (same logic as handleLogin)
+            const minimalUser = {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                profilePicture: user.profilePicture,
+                role: user.role,
+                schoolId: user.schoolId,
+                ...(user.studentData && {
+                    studentData: {
+                        name: user.studentData.name,
+                        email: user.studentData.email,
+                        admissionNo: user.studentData.admissionNo,
+                        class: user.studentData.class || null,
+                        section: user.studentData.section || null,
+                    },
+                }),
+                ...(user.parentData && {
+                    parentData: {
+                        id: user.parentData.id,
+                        name: user.parentData.name,
+                        email: user.parentData.email,
+                    },
+                }),
+                ...(user.teacherData && {
+                    teacherData: {
+                        name: user.teacherData.name,
+                        email: user.teacherData.email,
+                    },
+                }),
+                ...(user.school && {
+                    school: {
+                        id: user.school.id,
+                        name: user.school.name,
+                        schoolCode: user.school.schoolCode,
+                    },
+                }),
+            };
+            await SecureStore.setItemAsync('user', JSON.stringify(minimalUser));
+            await SecureStore.setItemAsync('userRole', user?.role?.name || '');
+            await SecureStore.setItemAsync('token', access_token);
+
+            // Save profile for this school code
+            const schoolCode = schoolConfig?.schoolcode || schoolConfig?.schoolCode;
+            if (schoolCode) {
+                try {
+                    await saveProfile(schoolCode, user, sessionData.session);
+                    console.log('✅ Profile saved for', schoolCode);
+                    await saveCurrentSchool(schoolCode, { school: schoolConfig });
+                } catch (saveError) {
+                    console.error('❌ Failed to save profile:', saveError);
+                }
+            }
+
+            // Create session for device tracking
+            try {
+                const deviceInfo = await getDeviceInfo();
+                const sessionRes = await api.post('/auth/sessions', {
+                    userId: user.id,
+                    supabaseSessionToken: access_token,
+                    ...deviceInfo,
+                });
+                if (sessionRes.data?.session?.id) {
+                    await SecureStore.setItemAsync('currentSessionId', sessionRes.data.session.id);
+                }
+            } catch (sessionErr) {
+                console.warn('Could not create session:', sessionErr.message);
+            }
+
+            router.replace('/(screens)/greeting');
+        } catch (err) {
+            console.error('Google login error:', err);
+            setErrors({ general: err.message || 'Google sign-in failed. Please try again.' });
+        } finally {
+            setGoogleLoading(false);
+        }
+    };
+
     return (
         <KeyboardAvoidingView
             style={styles.container}
@@ -746,6 +909,42 @@ export default function LoginScreen() {
                                     <View style={styles.loginButtonContent}>
                                         <Text style={styles.loginButtonText}>Log In</Text>
                                         <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
+                                    </View>
+                                )}
+                            </TouchableOpacity>
+                        </Animated.View>
+
+                        {/* OR Divider */}
+                        <Animated.View
+                            entering={FadeInDown.delay(350).duration(500)}
+                            style={styles.orDivider}
+                        >
+                            <View style={styles.orDividerLine} />
+                            <Text style={styles.orDividerText}>OR</Text>
+                            <View style={styles.orDividerLine} />
+                        </Animated.View>
+
+                        {/* Google Sign-In Button */}
+                        <Animated.View entering={FadeInDown.delay(400).duration(500)}>
+                            <TouchableOpacity
+                                style={[styles.googleButton, googleLoading && styles.googleButtonDisabled]}
+                                onPress={handleGoogleLogin}
+                                disabled={googleLoading || loading}
+                                activeOpacity={0.85}
+                            >
+                                {googleLoading ? (
+                                    <View style={styles.loadingContainer}>
+                                        <ActivityIndicator size="small" color="#374151" />
+                                        <Text style={styles.googleButtonText}>Signing in...</Text>
+                                    </View>
+                                ) : (
+                                    <View style={styles.googleButtonContent}>
+                                        <Image
+                                            source={require('../../assets/google.png')}
+                                            style={{ width: 20, height: 20 }}
+                                        />
+
+                                        <Text style={styles.googleButtonText}>Continue with Google</Text>
                                     </View>
                                 )}
                             </TouchableOpacity>
@@ -1165,6 +1364,52 @@ const styles = StyleSheet.create({
         fontWeight: '800',
         color: '#FFFFFF',
         letterSpacing: 0.3,
+    },
+    orDivider: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginVertical: verticalScale(16),
+    },
+    orDividerLine: {
+        flex: 1,
+        height: 1,
+        backgroundColor: '#E5E7EB',
+    },
+    orDividerText: {
+        marginHorizontal: moderateScale(14),
+        fontSize: moderateScale(12, 0.3),
+        fontWeight: '700',
+        color: '#9CA3AF',
+        letterSpacing: 0.5,
+    },
+    googleButton: {
+        backgroundColor: '#FFFFFF',
+        borderRadius: moderateScale(12),
+        paddingVertical: moderateScale(14),
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 1.5,
+        borderColor: '#E5E7EB',
+    },
+    googleButtonDisabled: {
+        backgroundColor: '#F9FAFB',
+        borderColor: '#E5E7EB',
+    },
+    googleButtonContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 10,
+    },
+    googleIcon: {
+        width: 20,
+        height: 20,
+    },
+    googleButtonText: {
+        fontSize: moderateScale(15, 0.3),
+        fontWeight: '700',
+        color: '#374151',
+        letterSpacing: 0.2,
     },
     footer: {
         flexDirection: 'row',

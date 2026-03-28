@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { Image as CachedImage } from 'expo-image';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { getProfilesForSchool } from '../../lib/profileManager';
 import {
@@ -137,7 +138,7 @@ const SchoolSearchItem = ({ school, onPress }) => (
   >
     <View style={styles.searchResultIcon}>
       {school.profilePicture ? (
-        <Image source={{ uri: school.profilePicture }} style={styles.schoolThumb} />
+        <CachedImage source={{ uri: school.profilePicture }} style={styles.schoolThumb} cachePolicy="disk" transition={200} />
       ) : (
         <LinearGradient
           colors={['#3b82f6', '#2563eb']}

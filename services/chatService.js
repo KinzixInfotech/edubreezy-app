@@ -3,6 +3,7 @@
 // ============================================
 
 import api from '../lib/api';
+import { supabase } from '../lib/supabase';
 
 /**
  * Get paginated conversation list for the current user.
@@ -47,7 +48,43 @@ export const getMessages = async (schoolId, conversationId, params = {}) => {
 };
 
 /**
- * Send a message to a conversation.
+ * Send a message via direct Supabase insert (instant, triggers realtime).
+ * Returns the inserted message row.
+ */
+export const sendMessageDirect = async ({ conversationId, senderId, content, attachments, replyToId }) => {
+    const row = {
+        conversationId,
+        senderId,
+        content: content || null,
+        attachments: attachments?.length ? JSON.stringify(attachments) : null,
+        replyToId: replyToId || null,
+        status: 'SENT',
+    };
+
+    const { data, error } = await supabase
+        .from('Message')
+        .insert(row)
+        .select('id, conversationId, senderId, content, attachments, replyToId, status, createdAt, updatedAt')
+        .single();
+
+    if (error) throw error;
+    return data;
+};
+
+/**
+ * Persist message via API (handles notifications, cache, conversation metadata).
+ * Called as fire-and-forget after the direct Supabase insert.
+ */
+export const sendMessagePersist = async (schoolId, conversationId, body) => {
+    const { data } = await api.post(
+        `/schools/${schoolId}/chat/conversations/${conversationId}/messages`,
+        body
+    );
+    return data;
+};
+
+/**
+ * Send a message to a conversation (legacy API-only path).
  * @param {string} schoolId
  * @param {string} conversationId
  * @param {{ content: string, attachments?: Array, replyToId?: string }} body

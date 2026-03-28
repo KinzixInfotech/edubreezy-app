@@ -277,28 +277,28 @@ export default function NewConversationScreen() {
                         onPress={() => { setCategory('all'); setIsGroupMode(false); }}
                         icon={<Users size={13} color={category === 'all' && !isGroupMode ? '#fff' : '#6b7280'} strokeWidth={2} />}
                     />
-                    <CategoryChip
+                    {/* <CategoryChip
                         label="New Group"
                         active={isGroupMode}
                         onPress={() => { setIsGroupMode(true); setCategory('all'); }}
                         icon={<Plus size={13} color={isGroupMode ? '#fff' : '#6b7280'} strokeWidth={2} />}
-                    />
-                    {showTeachers && !isGroupMode && (
+                    /> */}
+                    {/* {showTeachers && !isGroupMode && (
                         <CategoryChip
                             label="Teachers"
                             active={category === 'teachers'}
                             onPress={() => setCategory('teachers')}
                             icon={<GraduationCap size={13} color={category === 'teachers' ? '#fff' : '#6b7280'} strokeWidth={2} />}
                         />
-                    )}
-                    {showParents && !isGroupMode && (
+                    )} */}
+                    {/* {showParents && !isGroupMode && (
                         <CategoryChip
                             label="Parents"
                             active={category === 'parents'}
                             onPress={() => setCategory('parents')}
                             icon={<User size={13} color={category === 'parents' ? '#fff' : '#6b7280'} strokeWidth={2} />}
                         />
-                    )}
+                    )} */}
                 </ScrollView>
             </View>
 
@@ -404,6 +404,7 @@ const styles = StyleSheet.create({
     userRow: {
         flexDirection: 'row', alignItems: 'center',
         paddingHorizontal: 20, paddingVertical: 11,
+
         borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#f0f2f5',
     },
     userRowSelected: { backgroundColor: '#eff6ff' },

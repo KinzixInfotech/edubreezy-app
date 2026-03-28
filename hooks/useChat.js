@@ -67,8 +67,32 @@ export const useSendMessage = () => {
     const qc = useQueryClient();
 
     return useMutation({
-        mutationFn: ({ schoolId, conversationId, body }) =>
-            chatService.sendMessage(schoolId, conversationId, body),
+        mutationFn: async ({ schoolId, conversationId, body, tempId, currentUser }) => {
+            // Phase 1: Direct Supabase insert → triggers realtime instantly
+            try {
+                const directMsg = await chatService.sendMessageDirect({
+                    conversationId,
+                    senderId: currentUser?.id,
+                    content: body.content,
+                    attachments: body.attachments,
+                    replyToId: body.replyToId,
+                });
+
+                // Phase 2: Fire-and-forget API call for notifications, cache, metadata
+                chatService.sendMessagePersist(schoolId, conversationId, {
+                    ...body,
+                    _directMessageId: directMsg.id, // Tell API this message already exists
+                }).catch((err) => {
+                    console.warn('Background message persist failed (non-critical):', err.message);
+                });
+
+                return { success: true, message: directMsg };
+            } catch (supabaseErr) {
+                // Fallback: If direct insert fails, use API-only path
+                console.warn('Direct Supabase insert failed, falling back to API:', supabaseErr.message);
+                return chatService.sendMessage(schoolId, conversationId, body);
+            }
+        },
 
         // Optimistic update — add message to cache immediately
         onMutate: async ({ schoolId, conversationId, body, tempId, currentUser }) => {
@@ -110,8 +134,11 @@ export const useSendMessage = () => {
         },
 
         onSettled: (_data, _error, { schoolId, conversationId }) => {
-            qc.invalidateQueries({ queryKey: chatKeys.messages(schoolId, conversationId) });
-            qc.invalidateQueries({ queryKey: chatKeys.conversations(schoolId) });
+            // Delay invalidation slightly so realtime update arrives first
+            setTimeout(() => {
+                qc.invalidateQueries({ queryKey: chatKeys.messages(schoolId, conversationId) });
+                qc.invalidateQueries({ queryKey: chatKeys.conversations(schoolId) });
+            }, 2000);
         },
     });
 };

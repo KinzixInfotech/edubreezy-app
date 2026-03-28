@@ -4,25 +4,16 @@
 
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
-    View,
-    Text,
-    FlatList,
-    TextInput,
-    StyleSheet,
-    Image,
-    KeyboardAvoidingView,
-    Platform,
-    ActionSheetIOS,
-    Alert,
-    ActivityIndicator,
-    Animated,
+    View, Text, FlatList, TextInput, StyleSheet, Image,
+    KeyboardAvoidingView, Platform, ActionSheetIOS, Alert,
+    ActivityIndicator, Animated, Modal, TouchableOpacity,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
     ArrowLeft, Send, Paperclip, MoreVertical,
-    X, Clock, Check, CheckCheck,
+    X, Clock, Check, CheckCheck, BellOff, Bell, LogOut,
 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 import HapticTouchable from '../../components/HapticTouch';
@@ -36,8 +27,13 @@ import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
 import { usePresenceStatus } from '../../../hooks/usePresenceStatus';
 import { useShimmer, Bone } from '../../components/ScreenSkeleton';
 import { StatusBar } from 'expo-status-bar';
+import { BlurView } from 'expo-blur';
+import Animated2, {
+    useSharedValue, useAnimatedStyle, withTiming,
+} from 'react-native-reanimated';
 
-// ── Helpers ──
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
 function getDateLabel(dateStr) {
     const d = new Date(dateStr);
     const now = new Date();
@@ -64,7 +60,8 @@ function formatLastSeen(dateStr) {
     return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
-// ── Skeleton ──
+// ── Skeleton ──────────────────────────────────────────────────────────────────
+
 function ChatRoomSkeleton() {
     const anim = useShimmer();
     return (
@@ -81,7 +78,8 @@ function ChatRoomSkeleton() {
     );
 }
 
-// ── Typing Indicator ──
+// ── Typing Indicator ──────────────────────────────────────────────────────────
+
 function TypingIndicator({ users }) {
     const fadeAnim = useRef(new Animated.Value(0.3)).current;
     useEffect(() => {
@@ -110,7 +108,8 @@ function TypingIndicator({ users }) {
     );
 }
 
-// ── Message Status ──
+// ── Message Status ────────────────────────────────────────────────────────────
+
 const MessageStatusTicks = ({ status, isMine }) => {
     if (!isMine) return null;
     if (status === 'SENDING') return <Clock size={10} color="rgba(255,255,255,0.5)" style={{ marginLeft: 4 }} />;
@@ -119,7 +118,8 @@ const MessageStatusTicks = ({ status, isMine }) => {
     return <Check size={12} color="rgba(255,255,255,0.7)" style={{ marginLeft: 4 }} />;
 };
 
-// ── Message Bubble ──
+// ── Message Bubble ────────────────────────────────────────────────────────────
+
 const MessageBubble = React.memo(function MessageBubble({ message, isMine, showSender, onLongPress }) {
     if (message.isDeleted) {
         return (
@@ -176,9 +176,10 @@ const MessageBubble = React.memo(function MessageBubble({ message, isMine, showS
     );
 });
 
-// ── Header Avatar ──
+// ── Header Avatar ─────────────────────────────────────────────────────────────
+
 function HeaderAvatar({ profilePicture, title, isGroup }) {
-    if (isGroup) return null; // groups use title only
+    if (isGroup) return null;
     if (profilePicture) {
         return <Image source={{ uri: profilePicture }} style={styles.headerAvatar} />;
     }
@@ -191,14 +192,112 @@ function HeaderAvatar({ profilePicture, title, isGroup }) {
     );
 }
 
-// ── Main Screen ──
+// ── Bottom Sheet Modal ────────────────────────────────────────────────────────
+
+const BottomSheetModal = React.memo(function BottomSheetModal({ visible, title, options, onClose }) {
+    const insets = useSafeAreaInsets();
+    const translateY = useSharedValue(400);
+    const backdropOpacity = useSharedValue(0);
+    const [mounted, setMounted] = useState(false);
+
+    useEffect(() => {
+        if (visible) {
+            setMounted(true);
+            // slight delay so the modal is mounted before animating
+            setTimeout(() => {
+                backdropOpacity.value = withTiming(1, { duration: 240 });
+                translateY.value = withTiming(0, { duration: 320 });
+            }, 10);
+        } else {
+            backdropOpacity.value = withTiming(0, { duration: 200 });
+            translateY.value = withTiming(400, { duration: 260 });
+            setTimeout(() => setMounted(false), 270);
+        }
+    }, [visible]);
+
+    const backdropStyle = useAnimatedStyle(() => ({
+        opacity: backdropOpacity.value,
+    }));
+
+    const sheetStyle = useAnimatedStyle(() => ({
+        transform: [{ translateY: translateY.value }],
+    }));
+
+    if (!mounted) return null;
+
+    return (
+        <Modal
+            visible={mounted}
+            transparent
+            animationType="none"
+            statusBarTranslucent
+            onRequestClose={onClose}
+        >
+            {/* Dimmed backdrop */}
+            <Animated2.View style={[StyleSheet.absoluteFill, bsStyles.backdrop, backdropStyle]}>
+                <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
+            </Animated2.View>
+
+            {/* Sheet */}
+            <Animated2.View style={[bsStyles.sheet, { paddingBottom: insets.bottom + 8 }, sheetStyle]}>
+                {/* Handle bar */}
+                <View style={bsStyles.handleWrapper}>
+                    <View style={bsStyles.handle} />
+                </View>
+
+                {/* Optional title */}
+                {title ? (
+                    <Text style={bsStyles.sheetTitle}>{title}</Text>
+                ) : null}
+
+                {/* Options */}
+                <View style={bsStyles.optionsList}>
+                    {options.map((opt, i) => (
+                        <React.Fragment key={opt.label}>
+                            <TouchableOpacity
+                                style={bsStyles.optionRow}
+                                activeOpacity={0.65}
+                                onPress={() => {
+                                    onClose();
+                                    setTimeout(() => opt.onPress(), 280);
+                                }}
+                            >
+                                {opt.icon && (
+                                    <View style={[
+                                        bsStyles.iconBox,
+                                        opt.destructive ? bsStyles.iconBoxDestructive : bsStyles.iconBoxDefault,
+                                    ]}>
+                                        {opt.icon}
+                                    </View>
+                                )}
+                                <Text style={[
+                                    bsStyles.optionLabel,
+                                    opt.destructive && bsStyles.optionLabelDestructive,
+                                ]}>
+                                    {opt.label}
+                                </Text>
+                            </TouchableOpacity>
+                            {i < options.length - 1 && <View style={bsStyles.divider} />}
+                        </React.Fragment>
+                    ))}
+                </View>
+
+                {/* Cancel pill */}
+                <TouchableOpacity style={bsStyles.cancelBtn} onPress={onClose} activeOpacity={0.7}>
+                    <Text style={bsStyles.cancelText}>Cancel</Text>
+                </TouchableOpacity>
+            </Animated2.View>
+        </Modal>
+    );
+});
+
+// ── Main Screen ───────────────────────────────────────────────────────────────
+
 export default function ChatRoomScreen() {
     const insets = useSafeAreaInsets();
     const {
-        conversationId,
-        title: paramTitle,
-        schoolId: paramSchoolId,
-        profilePicture: paramProfilePicture,
+        conversationId, title: paramTitle,
+        schoolId: paramSchoolId, profilePicture: paramProfilePicture,
     } = useLocalSearchParams();
     const flatListRef = useRef(null);
 
@@ -208,6 +307,11 @@ export default function ChatRoomScreen() {
     const [replyTo, setReplyTo] = useState(null);
     const [isSending, setIsSending] = useState(false);
     const inputRef = useRef(null);
+
+    // Bottom sheet state
+    const [sheetVisible, setSheetVisible] = useState(false);
+    const [sheetTitle, setSheetTitle] = useState(null);
+    const [sheetOptions, setSheetOptions] = useState([]);
 
     useEffect(() => {
         SecureStore.getItemAsync('user').then((raw) => {
@@ -265,7 +369,6 @@ export default function ChatRoomScreen() {
         return items.reverse();
     }, [messages]);
 
-    // Re-mark as read when new messages arrive
     useEffect(() => {
         if (!schoolId || !conversationId || !listData?.length) return;
         const lastMsg = listData[0];
@@ -275,39 +378,28 @@ export default function ChatRoomScreen() {
         }
     }, [listData?.[0]?.id]);
 
-    // ── Header computed values ──
-    // Use params immediately (no flicker), upgrade to live data once loaded
     const isGroup = conversation
         ? conversation.type === 'COMMUNITY' || conversation.type === 'TEACHER_CLASS'
         : false;
 
     const displayTitle = conversation?.title || paramTitle || 'Chat';
 
-    // profilePicture: use param until conversation loads, then use participant's pic
     const resolvedProfilePicture = useMemo(() => {
         if (isGroup) return null;
-        // Live conversation data takes priority
         if (conversation?.participants?.length > 0) {
             const other = conversation.participants.find(p => p.id !== currentUser?.id || p.userId !== currentUser?.id);
             if (other?.profilePicture) return other.profilePicture;
         }
-        // Fall back to what was passed as param
         return paramProfilePicture || null;
     }, [conversation, currentUser?.id, paramProfilePicture, isGroup]);
 
-    // Subtitle: only show member count / online status once conversation is actually loaded
     const headerSubtitle = useMemo(() => {
-        if (!conversation) return null; // loading — show nothing, avoids "2 members" flash
-
+        if (!conversation) return null;
         if (isGroup) {
             const count = (conversation.participants?.length || 0) + 1;
             return `${count} ${count === 1 ? 'member' : 'members'}`;
         }
-
-        // 1-to-1: show online / last seen
-        const other = conversation.participants?.find(
-            p => p.userId !== currentUser?.id
-        );
+        const other = conversation.participants?.find(p => p.userId !== currentUser?.id);
         if (!other) return null;
         const online = isUserOnline(other.userId);
         if (online) return 'online';
@@ -321,7 +413,8 @@ export default function ChatRoomScreen() {
         return other ? isUserOnline(other.userId) : false;
     }, [conversation, isGroup, currentUser?.id, isUserOnline]);
 
-    // ── Actions ──
+    // ── Actions ───────────────────────────────────────────────────────────────
+
     const handleSend = useCallback(async () => {
         const text = inputText.trim();
         if (!text || isSending) return;
@@ -337,7 +430,7 @@ export default function ChatRoomScreen() {
                 body: { content: text, ...(currentReplyTo && { replyToId: currentReplyTo.id }) },
                 tempId, currentUser,
             });
-        } catch (err) {
+        } catch {
             setInputText(text);
             Alert.alert('Error', 'Failed to send message. Please try again.');
         } finally {
@@ -378,50 +471,75 @@ export default function ChatRoomScreen() {
         }
     }, [currentUser, schoolId, conversationId, deleteMessageMutation]);
 
+    // Opens mute duration sheet
+    const openMuteDurationSheet = useCallback(() => {
+        setSheetTitle('Mute notifications for...');
+        setSheetOptions([
+            {
+                label: '1 Hour',
+                icon: <Clock size={17} color="#374151" />,
+                onPress: () => muteMutation.mutate({ schoolId, conversationId, duration: '1h' }),
+            },
+            {
+                label: '8 Hours',
+                icon: <Clock size={17} color="#374151" />,
+                onPress: () => muteMutation.mutate({ schoolId, conversationId, duration: '8h' }),
+            },
+            {
+                label: '1 Day',
+                icon: <Clock size={17} color="#374151" />,
+                onPress: () => muteMutation.mutate({ schoolId, conversationId, duration: '1d' }),
+            },
+            {
+                label: 'Forever',
+                icon: <BellOff size={17} color="#374151" />,
+                onPress: () => muteMutation.mutate({ schoolId, conversationId, duration: 'forever' }),
+            },
+        ]);
+        setSheetVisible(true);
+    }, [schoolId, conversationId, muteMutation]);
+
     const handleMoreOptions = useCallback(() => {
         const isMuted = conversation?.isMuted;
         const isGroupConv = isGroup;
-        const options = [
-            isMuted ? 'Unmute Notifications' : 'Mute Notifications',
-            isGroupConv ? 'Leave Group' : 'Leave Conversation',
-            'Cancel',
-        ];
-        const handler = (idx) => {
-            if (idx === 0) {
-                if (isMuted) {
-                    muteMutation.mutate({ schoolId, conversationId, duration: 'unmute' });
-                } else {
-                    const muteOptions = ['1 Hour', '8 Hours', '1 Day', 'Forever', 'Cancel'];
-                    const durMap = ['1h', '8h', '1d', 'forever'];
-                    if (Platform.OS === 'ios') {
-                        ActionSheetIOS.showActionSheetWithOptions(
-                            { options: muteOptions, cancelButtonIndex: 4 },
-                            (i) => { if (i < 4) muteMutation.mutate({ schoolId, conversationId, duration: durMap[i] }); }
-                        );
+
+        setSheetTitle(null);
+        setSheetOptions([
+            {
+                label: isMuted ? 'Unmute Notifications' : 'Mute Notifications',
+                icon: isMuted
+                    ? <Bell size={17} color="#374151" />
+                    : <BellOff size={17} color="#374151" />,
+                onPress: () => {
+                    if (isMuted) {
+                        muteMutation.mutate({ schoolId, conversationId, duration: 'unmute' });
                     } else {
-                        Alert.alert('Mute for', null, [
-                            ...muteOptions.slice(0, -1).map((opt, i) => ({ text: opt, onPress: () => muteMutation.mutate({ schoolId, conversationId, duration: durMap[i] }) })),
-                            { text: 'Cancel', style: 'cancel' },
-                        ]);
+                        // open second sheet for duration
+                        openMuteDurationSheet();
                     }
-                }
-            } else if (idx === 1) {
-                Alert.alert(isGroupConv ? 'Leave Group' : 'Leave Conversation', 'You will no longer receive messages from this conversation.', [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Leave', style: 'destructive', onPress: () => { leaveMutation.mutate({ schoolId, conversationId }); router.back(); } },
-                ]);
-            }
-        };
-        if (Platform.OS === 'ios') {
-            ActionSheetIOS.showActionSheetWithOptions({ options, cancelButtonIndex: 2, destructiveButtonIndex: 1 }, handler);
-        } else {
-            Alert.alert('Options', null, [
-                { text: options[0], onPress: () => handler(0) },
-                { text: options[1], onPress: () => handler(1), style: 'destructive' },
-                { text: 'Cancel', style: 'cancel' },
-            ]);
-        }
-    }, [conversation, isGroup, schoolId, conversationId, muteMutation, leaveMutation]);
+                },
+            },
+            {
+                label: isGroupConv ? 'Leave Group' : 'Leave Conversation',
+                icon: <LogOut size={17} color="#ef4444" />,
+                destructive: true,
+                onPress: () => {
+                    Alert.alert(
+                        isGroupConv ? 'Leave Group' : 'Leave Conversation',
+                        'You will no longer receive messages from this conversation.',
+                        [
+                            { text: 'Cancel', style: 'cancel' },
+                            {
+                                text: 'Leave', style: 'destructive',
+                                onPress: () => { leaveMutation.mutate({ schoolId, conversationId }); router.back(); },
+                            },
+                        ]
+                    );
+                },
+            },
+        ]);
+        setSheetVisible(true);
+    }, [conversation, isGroup, schoolId, conversationId, muteMutation, leaveMutation, openMuteDurationSheet]);
 
     const renderItem = useCallback(({ item, index }) => {
         if (item.type === 'date') {
@@ -458,23 +576,19 @@ export default function ChatRoomScreen() {
         );
     }, [currentUser, listData, handleLongPress]);
 
+    // ── Render ────────────────────────────────────────────────────────────────
+
     return (
         <View style={[styles.container, { paddingTop: insets.top }]}>
-            <StatusBar style="dark" backgroundColor="#fff" />
+            <StatusBar style="dark" backgroundColor="transparent" translucent />
 
-            {/* ── Header ── */}
+            {/* Header */}
             <View style={styles.header}>
+                <BlurView intensity={60} tint="light" style={StyleSheet.absoluteFill} />
                 <HapticTouchable onPress={() => router.back()} style={styles.backBtn}>
                     <ArrowLeft size={22} color="#111" strokeWidth={2} />
                 </HapticTouchable>
-
-                {/* Avatar (1-to-1 only) */}
-                <HeaderAvatar
-                    profilePicture={resolvedProfilePicture}
-                    title={displayTitle}
-                    isGroup={isGroup}
-                />
-
+                <HeaderAvatar profilePicture={resolvedProfilePicture} title={displayTitle} isGroup={isGroup} />
                 <View style={styles.headerInfo}>
                     <Text style={styles.headerTitle} numberOfLines={1}>{displayTitle}</Text>
                     {headerSubtitle && (
@@ -484,15 +598,14 @@ export default function ChatRoomScreen() {
                         </View>
                     )}
                 </View>
-
                 <HapticTouchable onPress={handleMoreOptions} style={styles.moreBtn}>
                     <MoreVertical size={22} color="#111" strokeWidth={2} />
                 </HapticTouchable>
             </View>
 
-            {/* ── Messages ── */}
+            {/* Messages */}
             <KeyboardAvoidingView
-                style={{ flex: 1 }}
+                style={{ flex: 1, backgroundColor: '#f8f9fa' }}
                 behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                 keyboardVerticalOffset={0}
             >
@@ -544,19 +657,23 @@ export default function ChatRoomScreen() {
 
                 <TypingIndicator users={typingUsers} />
 
-                {/* Input */}
-                <View style={[styles.inputBar, { paddingBottom: Math.max(insets.bottom, 8) }]}>
-                    <View style={styles.inputRow}>
-                        <TextInput
-                            ref={inputRef}
-                            style={styles.textInput}
-                            placeholder="Type a message..."
-                            placeholderTextColor="#9ca3af"
-                            value={inputText}
-                            onChangeText={(text) => { setInputText(text); sendTyping(); }}
-                            multiline
-                            maxLength={5000}
-                        />
+                {/* Input bar */}
+                <View style={styles.inputBar}>
+                    <BlurView intensity={60} tint="light" style={StyleSheet.absoluteFill} />
+                    <View style={[styles.inputRow, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+                        <View style={styles.inputPill}>
+                            <TextInput
+                                ref={inputRef}
+                                style={styles.textInput}
+                                placeholder="Type a message..."
+                                placeholderTextColor="#9ca3af"
+                                value={inputText}
+                                onChangeText={(text) => { setInputText(text); sendTyping(); }}
+                                multiline
+                                maxLength={5000}
+                                textAlignVertical="center"
+                            />
+                        </View>
                         <HapticTouchable
                             style={[styles.sendBtn, (!inputText.trim() || isSending) && styles.sendBtnDisabled]}
                             onPress={handleSend}
@@ -571,41 +688,42 @@ export default function ChatRoomScreen() {
                     </View>
                 </View>
             </KeyboardAvoidingView>
+
+            {/* Bottom Sheet */}
+            <BottomSheetModal
+                visible={sheetVisible}
+                title={sheetTitle}
+                options={sheetOptions}
+                onClose={() => setSheetVisible(false)}
+            />
         </View>
     );
 }
 
-const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#f8f9fa' },
+// ── Main Styles ───────────────────────────────────────────────────────────────
 
-    // Header
+const styles = StyleSheet.create({
+    container: { flex: 1, backgroundColor: '#fff' },
+
     header: {
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 12,
         paddingVertical: 10,
-        backgroundColor: '#fff',
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: '#e5e7eb',
+        borderBottomColor: 'rgba(0,0,0,0.08)',
         gap: 10,
+        overflow: 'hidden',
+        backgroundColor: 'rgba(255,255,255,0.7)',
     },
     backBtn: { padding: 4 },
-    // Small avatar in header
-    headerAvatar: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-    },
+    headerAvatar: { width: 36, height: 36, borderRadius: 18 },
     headerAvatarFallback: {
         backgroundColor: '#eff6ff',
         alignItems: 'center',
         justifyContent: 'center',
     },
-    headerAvatarInitial: {
-        fontSize: 15,
-        fontWeight: '700',
-        color: '#0469ff',
-    },
+    headerAvatarInitial: { fontSize: 15, fontWeight: '700', color: '#0469ff' },
     headerInfo: { flex: 1 },
     headerTitle: { fontSize: 16, fontWeight: '700', color: '#111' },
     statusRow: { flexDirection: 'row', alignItems: 'center', marginTop: 1, gap: 4 },
@@ -613,7 +731,6 @@ const styles = StyleSheet.create({
     headerSubtitle: { fontSize: 12, color: '#6b7280' },
     moreBtn: { padding: 4 },
 
-    // Messages
     messagesContent: { padding: 12, paddingBottom: 8 },
     messageRow: { flexDirection: 'row', marginBottom: 4 },
     messageRowMine: { justifyContent: 'flex-end' },
@@ -623,7 +740,6 @@ const styles = StyleSheet.create({
     smallAvatarPlaceholder: { backgroundColor: '#e5e7eb', alignItems: 'center', justifyContent: 'center' },
     smallAvatarInitial: { fontSize: 13, fontWeight: '700', color: '#6b7280' },
 
-    // Bubble
     bubble: { maxWidth: '78%', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 18 },
     bubbleMine: { backgroundColor: '#0469ff', borderBottomRightRadius: 6 },
     bubbleOther: {
@@ -644,7 +760,6 @@ const styles = StyleSheet.create({
     timeText: { fontSize: 10, color: '#9ca3af' },
     timeTextMine: { color: 'rgba(255,255,255,0.65)' },
 
-    // Reply in bubble
     replyPreview: {
         flexDirection: 'row', alignItems: 'center',
         backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: 8,
@@ -654,10 +769,9 @@ const styles = StyleSheet.create({
     replySenderName: { fontSize: 11, fontWeight: '700', color: '#0469ff' },
     replyContent: { fontSize: 12, color: '#6b7280', marginTop: 1 },
 
-    // Reply bar above input
     replyBar2: {
         flexDirection: 'row', alignItems: 'center',
-        backgroundColor: '#fff',
+        backgroundColor: 'rgba(255,255,255,0.9)',
         paddingHorizontal: 16, paddingVertical: 10,
         borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e5e7eb',
     },
@@ -665,7 +779,6 @@ const styles = StyleSheet.create({
     replyBar2Sender: { fontSize: 12, fontWeight: '600', color: '#0469ff' },
     replyBar2Text: { fontSize: 13, color: '#6b7280', marginTop: 1 },
 
-    // Attachments
     attachmentContainer: { marginBottom: 6 },
     attachmentImage: { width: 200, height: 150, borderRadius: 12, marginBottom: 4 },
     fileAttachment: {
@@ -675,40 +788,144 @@ const styles = StyleSheet.create({
     },
     fileName: { fontSize: 12, color: '#374151', flex: 1 },
 
-    // Date separator
     dateSeparator: { flexDirection: 'row', alignItems: 'center', marginVertical: 16, paddingHorizontal: 4 },
     dateLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: '#d1d5db' },
     dateLabel: { fontSize: 12, color: '#9ca3af', fontWeight: '600', paddingHorizontal: 12 },
 
-    // Input
     inputBar: {
-        backgroundColor: '#fff',
-        paddingHorizontal: 12, paddingTop: 8,
-        borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#e5e7eb',
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: 'rgba(0,0,0,0.08)',
+        overflow: 'hidden',
+        backgroundColor: 'rgba(255,255,255,0.7)',
     },
     inputRow: {
-        flexDirection: 'row', alignItems: 'flex-end',
-        backgroundColor: '#f3f4f6', borderRadius: 24,
-        paddingHorizontal: 16,
-        paddingVertical: Platform.OS === 'ios' ? 10 : 4,
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 12,
+        paddingTop: 10,
         gap: 8,
     },
-    textInput: {
-        flex: 1, fontSize: 15, color: '#111', maxHeight: 100,
-        paddingTop: Platform.OS === 'ios' ? 0 : 8,
-
-        paddingBottom: Platform.OS === 'ios' ? 0 : 8,
+    inputPill: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.06)',
+        borderRadius: 24,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(0,0,0,0.09)',
+        paddingHorizontal: 16,
+        paddingVertical: Platform.OS === 'ios' ? 10 : 4,
+        justifyContent: 'center',
+        minHeight: 44,
     },
-    sendBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#0469ff', alignItems: 'center', justifyContent: 'center' },
-    sendBtnDisabled: { opacity: 0.4 },
+    textInput: {
+        fontSize: 15,
+        color: '#111',
+        maxHeight: 100,
+        padding: 0,
+        margin: 0,
+        includeFontPadding: false,
+        textAlignVertical: 'center',
+    },
+    sendBtn: {
+        width: 40, height: 40, borderRadius: 20,
+        backgroundColor: '#0469ff',
+        alignItems: 'center', justifyContent: 'center',
+    },
+    sendBtnDisabled: { opacity: 0.35 },
 
-    // Empty
     emptyMessages: { alignItems: 'center', paddingVertical: 60 },
     emptyMessagesText: { fontSize: 15, color: '#9ca3af' },
 
-    // Typing
     typingContainer: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 8, gap: 6 },
     typingText: { fontSize: 12, color: '#6b7280', fontStyle: 'italic' },
     dotContainer: { flexDirection: 'row', gap: 2, alignItems: 'center', height: 12 },
     typingDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#9ca3af' },
+});
+
+// ── Bottom Sheet Styles ───────────────────────────────────────────────────────
+
+const bsStyles = StyleSheet.create({
+    backdrop: {
+        backgroundColor: 'rgba(0,0,0,0.45)',
+    },
+    sheet: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        backgroundColor: '#fff',
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        paddingHorizontal: 16,
+        paddingTop: 8,
+    },
+    handleWrapper: {
+        alignItems: 'center',
+        paddingVertical: 10,
+    },
+    handle: {
+        width: 36,
+        height: 4,
+        borderRadius: 2,
+        backgroundColor: '#d1d5db',
+    },
+    sheetTitle: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#9ca3af',
+        textAlign: 'center',
+        marginBottom: 12,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    optionsList: {
+        backgroundColor: '#f9fafb',
+        borderRadius: 14,
+        overflow: 'hidden',
+        marginBottom: 10,
+    },
+    optionRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 15,
+        paddingHorizontal: 16,
+        gap: 14,
+    },
+    divider: {
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: '#e5e7eb',
+        marginLeft: 56,   // indent past icon
+    },
+    iconBox: {
+        width: 34,
+        height: 34,
+        borderRadius: 9,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    iconBoxDefault: {
+        backgroundColor: '#f3f4f6',
+    },
+    iconBoxDestructive: {
+        backgroundColor: '#fef2f2',
+    },
+    optionLabel: {
+        fontSize: 15,
+        color: '#111',
+        fontWeight: '500',
+    },
+    optionLabelDestructive: {
+        color: '#ef4444',
+    },
+    cancelBtn: {
+        backgroundColor: '#f3f4f6',
+        borderRadius: 14,
+        paddingVertical: 15,
+        alignItems: 'center',
+        marginBottom: 4,
+    },
+    cancelText: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#374151',
+    },
 });

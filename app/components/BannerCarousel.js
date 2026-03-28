@@ -225,6 +225,8 @@ const styles = StyleSheet.create({
         marginHorizontal: 16,
         borderRadius: 16,
         overflow: 'hidden',
+        borderWidth: 0.9,
+        borderColor: '#edeff0ff',
         backgroundColor: '#f1f5f9',
         justifyContent: 'center',
         alignItems: 'center',

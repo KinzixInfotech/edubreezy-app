@@ -1453,37 +1453,68 @@ export default function ProfileScreen() {
           <Animated2.View entering={FadeInDown.delay(575).duration(600)} style={styles.section}>
             <Text style={styles.sectionTitle}>Linked Accounts</Text>
             <View style={styles.menuContainer}>
-              <View style={[styles.menuItem, styles.lastMenuItem, { paddingVertical: 14 }]}>
-                <View style={[styles.menuIconContainer, { backgroundColor: googleLinked ? '#10b98115' : '#EA433515' }]}>
-                  {googleLinked ? (
-                    <Link2 size={20} color="#10b981" />
-                  ) : (
-                    <Link2 size={20} color="#EA4335" />
-                  )}
+              <View style={[styles.menuItem, styles.lastMenuItem, { paddingVertical: 16 }]}>
+
+                {/* Icon */}
+                <View
+                  style={[
+                    styles.menuIconContainer,
+                    { backgroundColor: googleLinked ? '#10b98115' : '#EA433515' },
+                  ]}
+                >
+                  <Image
+                    source={require('../../assets/google.png')}
+                    style={{ width: 30, height: 30 }}
+                  />
                 </View>
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Text style={styles.menuText}>Google Account</Text>
-                    {googleLinked && (
-                      <View style={{ backgroundColor: '#DCFCE7', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#16A34A' }} />
-                        <Text style={{ fontSize: 11, fontWeight: '600', color: '#16A34A' }}>Connected</Text>
-                      </View>
-                    )}
-                  </View>
-                  {googleLinked && googleIdentity?.identity_data?.email ? (
-                    <Text style={{ fontSize: 12, color: '#6B7280', marginTop: 3 }}>
+
+                {/* Text block */}
+                <View style={{ flex: 1, gap: 4 }}>
+                  <Text style={styles.menuText}>Google Account</Text>
+
+                  {googleLinked && googleIdentity?.identity_data?.email && (
+                    <Text style={{ fontSize: 12, color: '#6B7280' }}>
                       {googleIdentity.identity_data.email}
                     </Text>
-                  ) : !googleLinked ? (
-                    <Text style={{ fontSize: 12, color: '#9CA3AF', marginTop: 3 }}>
+                  )}
+
+                  {!googleLinked && (
+                    <Text style={{ fontSize: 12, color: '#9CA3AF' }}>
                       Link your Google account for easy sign-in
                     </Text>
-                  ) : null}
+                  )}
+
+                  {googleLinked && (
+                    <View
+                      style={{
+                        alignSelf: 'flex-start',
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 5,
+                        backgroundColor: '#DCFCE7',
+                        paddingHorizontal: 8,
+                        paddingVertical: 3,
+                        borderRadius: 10,
+                        marginTop: 2,
+                      }}
+                    >
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#16A34A' }} />
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: '#16A34A' }}>Connected</Text>
+                    </View>
+                  )}
                 </View>
+
+                {/* Action button */}
                 {googleLinked ? (
                   <HapticTouchable onPress={handleUnlinkGoogle}>
-                    <View style={{ backgroundColor: '#FEE2E2', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 12 }}>
+                    <View
+                      style={{
+                        backgroundColor: '#FEE2E2',
+                        paddingHorizontal: 14,
+                        paddingVertical: 8,
+                        borderRadius: 12,
+                      }}
+                    >
                       <Text style={{ fontSize: 12, fontWeight: '600', color: '#EF4444' }}>Unlink</Text>
                     </View>
                   </HapticTouchable>
@@ -1492,16 +1523,23 @@ export default function ProfileScreen() {
                     {linkingGoogle ? (
                       <ActivityIndicator size="small" color="#0469ff" />
                     ) : (
-                      <View style={{ backgroundColor: '#DBEAFE', paddingHorizontal: 14, paddingVertical: 7, borderRadius: 12 }}>
+                      <View
+                        style={{
+                          backgroundColor: '#DBEAFE',
+                          paddingHorizontal: 14,
+                          paddingVertical: 8,
+                          borderRadius: 12,
+                        }}
+                      >
                         <Text style={{ fontSize: 12, fontWeight: '600', color: '#2563EB' }}>Link</Text>
                       </View>
                     )}
                   </HapticTouchable>
                 )}
+
               </View>
             </View>
           </Animated2.View>
-
           {/* Logout */}
           <Animated2.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
             <View style={styles.menuContainer}>

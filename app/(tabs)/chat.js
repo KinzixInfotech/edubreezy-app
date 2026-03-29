@@ -2,7 +2,7 @@
 // CHAT TAB - Conversation List
 // ============================================
 
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
     View,
     Text,
@@ -13,15 +13,19 @@ import {
     RefreshControl,
     Platform,
     ActivityIndicator,
+    Animated as RNAnimated,
 } from 'react-native';
 import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import { MessageCircle, Plus, BellOff, Search, Users } from 'lucide-react-native';
+import { MessageCircle, Plus, BellOff, Search, Users, Trash2 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Swipeable } from 'react-native-gesture-handler';
+import { useQueryClient } from '@tanstack/react-query';
 import HapticTouchable from '../components/HapticTouch';
-import { useConversations } from '../../hooks/useChat';
+import { useConversations, chatKeys } from '../../hooks/useChat';
 import { usePresenceStatus } from '../../hooks/usePresenceStatus';
 import { useShimmer, Bone } from '../components/ScreenSkeleton';
+import { deleteConversation } from '../../services/chatService';
 
 // ── Skeleton ──
 function ChatListSkeleton() {
@@ -98,7 +102,10 @@ function ConversationRow({ item, currentUserId, onPress, isOnline }) {
             typeof otherParticipant?.role === 'string'
                 ? otherParticipant.role
                 : otherParticipant?.role?.name || '';
-        return r === 'TEACHING_STAFF' ? 'Teacher' : r === 'PARENT' ? 'Parent' : r || null;
+        const roleName = r === 'TEACHING_STAFF' ? 'Teacher' : r === 'PARENT' ? 'Parent' : r || null;
+        const classSection = otherParticipant?.classSection;
+        if (roleName && classSection) return `${roleName} · ${classSection}`;
+        return roleName;
     })();
 
     return (
@@ -190,8 +197,9 @@ export default function ChatScreen() {
             .finally(() => setIsUserLoaded(true));
     }, []);
 
-    const { data, isLoading, isRefetching, refetch } = useConversations(schoolId);
+    const { data, isLoading, isRefetching, refetch } = useConversations(schoolId, { userId });
     const { isUserOnline } = usePresenceStatus(schoolId, { id: userId });
+    const qc = useQueryClient();
 
     const conversations = useMemo(() => {
         const list = data?.conversations || [];
@@ -204,6 +212,25 @@ export default function ChatScreen() {
         );
     }, [data, searchQuery]);
 
+    // ── Delete conversation (swipe) ──
+    const handleDeleteConversation = useCallback(async (convId) => {
+        if (!schoolId) return;
+        // Optimistic removal from cache
+        qc.setQueriesData({ queryKey: chatKeys.conversations(schoolId) }, (old) => {
+            if (!old?.conversations) return old;
+            return {
+                ...old,
+                conversations: old.conversations.filter(c => c.id !== convId),
+            };
+        });
+        try {
+            await deleteConversation(schoolId, convId);
+        } catch (e) {
+            // Rollback on failure
+            refetch();
+        }
+    }, [schoolId, qc, refetch]);
+
     // ── Navigate to conversation — includes profilePicture for the header avatar ──
     const handleConversationPress = useCallback((conv) => {
         const isGroup =
@@ -212,17 +239,24 @@ export default function ChatScreen() {
             (conv.participants?.length || 0) > 1;
         const otherParticipant = conv.participants?.[0];
 
+        const r = typeof otherParticipant?.role === 'string'
+            ? otherParticipant.role
+            : otherParticipant?.role?.name || '';
+        const roleName = r === 'TEACHING_STAFF' ? 'Teacher' : r === 'PARENT' ? 'Parent' : r || '';
+
         router.push({
             pathname: '/(screens)/chat/[conversationId]',
             params: {
                 conversationId: conv.id,
                 title: conv.title || 'Chat',
                 schoolId,
-                // Only pass for 1-to-1 chats; groups use a group icon instead
                 profilePicture:
                     !isGroup && otherParticipant?.profilePicture
                         ? otherParticipant.profilePicture
                         : undefined,
+                otherRole: roleName || undefined,
+                classSection: otherParticipant?.classSection || undefined,
+                lastSeenAt: otherParticipant?.lastSeenAt || undefined,
             },
         });
     }, [schoolId]);
@@ -234,15 +268,42 @@ export default function ChatScreen() {
     const renderItem = useCallback(({ item }) => {
         const otherId = item.participants?.[0]?.id;
         const online = item.type === 'DIRECT' && otherId ? isUserOnline(otherId) : false;
+
+        const renderRightActions = (progress) => {
+            const trans = progress.interpolate({
+                inputRange: [0, 1],
+                outputRange: [80, 0],
+            });
+            return (
+                <RNAnimated.View style={[styles.swipeDeleteContainer, { transform: [{ translateX: trans }] }]}>
+                    <HapticTouchable
+                        style={styles.swipeDeleteBtn}
+                        onPress={() => handleDeleteConversation(item.id)}
+                        haptic="medium"
+                    >
+                        <Trash2 size={20} color="#fff" strokeWidth={2} />
+                        <Text style={styles.swipeDeleteText}>Delete</Text>
+                    </HapticTouchable>
+                </RNAnimated.View>
+            );
+        };
+
         return (
-            <ConversationRow
-                item={item}
-                currentUserId={userId}
-                onPress={handleConversationPress}
-                isOnline={online}
-            />
+            <Swipeable
+                renderRightActions={renderRightActions}
+                overshootRight={false}
+                friction={2}
+                rightThreshold={40}
+            >
+                <ConversationRow
+                    item={item}
+                    currentUserId={userId}
+                    onPress={handleConversationPress}
+                    isOnline={online}
+                />
+            </Swipeable>
         );
-    }, [userId, handleConversationPress, isUserOnline]);
+    }, [userId, handleConversationPress, isUserOnline, handleDeleteConversation]);
 
     const keyExtractor = useCallback((item) => item.id, []);
 
@@ -451,4 +512,24 @@ const styles = StyleSheet.create({
     },
     emptyTitle: { fontSize: 20, fontWeight: '700', color: '#1a1a2e', marginBottom: 8 },
     emptySubtitle: { fontSize: 15, color: '#6b7280', textAlign: 'center', lineHeight: 22 },
+
+    // Swipe delete
+    swipeDeleteContainer: {
+        width: 80,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    swipeDeleteBtn: {
+        flex: 1,
+        width: '100%',
+        backgroundColor: '#ef4444',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 4,
+    },
+    swipeDeleteText: {
+        color: '#fff',
+        fontSize: 11,
+        fontWeight: '600',
+    },
 });

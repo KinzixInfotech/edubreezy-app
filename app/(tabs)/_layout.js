@@ -3,6 +3,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState, useCallback } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { useNotification } from '../../contexts/NotificationContext';
+import { useChat } from '../../contexts/ChatContext';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { View, Text, StyleSheet, Platform, Image } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -13,6 +14,7 @@ function TabsLayout() {
   const [role, setRole] = useState(null);
   const [user, setUser] = useState(null);
   const { noticeBadgeCount } = useNotification();
+  const { chatBadgeCount } = useChat();
   const insets = useSafeAreaInsets();
 
   useEffect(() => {
@@ -167,6 +169,7 @@ function TabsLayout() {
           href: tabConfig.showChat ? undefined : null,
           tabBarItemStyle: tabConfig.showChat ? undefined : { display: 'none' },
           unmountOnBlur: false,
+          tabBarBadge: chatBadgeCount > 0 ? chatBadgeCount : undefined,
           tabBarIcon: ({ focused, color, size }) => (
             <Ionicons name={focused ? 'chatbubbles' : 'chatbubbles-outline'} size={size} color={color} />
           ),

@@ -1,16 +1,16 @@
 // ============================================
-// PRESENCE STATUS - Online/Offline tracking
-// Supabase Presence + Heartbeat API
+// PRESENCE STATUS - Online/Offline tracking via Supabase Presence
+// Heartbeat is handled globally in ChatContext — NOT here
 // ============================================
 
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
-import { sendHeartbeat } from '../services/chatService';
-
-const HEARTBEAT_INTERVAL_MS = 60 * 1000; // 1 minute
 
 /**
- * Global presence hook to track who is online.
+ * Presence hook to track who is online via Supabase Presence channels.
+ * 
+ * NOTE: Heartbeat API is managed in ChatContext (single global interval).
+ * This hook only manages Supabase Presence for real-time online status.
  * 
  * @param {string} schoolId - The school to track presence for
  * @param {object} currentUser - { id, name } of current user
@@ -19,20 +19,6 @@ const HEARTBEAT_INTERVAL_MS = 60 * 1000; // 1 minute
 export function usePresenceStatus(schoolId, currentUser) {
     const [onlineUsers, setOnlineUsers] = useState(new Set());
     const channelRef = useRef(null);
-
-    // ── Heartbeat ──
-    useEffect(() => {
-        if (!currentUser?.id) return;
-
-        // Immediate heartbeat on mount
-        sendHeartbeat().catch(e => console.error('Initial heartbeat failed:', e));
-
-        const interval = setInterval(() => {
-            sendHeartbeat().catch(e => console.error('Heartbeat failed:', e));
-        }, HEARTBEAT_INTERVAL_MS);
-
-        return () => clearInterval(interval);
-    }, [currentUser?.id]);
 
     // ── Supabase Presence ──
     useEffect(() => {

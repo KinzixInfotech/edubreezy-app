@@ -5,7 +5,7 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
     View, Text, FlatList, TextInput, StyleSheet, Image,
-    KeyboardAvoidingView, Platform, ActionSheetIOS, Alert,
+    KeyboardAvoidingView, Platform, Alert, Vibration,
     ActivityIndicator, Animated, Modal, TouchableOpacity,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -14,13 +14,18 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
     ArrowLeft, Send, Paperclip, MoreVertical,
     X, Clock, Check, CheckCheck, BellOff, Bell, LogOut,
+    Copy, Reply, Trash2, ImagePlus,
 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
+import * as Haptics from 'expo-haptics';
+import { Video, ResizeMode } from 'expo-av';
 import HapticTouchable from '../../components/HapticTouch';
+import { pickMedia, getPresignedUrls, uploadToR2, detectMediaType } from '../../../lib/r2Upload';
+import { useQueryClient } from '@tanstack/react-query';
 import {
     useMessages, useSendMessage, useDeleteMessage,
     useMuteConversation, useMarkAsRead, useLeaveConversation,
-    useConversation, useMarkAsDelivered,
+    useConversation, useMarkAsDelivered, chatKeys
 } from '../../../hooks/useChat';
 import { useChatRealtime } from '../../../hooks/useChatRealtime';
 import { useTypingIndicator } from '../../../hooks/useTypingIndicator';
@@ -46,7 +51,9 @@ function getDateLabel(dateStr) {
 }
 
 function formatTime(dateStr) {
-    return new Date(dateStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (!dateStr) return '';
+    const d = new Date(dateStr.endsWith('Z') ? dateStr : dateStr + 'Z');
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function formatLastSeen(dateStr) {
@@ -120,7 +127,7 @@ const MessageStatusTicks = ({ status, isMine }) => {
 
 // ── Message Bubble ────────────────────────────────────────────────────────────
 
-const MessageBubble = React.memo(function MessageBubble({ message, isMine, showSender, onLongPress }) {
+const MessageBubble = React.memo(function MessageBubble({ message, isMine, showSender, onLongPress, isSelected, onMediaPress }) {
     if (message.isDeleted) {
         return (
             <View style={[styles.bubble, isMine ? styles.bubbleMine : styles.bubbleOther, styles.bubbleDeleted]}>
@@ -130,8 +137,17 @@ const MessageBubble = React.memo(function MessageBubble({ message, isMine, showS
     }
     return (
         <HapticTouchable
-            style={[styles.bubble, isMine ? styles.bubbleMine : styles.bubbleOther]}
-            onPress={() => { }}
+            style={[
+                styles.bubble,
+                isMine ? styles.bubbleMine : styles.bubbleOther,
+                isSelected && { opacity: 0.7, borderWidth: 2, borderColor: '#0469ff' },
+            ]}
+            onPress={() => {
+                const atts = Array.isArray(message.attachments) ? message.attachments : (() => { try { return JSON.parse(message.attachments); } catch { return null; } })();
+                if (atts && atts.length > 0 && onMediaPress) {
+                    onMediaPress(atts[0]);
+                }
+            }}
             onLongPress={() => onLongPress(message)}
             delayLongPress={400}
             activeOpacity={0.85}
@@ -142,27 +158,63 @@ const MessageBubble = React.memo(function MessageBubble({ message, isMine, showS
                     {typeof message.sender.name === 'string' ? message.sender.name : message.sender.name?.name || ''}
                 </Text>
             )}
+
             {message.replyTo && (
-                <View style={styles.replyPreview}>
-                    <View style={styles.replyBar} />
+                <View style={[styles.replyPreview, isMine && styles.replyPreviewMine]}>
+                    <View style={[styles.replyBar, isMine && { backgroundColor: 'rgba(255,255,255,0.7)' }]} />
                     <View>
-                        <Text style={styles.replySenderName}>{message.replyTo.senderName || 'Unknown'}</Text>
-                        <Text style={styles.replyContent} numberOfLines={1}>{message.replyTo.content || 'Message'}</Text>
+                        <Text style={[styles.replySenderName, isMine && { color: 'rgba(255,255,255,0.85)' }]}>
+                            {(() => {
+                                const replyName = message.replyTo.senderName || 'Unknown';
+                                const myName = typeof message.sender?.name === 'string'
+                                    ? message.sender.name
+                                    : message.sender?.name?.name || '';
+                                const isSelf = replyName === myName;
+                                return isSelf ? `${replyName} (You)` : replyName;
+                            })()}
+                        </Text>
+                        <Text style={[styles.replyContent, isMine && { color: 'rgba(255,255,255,0.7)' }]} numberOfLines={1}>{message.replyTo.content || 'Message'}</Text>
                     </View>
                 </View>
             )}
-            {message.attachments?.length > 0 && (
+            {message.attachments && (typeof message.attachments === 'string' ? message.attachments.length > 2 : message.attachments?.length > 0) && (
                 <View style={styles.attachmentContainer}>
-                    {message.attachments.map((att, idx) =>
-                        att.mimeType?.startsWith('image/') ? (
-                            <Image key={idx} source={{ uri: att.url }} style={styles.attachmentImage} resizeMode="cover" />
-                        ) : (
-                            <View key={idx} style={styles.fileAttachment}>
-                                <Paperclip size={14} color="#6b7280" />
-                                <Text style={styles.fileName} numberOfLines={1}>{att.fileName || 'File'}</Text>
-                            </View>
-                        )
-                    )}
+                    {(Array.isArray(message.attachments) ? message.attachments : (() => { try { return JSON.parse(message.attachments); } catch { return []; } })()).map((att, idx) => {
+                        const mediaType = detectMediaType(att.url || att.mimeType || '');
+                        let mediaComponent = null;
+
+                        if (mediaType === 'image' || mediaType === 'gif') {
+                            mediaComponent = <Image source={{ uri: att.url }} style={styles.attachmentImage} resizeMode="cover" />;
+                        } else if (mediaType === 'video') {
+                            mediaComponent = (
+                                <Video
+                                    source={{ uri: att.url }}
+                                    style={styles.attachmentVideo}
+                                    useNativeControls
+                                    resizeMode={ResizeMode.CONTAIN}
+                                    isLooping={false}
+                                />
+                            );
+                        } else {
+                            mediaComponent = (
+                                <View style={styles.fileAttachment}>
+                                    <Paperclip size={14} color="#6b7280" />
+                                    <Text style={styles.fileName} numberOfLines={1}>{att.fileName || 'File'}</Text>
+                                </View>
+                            );
+                        }
+
+                        return (
+                            <TouchableOpacity key={idx} style={{ position: 'relative' }} activeOpacity={0.9} onPress={() => onMediaPress && onMediaPress(att)}>
+                                {mediaComponent}
+                                {message.isUploading && (
+                                    <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', borderRadius: 12, marginBottom: 4 }]}>
+                                        <ActivityIndicator size="large" color="#fff" />
+                                    </View>
+                                )}
+                            </TouchableOpacity>
+                        );
+                    })}
                 </View>
             )}
             {message.content ? (
@@ -203,7 +255,6 @@ const BottomSheetModal = React.memo(function BottomSheetModal({ visible, title, 
     useEffect(() => {
         if (visible) {
             setMounted(true);
-            // slight delay so the modal is mounted before animating
             setTimeout(() => {
                 backdropOpacity.value = withTiming(1, { duration: 240 });
                 translateY.value = withTiming(0, { duration: 320 });
@@ -233,24 +284,19 @@ const BottomSheetModal = React.memo(function BottomSheetModal({ visible, title, 
             statusBarTranslucent
             onRequestClose={onClose}
         >
-            {/* Dimmed backdrop */}
             <Animated2.View style={[StyleSheet.absoluteFill, bsStyles.backdrop, backdropStyle]}>
                 <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={onClose} />
             </Animated2.View>
 
-            {/* Sheet */}
             <Animated2.View style={[bsStyles.sheet, { paddingBottom: insets.bottom + 8 }, sheetStyle]}>
-                {/* Handle bar */}
                 <View style={bsStyles.handleWrapper}>
                     <View style={bsStyles.handle} />
                 </View>
 
-                {/* Optional title */}
                 {title ? (
                     <Text style={bsStyles.sheetTitle}>{title}</Text>
                 ) : null}
 
-                {/* Options */}
                 <View style={bsStyles.optionsList}>
                     {options.map((opt, i) => (
                         <React.Fragment key={opt.label}>
@@ -282,7 +328,6 @@ const BottomSheetModal = React.memo(function BottomSheetModal({ visible, title, 
                     ))}
                 </View>
 
-                {/* Cancel pill */}
                 <TouchableOpacity style={bsStyles.cancelBtn} onPress={onClose} activeOpacity={0.7}>
                     <Text style={bsStyles.cancelText}>Cancel</Text>
                 </TouchableOpacity>
@@ -298,6 +343,8 @@ export default function ChatRoomScreen() {
     const {
         conversationId, title: paramTitle,
         schoolId: paramSchoolId, profilePicture: paramProfilePicture,
+        otherRole: paramRole, classSection: paramClassSection,
+        lastSeenAt: paramLastSeenAt,
     } = useLocalSearchParams();
     const flatListRef = useRef(null);
 
@@ -305,10 +352,10 @@ export default function ChatRoomScreen() {
     const [schoolId, setSchoolId] = useState(paramSchoolId || null);
     const [inputText, setInputText] = useState('');
     const [replyTo, setReplyTo] = useState(null);
-    const [isSending, setIsSending] = useState(false);
+    const [isUploading, setIsUploading] = useState(false);
+
     const inputRef = useRef(null);
 
-    // Bottom sheet state
     const [sheetVisible, setSheetVisible] = useState(false);
     const [sheetTitle, setSheetTitle] = useState(null);
     const [sheetOptions, setSheetOptions] = useState([]);
@@ -331,10 +378,12 @@ export default function ChatRoomScreen() {
     const { data: convData } = useConversation(schoolId, conversationId);
     const conversation = convData?.conversation;
 
-    const { data: messagesData, isLoading: messagesLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useMessages(schoolId, conversationId);
+    const { data: messagesPages, isLoading: messagesLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useMessages(schoolId, conversationId);
     const sendMessageMutation = useSendMessage();
     const deleteMessageMutation = useDeleteMessage();
     const muteMutation = useMuteConversation();
+    const queryClient = useQueryClient();
+
     const markReadMutation = useMarkAsRead();
     const markAsDeliveredMutation = useMarkAsDelivered();
     const leaveMutation = useLeaveConversation();
@@ -343,6 +392,7 @@ export default function ChatRoomScreen() {
     const { sendTyping, stopTyping, typingUsers } = useTypingIndicator(conversationId, currentUser, { enabled: !!conversationId && !!currentUser });
     const { isUserOnline } = usePresenceStatus(schoolId, currentUser);
 
+    const lastSeenMsgId = useRef(null);
     useEffect(() => {
         if (!schoolId || !conversationId) return;
         markAsDeliveredMutation.mutate({ schoolId, conversationId });
@@ -350,9 +400,9 @@ export default function ChatRoomScreen() {
     }, [schoolId, conversationId]);
 
     const messages = useMemo(() => {
-        if (!messagesData?.pages) return [];
-        return messagesData.pages.flatMap((page) => page.messages || []);
-    }, [messagesData]);
+        if (!messagesPages?.pages) return [];
+        return messagesPages.pages.flatMap((page) => page.messages || []);
+    }, [messagesPages]);
 
     const listData = useMemo(() => {
         const items = [];
@@ -371,11 +421,12 @@ export default function ChatRoomScreen() {
 
     useEffect(() => {
         if (!schoolId || !conversationId || !listData?.length) return;
-        const lastMsg = listData[0];
-        if (lastMsg?.type === 'message' && lastMsg.senderId !== currentUser?.id) {
-            markAsDeliveredMutation.mutate({ schoolId, conversationId });
-            markReadMutation.mutate({ schoolId, conversationId });
-        }
+        const newestMsg = listData[0];
+        if (newestMsg?.type !== 'message') return;
+        if (newestMsg.senderId === currentUser?.id) return;
+        if (newestMsg.id === lastSeenMsgId.current) return;
+        lastSeenMsgId.current = newestMsg.id;
+        markReadMutation.mutate({ schoolId, conversationId });
     }, [listData?.[0]?.id]);
 
     const isGroup = conversation
@@ -394,18 +445,24 @@ export default function ChatRoomScreen() {
     }, [conversation, currentUser?.id, paramProfilePicture, isGroup]);
 
     const headerSubtitle = useMemo(() => {
-        if (!conversation) return null;
+        if (!conversation && !paramRole) return null;
         if (isGroup) {
-            const count = (conversation.participants?.length || 0) + 1;
+            const count = (conversation?.participants?.length || 0) + 1;
             return `${count} ${count === 1 ? 'member' : 'members'}`;
         }
-        const other = conversation.participants?.find(p => p.userId !== currentUser?.id);
-        if (!other) return null;
-        const online = isUserOnline(other.userId);
+        const other = conversation?.participants?.find(p => p.userId !== currentUser?.id);
+        const online = other ? isUserOnline(other.userId) : false;
         if (online) return 'online';
-        if (other.user?.lastSeenAt) return `last seen ${formatLastSeen(other.user.lastSeenAt)}`;
-        return null;
-    }, [conversation, isGroup, currentUser?.id, isUserOnline]);
+        const role = paramRole || '';
+        const cs = paramClassSection || '';
+        const roleInfo = role && cs ? `${role} · ${cs}` : role || cs || '';
+        const lastSeen = paramLastSeenAt || other?.lastSeenAt;
+        if (lastSeen) {
+            const label = formatLastSeen(lastSeen);
+            return roleInfo ? `${roleInfo} · ${label}` : `last seen ${label}`;
+        }
+        return roleInfo || null;
+    }, [conversation, isGroup, currentUser?.id, isUserOnline, paramRole, paramClassSection, paramLastSeenAt]);
 
     const isOtherOnline = useMemo(() => {
         if (!conversation || isGroup) return false;
@@ -415,63 +472,159 @@ export default function ChatRoomScreen() {
 
     // ── Actions ───────────────────────────────────────────────────────────────
 
-    const handleSend = useCallback(async () => {
+    const handleSend = useCallback(() => {
         const text = inputText.trim();
-        if (!text || isSending) return;
+        if (!text) return;
         const tempId = `temp-${Date.now()}`;
-        setIsSending(true);
         setInputText('');
         stopTyping();
         const currentReplyTo = replyTo;
         setReplyTo(null);
+        sendMessageMutation.mutate({
+            schoolId, conversationId,
+            body: { content: text, ...(currentReplyTo && { replyToId: currentReplyTo.id }) },
+            tempId, currentUser,
+            replyToMessage: currentReplyTo || null,
+        });
+    }, [inputText, schoolId, conversationId, replyTo, currentUser, sendMessageMutation]);
+
+    const [mediaPreview, setMediaPreview] = useState(null);
+    const [isPreviewExpanded, setIsPreviewExpanded] = useState(false);
+
+    const handlePickMedia = useCallback(async () => {
+        if (isUploading || !schoolId) return;
         try {
-            await sendMessageMutation.mutateAsync({
-                schoolId, conversationId,
-                body: { content: text, ...(currentReplyTo && { replyToId: currentReplyTo.id }) },
-                tempId, currentUser,
+            const result = await pickMedia({ quality: 0.8 });
+            if (!result) return;
+            setMediaPreview({
+                localUri: result.uri,
+                mimeType: result.mimeType,
+                fileName: result.fileName,
+                width: result.width,
+                height: result.height,
             });
-        } catch {
-            setInputText(text);
-            Alert.alert('Error', 'Failed to send message. Please try again.');
-        } finally {
-            setIsSending(false);
+            setIsPreviewExpanded(true);
+        } catch (e) {
+            Alert.alert('Selection Failed', e.message || 'Could not pick media');
         }
-    }, [inputText, isSending, schoolId, conversationId, replyTo, currentUser, sendMessageMutation]);
+    }, [isUploading, schoolId]);
+
+    const handleSendMedia = useCallback(async () => {
+        if (!mediaPreview) return;
+        const tempId = `temp-${Date.now()}`;
+        const caption = inputText.trim();
+        const preview = mediaPreview;
+        const currentReplyTo = replyTo;
+
+        setInputText('');
+        setMediaPreview(null);
+        setIsPreviewExpanded(false);
+        setReplyTo(null);
+
+        const optimisticMsg = {
+            id: tempId,
+            content: caption,
+            senderId: currentUser.id,
+            sender: currentUser,
+            attachments: [{
+                url: preview.localUri,
+                mimeType: preview.mimeType,
+                fileName: preview.fileName,
+                width: preview.width,
+                height: preview.height,
+            }],
+            replyTo: currentReplyTo || null,
+            createdAt: new Date().toISOString(),
+            status: 'SENDING',
+            isUploading: true,
+        };
+
+        queryClient.setQueryData(chatKeys.messages(schoolId, conversationId), (old) => {
+            if (!old?.pages?.length) return old;
+            const newPages = [...old.pages];
+            newPages[0] = { ...newPages[0], messages: [optimisticMsg, ...newPages[0].messages] };
+            return { ...old, pages: newPages };
+        });
+
+        try {
+            const [presigned] = await getPresignedUrls(
+                [{ name: preview.fileName, type: preview.mimeType }],
+                schoolId,
+                'chat'
+            );
+            await uploadToR2(preview.localUri, presigned.url, preview.mimeType);
+
+            sendMessageMutation.mutate({
+                schoolId, conversationId,
+                body: {
+                    content: caption,
+                    attachments: [{
+                        url: presigned.publicUrl,
+                        mimeType: preview.mimeType,
+                        fileName: preview.fileName,
+                        width: preview.width,
+                        height: preview.height,
+                    }],
+                    ...(currentReplyTo && { replyToId: currentReplyTo.id })
+                },
+                tempId, currentUser,
+                replyToMessage: currentReplyTo || null,
+            });
+        } catch (error) {
+            console.error('Upload failed:', error);
+            Alert.alert('Upload Failed', 'Message could not be sent.');
+            queryClient.setQueryData(chatKeys.messages(schoolId, conversationId), (old) => {
+                if (!old?.pages?.length) return old;
+                const newPages = [...old.pages];
+                newPages[0] = { ...newPages[0], messages: newPages[0].messages.filter(m => m.id !== tempId) };
+                return { ...old, pages: newPages };
+            });
+        }
+    }, [mediaPreview, inputText, schoolId, conversationId, currentUser, sendMessageMutation, replyTo, queryClient]);
+
+    const [selectedMessage, setSelectedMessage] = useState(null);
+    const [viewingMedia, setViewingMedia] = useState(null);
 
     const handleLongPress = useCallback((message) => {
-        const isMine = message.senderId === currentUser?.id;
-        const options = ['Copy', 'Reply'];
-        const actions = [
-            () => Clipboard.setStringAsync(message.content || ''),
-            () => { setReplyTo(message); inputRef.current?.focus(); },
-        ];
-        if (isMine) {
-            options.push('Delete');
-            actions.push(() => {
-                Alert.alert('Delete Message', 'This message will be deleted for everyone.', [
-                    { text: 'Cancel', style: 'cancel' },
-                    {
-                        text: 'Delete', style: 'destructive',
-                        onPress: () => deleteMessageMutation.mutate({ schoolId, conversationId, messageId: message.id }),
-                    },
-                ]);
-            });
-        }
-        options.push('Cancel');
+        setSelectedMessage(prev => prev?.id === message.id ? null : message);
         if (Platform.OS === 'ios') {
-            ActionSheetIOS.showActionSheetWithOptions(
-                { options, cancelButtonIndex: options.length - 1, destructiveButtonIndex: isMine ? options.indexOf('Delete') : undefined },
-                (idx) => { if (idx < actions.length) actions[idx](); }
-            );
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         } else {
-            Alert.alert('Message Options', null, [
-                ...options.slice(0, -1).map((opt, i) => ({ text: opt, onPress: actions[i], style: opt === 'Delete' ? 'destructive' : 'default' })),
-                { text: 'Cancel', style: 'cancel' },
-            ]);
+            Vibration.vibrate(50);
         }
-    }, [currentUser, schoolId, conversationId, deleteMessageMutation]);
+    }, []);
 
-    // Opens mute duration sheet
+    const clearSelection = useCallback(() => {
+        setSelectedMessage(null);
+    }, []);
+
+    const handleCopySelected = useCallback(() => {
+        if (selectedMessage?.content) {
+            Clipboard.setStringAsync(selectedMessage.content);
+        }
+        setSelectedMessage(null);
+    }, [selectedMessage]);
+
+    const handleReplySelected = useCallback(() => {
+        if (selectedMessage) {
+            setReplyTo(selectedMessage);
+            inputRef.current?.focus();
+        }
+        setSelectedMessage(null);
+    }, [selectedMessage]);
+
+    const handleDeleteSelected = useCallback(() => {
+        if (!selectedMessage) return;
+        Alert.alert('Delete Message', 'This message will be deleted for everyone.', [
+            { text: 'Cancel', style: 'cancel' },
+            {
+                text: 'Delete', style: 'destructive',
+                onPress: () => deleteMessageMutation.mutate({ schoolId, conversationId, messageId: selectedMessage.id }),
+            },
+        ]);
+        setSelectedMessage(null);
+    }, [selectedMessage, schoolId, conversationId, deleteMessageMutation]);
+
     const openMuteDurationSheet = useCallback(() => {
         setSheetTitle('Mute notifications for...');
         setSheetOptions([
@@ -514,7 +667,6 @@ export default function ChatRoomScreen() {
                     if (isMuted) {
                         muteMutation.mutate({ schoolId, conversationId, duration: 'unmute' });
                     } else {
-                        // open second sheet for duration
                         openMuteDurationSheet();
                     }
                 },
@@ -541,6 +693,7 @@ export default function ChatRoomScreen() {
         setSheetVisible(true);
     }, [conversation, isGroup, schoolId, conversationId, muteMutation, leaveMutation, openMuteDurationSheet]);
 
+    // ── THE FIX: single renderItem that passes onMediaPress ──────────────────
     const renderItem = useCallback(({ item, index }) => {
         if (item.type === 'date') {
             return (
@@ -554,9 +707,14 @@ export default function ChatRoomScreen() {
         const isMine = item.senderId === currentUser?.id;
         const prevItem = listData[index + 1];
         const showSender = !isMine && (prevItem?.type === 'message' ? prevItem.senderId !== item.senderId : true);
+        const isSelected = selectedMessage?.id === item.id;
 
         return (
-            <View style={[styles.messageRow, isMine ? styles.messageRowMine : styles.messageRowOther]}>
+            <TouchableOpacity
+                activeOpacity={1}
+                onPress={() => selectedMessage ? clearSelection() : null}
+                style={[styles.messageRow, isMine ? styles.messageRowMine : styles.messageRowOther]}
+            >
                 {!isMine && showSender && (
                     <View style={styles.messageAvatar}>
                         {item.sender?.profilePicture ? (
@@ -571,10 +729,17 @@ export default function ChatRoomScreen() {
                     </View>
                 )}
                 {!isMine && !showSender && <View style={{ width: 32, marginRight: 8 }} />}
-                <MessageBubble message={item} isMine={isMine} showSender={showSender} onLongPress={handleLongPress} />
-            </View>
+                <MessageBubble
+                    message={item}
+                    isMine={isMine}
+                    showSender={showSender}
+                    onLongPress={handleLongPress}
+                    isSelected={isSelected}
+                    onMediaPress={(att) => setViewingMedia(att)}
+                />
+            </TouchableOpacity>
         );
-    }, [currentUser, listData, handleLongPress]);
+    }, [currentUser, listData, handleLongPress, selectedMessage, clearSelection]);
 
     // ── Render ────────────────────────────────────────────────────────────────
 
@@ -598,6 +763,9 @@ export default function ChatRoomScreen() {
                         </View>
                     )}
                 </View>
+                {conversation?.isMuted && (
+                    <BellOff size={16} color="#9ca3af" strokeWidth={2} style={{ marginRight: 4 }} />
+                )}
                 <HapticTouchable onPress={handleMoreOptions} style={styles.moreBtn}>
                     <MoreVertical size={22} color="#111" strokeWidth={2} />
                 </HapticTouchable>
@@ -606,8 +774,8 @@ export default function ChatRoomScreen() {
             {/* Messages */}
             <KeyboardAvoidingView
                 style={{ flex: 1, backgroundColor: '#f8f9fa' }}
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-                keyboardVerticalOffset={0}
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
             >
                 {messagesLoading ? (
                     <ChatRoomSkeleton />
@@ -622,6 +790,7 @@ export default function ChatRoomScreen() {
                         showsVerticalScrollIndicator={false}
                         onEndReached={() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }}
                         onEndReachedThreshold={0.3}
+                        onScrollBeginDrag={clearSelection}
                         ListFooterComponent={
                             isFetchingNextPage
                                 ? <ActivityIndicator size="small" color="#0469ff" style={{ padding: 16 }} />
@@ -635,6 +804,50 @@ export default function ChatRoomScreen() {
                         keyboardDismissMode="interactive"
                         keyboardShouldPersistTaps="handled"
                     />
+                )}
+
+                {/* Selection Action Bar */}
+                {selectedMessage && (
+                    <View style={{
+                        flexDirection: 'row',
+                        justifyContent: 'space-evenly',
+                        alignItems: 'center',
+                        backgroundColor: '#fff',
+                        height: 56,
+                        borderTopWidth: StyleSheet.hairlineWidth,
+                        borderTopColor: '#e5e7eb',
+                    }}>
+                        <TouchableOpacity
+                            onPress={handleCopySelected}
+                            style={{ flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, height: '100%' }}
+                        >
+                            <Copy size={18} color="#374151" />
+                            <Text style={{ fontSize: 11, fontWeight: '600', color: '#374151', marginTop: 4 }}>Copy</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            onPress={handleReplySelected}
+                            style={{ flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, height: '100%' }}
+                        >
+                            <Reply size={18} color="#374151" />
+                            <Text style={{ fontSize: 11, fontWeight: '600', color: '#374151', marginTop: 4 }}>Reply</Text>
+                        </TouchableOpacity>
+                        {selectedMessage.senderId === currentUser?.id && (
+                            <TouchableOpacity
+                                onPress={handleDeleteSelected}
+                                style={{ flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, height: '100%' }}
+                            >
+                                <Trash2 size={18} color="#ef4444" />
+                                <Text style={{ fontSize: 11, fontWeight: '600', color: '#ef4444', marginTop: 4 }}>Delete</Text>
+                            </TouchableOpacity>
+                        )}
+                        <TouchableOpacity
+                            onPress={clearSelection}
+                            style={{ flexDirection: 'column', alignItems: 'center', justifyContent: 'center', flex: 1, height: '100%' }}
+                        >
+                            <X size={18} color="#9ca3af" />
+                            <Text style={{ fontSize: 11, fontWeight: '600', color: '#9ca3af', marginTop: 4 }}>Cancel</Text>
+                        </TouchableOpacity>
+                    </View>
                 )}
 
                 {/* Reply preview */}
@@ -657,15 +870,52 @@ export default function ChatRoomScreen() {
 
                 <TypingIndicator users={typingUsers} />
 
+                {/* Media Preview (WhatsApp-style) */}
+                {mediaPreview && (
+                    <View style={styles.mediaPreviewContainer}>
+                        <TouchableOpacity
+                            style={styles.mediaPreviewCard}
+                            activeOpacity={0.8}
+                            onPress={() => setIsPreviewExpanded(true)}
+                        >
+                            {mediaPreview.mimeType?.startsWith('video/') ? (
+                                <View style={styles.mediaPreviewVideoPlaceholder}>
+                                    <Text style={{ color: '#fff', fontSize: 12, marginTop: 4, fontWeight: 'bold' }}>Video Attached</Text>
+                                </View>
+                            ) : (
+                                <Image
+                                    source={{ uri: mediaPreview.localUri || mediaPreview.url }}
+                                    style={styles.mediaPreviewImage}
+                                    resizeMode="cover"
+                                />
+                            )}
+                            <TouchableOpacity
+                                style={styles.mediaPreviewCloseBtn}
+                                onPress={() => setMediaPreview(null)}
+                            >
+                                <X size={16} color="#fff" />
+                            </TouchableOpacity>
+                        </TouchableOpacity>
+                    </View>
+                )}
+
                 {/* Input bar */}
                 <View style={styles.inputBar}>
                     <BlurView intensity={60} tint="light" style={StyleSheet.absoluteFill} />
                     <View style={[styles.inputRow, { paddingBottom: Math.max(insets.bottom, 12) }]}>
-                        <View style={styles.inputPill}>
+                        <HapticTouchable
+                            style={styles.mediaBtn}
+                            onPress={handlePickMedia}
+                            haptic="light"
+                            disabled={isUploading}
+                        >
+                            {isUploading ? <ActivityIndicator size="small" color="#0469ff" /> : <ImagePlus size={22} color="#0469ff" />}
+                        </HapticTouchable>
+                        <View style={[styles.inputPill, { flex: 1 }]}>
                             <TextInput
                                 ref={inputRef}
                                 style={styles.textInput}
-                                placeholder="Type a message..."
+                                placeholder={mediaPreview ? "Add a caption..." : "Type a message..."}
                                 placeholderTextColor="#9ca3af"
                                 value={inputText}
                                 onChangeText={(text) => { setInputText(text); sendTyping(); }}
@@ -675,19 +925,76 @@ export default function ChatRoomScreen() {
                             />
                         </View>
                         <HapticTouchable
-                            style={[styles.sendBtn, (!inputText.trim() || isSending) && styles.sendBtnDisabled]}
-                            onPress={handleSend}
-                            disabled={!inputText.trim() || isSending}
+                            style={[
+                                styles.sendBtn,
+                                (!inputText.trim() && !isUploading && !mediaPreview) && styles.sendBtnDisabled
+                            ]}
+                            onPress={mediaPreview ? handleSendMedia : handleSend}
+                            disabled={(!inputText.trim() && !mediaPreview) || isUploading}
                             haptic="medium"
                         >
-                            {isSending
-                                ? <ActivityIndicator size={16} color="#fff" />
-                                : <Send size={18} color="#fff" strokeWidth={2.5} />
-                            }
+                            <Send size={18} color="#fff" strokeWidth={2.5} />
                         </HapticTouchable>
                     </View>
                 </View>
             </KeyboardAvoidingView>
+
+            {/* Full-Screen Media Preview Modal (before sending) */}
+            <Modal
+                visible={isPreviewExpanded}
+                animationType="slide"
+                transparent={false}
+                onRequestClose={() => setIsPreviewExpanded(false)}
+            >
+                <KeyboardAvoidingView
+                    style={{ flex: 1, backgroundColor: '#000' }}
+                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                >
+                    <View style={{ paddingTop: Math.max(insets.top, 20), paddingHorizontal: 16, paddingBottom: 16, backgroundColor: 'rgba(0,0,0,0.4)', position: 'absolute', top: 0, width: '100%', zIndex: 10, flexDirection: 'row', alignItems: 'center' }}>
+                        <TouchableOpacity onPress={() => setIsPreviewExpanded(false)} style={{ padding: 4 }}>
+                            <X size={28} color="#fff" />
+                        </TouchableOpacity>
+                    </View>
+
+                    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                        {mediaPreview?.mimeType?.startsWith('video/') ? (
+                            <Video
+                                source={{ uri: mediaPreview.localUri || mediaPreview.url }}
+                                style={{ width: '100%', height: '100%' }}
+                                useNativeControls
+                                resizeMode={ResizeMode.CONTAIN}
+                            />
+                        ) : (
+                            <Image
+                                source={{ uri: mediaPreview?.localUri || mediaPreview?.url }}
+                                style={{ width: '100%', height: '100%' }}
+                                resizeMode="contain"
+                            />
+                        )}
+                    </View>
+
+                    <View style={{ backgroundColor: '#111', paddingHorizontal: 16, paddingVertical: 12, paddingBottom: Math.max(insets.bottom, 12), flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                        <View style={[styles.inputPill, { flex: 1, backgroundColor: '#222' }]}>
+                            <TextInput
+                                style={[styles.textInput, { color: '#fff' }]}
+                                placeholder="Add a caption..."
+                                placeholderTextColor="#9ca3af"
+                                value={inputText}
+                                onChangeText={setInputText}
+                                multiline
+                                maxLength={5000}
+                            />
+                        </View>
+                        <TouchableOpacity
+                            style={[styles.sendBtn, isUploading && styles.sendBtnDisabled]}
+                            onPress={handleSendMedia}
+                            disabled={isUploading}
+                        >
+                            <Send size={18} color="#fff" strokeWidth={2.5} />
+                        </TouchableOpacity>
+                    </View>
+                </KeyboardAvoidingView>
+            </Modal>
 
             {/* Bottom Sheet */}
             <BottomSheetModal
@@ -696,6 +1003,39 @@ export default function ChatRoomScreen() {
                 options={sheetOptions}
                 onClose={() => setSheetVisible(false)}
             />
+
+            {/* Full-Screen Media Viewer Modal (viewing received/sent media) */}
+            <Modal
+                visible={!!viewingMedia}
+                animationType="fade"
+                transparent={false}
+                onRequestClose={() => setViewingMedia(null)}
+            >
+                <View style={{ flex: 1, backgroundColor: '#000' }}>
+                    <View style={{ paddingTop: Math.max(insets.top, 20), paddingHorizontal: 16, paddingBottom: 16, backgroundColor: 'rgba(0,0,0,0.5)', position: 'absolute', top: 0, width: '100%', zIndex: 10, flexDirection: 'row', alignItems: 'center' }}>
+                        <TouchableOpacity onPress={() => setViewingMedia(null)} style={{ padding: 4 }}>
+                            <X size={28} color="#fff" />
+                        </TouchableOpacity>
+                    </View>
+                    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                        {detectMediaType(viewingMedia?.url || viewingMedia?.mimeType || '') === 'video' ? (
+                            <Video
+                                source={{ uri: viewingMedia?.url }}
+                                style={{ width: '100%', height: '100%' }}
+                                useNativeControls
+                                resizeMode={ResizeMode.CONTAIN}
+                            />
+                        ) : (
+                            <Image
+                                source={{ uri: viewingMedia?.url }}
+                                style={{ width: '100%', height: '100%' }}
+                                resizeMode="contain"
+                            />
+                        )}
+                    </View>
+                </View>
+            </Modal>
+
         </View>
     );
 }
@@ -765,6 +1105,9 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(0,0,0,0.06)', borderRadius: 8,
         padding: 8, marginBottom: 6,
     },
+    replyPreviewMine: {
+        backgroundColor: 'rgba(255,255,255,0.15)',
+    },
     replyBar: { width: 3, height: '100%', borderRadius: 2, backgroundColor: '#0469ff', marginRight: 8 },
     replySenderName: { fontSize: 11, fontWeight: '700', color: '#0469ff' },
     replyContent: { fontSize: 12, color: '#6b7280', marginTop: 1 },
@@ -781,12 +1124,45 @@ const styles = StyleSheet.create({
 
     attachmentContainer: { marginBottom: 6 },
     attachmentImage: { width: 200, height: 150, borderRadius: 12, marginBottom: 4 },
+    attachmentVideo: { width: 240, height: 180, borderRadius: 12, marginBottom: 4, backgroundColor: '#000' },
     fileAttachment: {
         flexDirection: 'row', alignItems: 'center',
         backgroundColor: 'rgba(0,0,0,0.06)',
         borderRadius: 8, padding: 8, marginBottom: 4, gap: 6,
     },
     fileName: { fontSize: 12, color: '#374151', flex: 1 },
+
+    mediaBtn: {
+        width: 38, height: 38,
+        borderRadius: 19,
+        backgroundColor: 'rgba(4,105,255,0.08)',
+        alignItems: 'center', justifyContent: 'center',
+    },
+
+    mediaPreviewContainer: {
+        paddingHorizontal: 12,
+        paddingBottom: 8,
+        backgroundColor: 'transparent',
+    },
+    mediaPreviewCard: {
+        width: 120, height: 160,
+        borderRadius: 12, overflow: 'hidden',
+        backgroundColor: '#e5e7eb',
+        position: 'relative',
+        shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 2,
+    },
+    mediaPreviewImage: { width: '100%', height: '100%' },
+    mediaPreviewVideoPlaceholder: {
+        width: '100%', height: '100%',
+        backgroundColor: '#1f2937',
+        alignItems: 'center', justifyContent: 'center',
+    },
+    mediaPreviewCloseBtn: {
+        position: 'absolute', top: 6, right: 6,
+        width: 24, height: 24, borderRadius: 12,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        alignItems: 'center', justifyContent: 'center',
+    },
 
     dateSeparator: { flexDirection: 'row', alignItems: 'center', marginVertical: 16, paddingHorizontal: 4 },
     dateLine: { flex: 1, height: StyleSheet.hairlineWidth, backgroundColor: '#d1d5db' },
@@ -893,7 +1269,7 @@ const bsStyles = StyleSheet.create({
     divider: {
         height: StyleSheet.hairlineWidth,
         backgroundColor: '#e5e7eb',
-        marginLeft: 56,   // indent past icon
+        marginLeft: 56,
     },
     iconBox: {
         width: 34,
@@ -927,5 +1303,34 @@ const bsStyles = StyleSheet.create({
         fontSize: 15,
         fontWeight: '600',
         color: '#374151',
+    },
+    selectionBar: {
+        flexDirection: 'row',
+        justifyContent: 'space-evenly',
+        alignItems: 'center',
+        backgroundColor: '#fff',
+        paddingVertical: 12,
+        paddingHorizontal: 8,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: '#e5e7eb',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -2 },
+        shadowOpacity: 0.06,
+        shadowRadius: 6,
+        elevation: 4,
+    },
+    selectionAction: {
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 20,
+        paddingVertical: 8,
+        gap: 4,
+    },
+    selectionActionText: {
+        fontSize: 11,
+        fontWeight: '600',
+        color: '#374151',
+        marginTop: 2,
     },
 });

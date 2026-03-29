@@ -1,16 +1,21 @@
 // ============================================
 // CHAT REALTIME - Supabase Realtime subscription for live messages
+// Room-based channels: room created when user subscribes
 // ============================================
 
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
 import { chatKeys } from './useChat';
+import { getCachedUser } from '../services/chatService';
 
 /**
  * Subscribe to real-time message changes for a specific conversation.
+ * Creates a room channel per conversation — the room is created when
+ * the user subscribes and destroyed on cleanup.
+ *
  * Automatically updates the React Query cache when new messages arrive
- * or existing messages are updated (e.g. soft-deleted).
+ * or existing messages are updated/deleted.
  *
  * @param {string} schoolId - Current school ID
  * @param {string} conversationId - ID of the conversation to watch
@@ -24,8 +29,10 @@ export function useChatRealtime(schoolId, conversationId, { enabled = true } = {
     useEffect(() => {
         if (!enabled || !conversationId || !schoolId) return;
 
+        // Create a room channel for this conversation
+        // Room is auto-created on subscribe, auto-destroyed on removeChannel
         const channel = supabase
-            .channel(`chat:${conversationId}`)
+            .channel(`chat-room:${conversationId}`)
             .on(
                 'postgres_changes',
                 {
@@ -34,9 +41,17 @@ export function useChatRealtime(schoolId, conversationId, { enabled = true } = {
                     table: 'Message',
                     filter: `conversationId=eq.${conversationId}`,
                 },
-                (payload) => {
+                async (payload) => {
                     const newMessage = payload.new;
                     const queryKey = chatKeys.messages(schoolId, conversationId);
+
+                    // Fetch sender info from cache or Supabase
+                    let sender = null;
+                    try {
+                        sender = await getCachedUser(newMessage.senderId);
+                    } catch (e) {
+                        console.warn('Failed to fetch sender for realtime message:', e);
+                    }
 
                     // Prepend new message to the first page of the infinite query
                     qc.setQueryData(queryKey, (old) => {
@@ -46,13 +61,33 @@ export function useChatRealtime(schoolId, conversationId, { enabled = true } = {
                         const exists = old.pages.some((page) =>
                             page.messages.some((msg) => msg.id === newMessage.id)
                         );
-                        if (exists) return old;
+
+                        if (exists) {
+                            // Replace optimistic message with real one (adds sender info)
+                            return {
+                                ...old,
+                                pages: old.pages.map((page) => ({
+                                    ...page,
+                                    messages: page.messages.map((msg) =>
+                                        msg.id === newMessage.id
+                                            ? {
+                                                ...msg,
+                                                sender: sender || msg.sender,
+                                                status: newMessage.status || 'SENT',
+                                                _isRealtime: true,
+                                                isUploading: false,
+                                            }
+                                            : msg
+                                    ),
+                                })),
+                            };
+                        }
 
                         const formatted = {
                             id: newMessage.id,
                             conversationId: newMessage.conversationId,
                             senderId: newMessage.senderId,
-                            sender: null, // Will be populated on next refetch
+                            sender,
                             content: newMessage.deletedAt ? null : newMessage.content,
                             attachments: newMessage.deletedAt ? null : newMessage.attachments,
                             isDeleted: !!newMessage.deletedAt,
@@ -60,7 +95,7 @@ export function useChatRealtime(schoolId, conversationId, { enabled = true } = {
                             replyTo: null,
                             createdAt: newMessage.createdAt,
                             updatedAt: newMessage.updatedAt,
-                            _isRealtime: true, // Flag for sender lookup
+                            _isRealtime: true,
                         };
 
                         const newPages = [...old.pages];
@@ -132,7 +167,11 @@ export function useChatRealtime(schoolId, conversationId, { enabled = true } = {
                     });
                 }
             )
-            .subscribe();
+            .subscribe((status) => {
+                if (status === 'SUBSCRIBED') {
+                    console.log(`[Chat Realtime] Room subscribed: chat-room:${conversationId}`);
+                }
+            });
 
         channelRef.current = channel;
 

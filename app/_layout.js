@@ -12,6 +12,7 @@ import { AppState, View, Alert, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import fcmService from '../services/fcmService';
 import { NotificationProvider, useNotification } from '../contexts/NotificationContext';
+import { ChatProvider } from '../contexts/ChatContext';
 import { AttendanceReminderProvider } from '../contexts/AttendanceReminderContext';
 import AttendanceReminderModal from './components/AttendanceReminderModal';
 import messaging from '@react-native-firebase/messaging';
@@ -525,10 +526,12 @@ export default function RootLayout() {
         <GestureHandlerRootView style={{ flex: 1 }}>
             <QueryClientProvider client={queryClient}>
                 <NotificationProvider>
-                    <AttendanceReminderProvider>
-                        <RootLayoutContent />
-                        <AttendanceReminderModal />
-                    </AttendanceReminderProvider>
+                    <ChatProvider>
+                        <AttendanceReminderProvider>
+                            <RootLayoutContent />
+                            <AttendanceReminderModal />
+                        </AttendanceReminderProvider>
+                    </ChatProvider>
                 </NotificationProvider>
             </QueryClientProvider>
         </GestureHandlerRootView>

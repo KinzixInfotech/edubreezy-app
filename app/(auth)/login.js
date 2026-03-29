@@ -260,6 +260,9 @@ const FeatureItem = ({ icon, text, delay }) => (
     </Animated.View>
 );
 
+// Roles that are blocked from the mobile app — these are web-only
+const BLOCKED_MOBILE_ROLES = ['ADMIN', 'LIBRARIAN', 'SUPER_ADMIN'];
+
 export default function LoginScreen() {
     const insets = useSafeAreaInsets();
     const passwordRef = useRef(null);
@@ -465,12 +468,12 @@ export default function LoginScreen() {
                 return;
             }
 
-            // Block ADMIN role from mobile app – direct them to web dashboard
-            if (user.role?.name === 'ADMIN') {
+            // Block ADMIN, LIBRARIAN, SUPER_ADMIN roles from mobile app
+            if (BLOCKED_MOBILE_ROLES.includes(user.role?.name)) {
                 await supabase.auth.signOut();
                 Alert.alert(
                     'Web Only',
-                    'Admin accounts can only access the web dashboard at atlas.edubreezy.com. Please use the web version for admin features.',
+                    `${user.role?.name === 'ADMIN' ? 'Admin' : user.role?.name === 'LIBRARIAN' ? 'Librarian' : 'Super Admin'} accounts can only access the web dashboard at atlas.edubreezy.com. Please use the web version.`,
                     [{ text: 'OK' }]
                 );
                 setLoading(false);
@@ -574,7 +577,7 @@ export default function LoginScreen() {
             const { data: oauthData, error: oauthError } = await supabase.auth.signInWithOAuth({
                 provider: 'google',
                 options: {
-                    redirectTo: 'edubreezy://',
+                    redirectTo: 'edubreezy://(auth)/login',
                     skipBrowserRedirect: true,
                 },
             });
@@ -587,7 +590,7 @@ export default function LoginScreen() {
             }
 
             // Open browser for Google OAuth
-            const result = await WebBrowser.openAuthSessionAsync(oauthData.url, 'edubreezy://');
+            const result = await WebBrowser.openAuthSessionAsync(oauthData.url, 'edubreezy://(auth)/login');
 
             if (result.type !== 'success' || !result.url) {
                 // User cancelled or browser closed
@@ -635,12 +638,12 @@ export default function LoginScreen() {
                 return;
             }
 
-            // Block ADMIN role from mobile app
-            if (user.role?.name === 'ADMIN') {
+            // Block ADMIN, LIBRARIAN, SUPER_ADMIN roles from mobile app
+            if (BLOCKED_MOBILE_ROLES.includes(user.role?.name)) {
                 await supabase.auth.signOut();
                 Alert.alert(
                     'Web Only',
-                    'Admin accounts can only access the web dashboard at atlas.edubreezy.com.',
+                    `${user.role?.name === 'ADMIN' ? 'Admin' : user.role?.name === 'LIBRARIAN' ? 'Librarian' : 'Super Admin'} accounts can only access the web dashboard at atlas.edubreezy.com.`,
                     [{ text: 'OK' }]
                 );
                 setGoogleLoading(false);

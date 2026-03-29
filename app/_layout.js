@@ -8,7 +8,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { applyGlobalFont } from '../app/styles/_global';
 import { StatusBar } from 'expo-status-bar';
 import * as SecureStore from 'expo-secure-store';
-import { AppState, View, Alert, Platform } from 'react-native';
+import { AppState, View, Alert, Platform, Vibration } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import * as Notifications from 'expo-notifications';
 import fcmService from '../services/fcmService';
 import { NotificationProvider, useNotification } from '../contexts/NotificationContext';
@@ -26,6 +27,16 @@ import ChangelogModal from './components/ChangelogModal';
 import { checkForUpdates, setupUpdateListener } from '../services/updateChecker';
 
 const BADGE_KEY = 'noticeBadgeCount';
+
+// Configure expo-notifications to NOT show the OS-level banner when the app is in the foreground.
+// This prevents double-notifications since we use custom in-app components (like InAppToast).
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: false,
+    shouldPlaySound: false,
+    shouldSetBadge: false,
+  }),
+});
 
 // Keep splash visible while fonts load
 SplashScreen.preventAutoHideAsync();
@@ -210,6 +221,13 @@ function RootLayoutContent() {
 
             if (isAppActiveRef.current) {
                 console.log('New notice from FCM:', remoteMessage.notification?.title);
+                
+                // Play haptic/vibration feedback for incoming foreground notification
+                if (Platform.OS === 'ios') {
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                } else {
+                    Vibration.vibrate([0, 200, 100, 200]);
+                }
             }
         });
 

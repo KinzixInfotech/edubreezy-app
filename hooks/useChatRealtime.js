@@ -53,6 +53,48 @@ export function useChatRealtime(schoolId, conversationId, { enabled = true } = {
                         console.warn('Failed to fetch sender for realtime message:', e);
                     }
 
+                    // Populate replyTo if available
+                    let replyTo = null;
+                    if (newMessage.replyToId) {
+                        try {
+                            const pages = qc.getQueryData(queryKey)?.pages;
+                            let cachedReplyMsg = null;
+                            if (pages) {
+                                for (const page of pages) {
+                                    cachedReplyMsg = page.messages?.find(m => m.id === newMessage.replyToId);
+                                    if (cachedReplyMsg) break;
+                                }
+                            }
+                            if (cachedReplyMsg) {
+                                replyTo = {
+                                    id: cachedReplyMsg.id,
+                                    content: cachedReplyMsg.content,
+                                    senderName: typeof cachedReplyMsg.sender?.name === 'string'
+                                        ? cachedReplyMsg.sender.name
+                                        : cachedReplyMsg.sender?.name?.name || 'Unknown',
+                                };
+                            } else {
+                                const { data: repliedMsg } = await supabase
+                                    .from('Message')
+                                    .select('id, content, senderId')
+                                    .eq('id', newMessage.replyToId)
+                                    .single();
+                                if (repliedMsg) {
+                                    const repliedSender = await getCachedUser(repliedMsg.senderId);
+                                    replyTo = {
+                                        id: repliedMsg.id,
+                                        content: repliedMsg.content,
+                                        senderName: typeof repliedSender?.name === 'string'
+                                            ? repliedSender.name
+                                            : repliedSender?.name?.name || 'Unknown',
+                                    };
+                                }
+                            }
+                        } catch (e) {
+                            console.warn('Failed to fetch replyTo for realtime message', e);
+                        }
+                    }
+
                     // Prepend new message to the first page of the infinite query
                     qc.setQueryData(queryKey, (old) => {
                         if (!old?.pages?.length) return old;
@@ -92,7 +134,7 @@ export function useChatRealtime(schoolId, conversationId, { enabled = true } = {
                             attachments: newMessage.deletedAt ? null : newMessage.attachments,
                             isDeleted: !!newMessage.deletedAt,
                             status: newMessage.status || 'SENT',
-                            replyTo: null,
+                            replyTo,
                             createdAt: newMessage.createdAt,
                             updatedAt: newMessage.updatedAt,
                             _isRealtime: true,
@@ -182,4 +224,91 @@ export function useChatRealtime(schoolId, conversationId, { enabled = true } = {
             }
         };
     }, [conversationId, schoolId, enabled, qc]);
+}
+
+/**
+ * Subscribe to real-time message changes across ALL active conversations.
+ * Uses a single channel and multiplexes Postgres filters.
+ *
+ * @param {string} schoolId - Current school ID
+ * @param {string} userId - Current user ID
+ * @param {Array} conversations - Array of conversation objects the user belongs to
+ */
+export function useChatFeedRealtime(schoolId, userId, conversations) {
+    const qc = useQueryClient();
+
+    useEffect(() => {
+        if (!schoolId || !userId || !conversations?.length) return;
+
+        const channelName = `chat-feed:${userId}`;
+        const channel = supabase.channel(channelName);
+
+        // Add a listener for each conversation's new messages
+        conversations.forEach((c) => {
+            channel.on(
+                'postgres_changes',
+                {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'Message',
+                    filter: `conversationId=eq.${c.id}`,
+                },
+                async (payload) => {
+                    const newMessage = payload.new;
+
+                    // Update the conversation feed
+                    qc.invalidateQueries({ queryKey: chatKeys.conversations(schoolId) });
+
+                    const queryKey = chatKeys.messages(schoolId, c.id);
+
+                    // Try to populate sender
+                    let senderName = 'Unknown';
+                    try {
+                        const { data } = await supabase.from('User').select('id, name').eq('id', newMessage.senderId).single();
+                        if (data) senderName = typeof data.name === 'string' ? data.name : data.name?.name || 'Unknown';
+                    } catch (e) {}
+
+                    const formatted = {
+                        id: newMessage.id,
+                        conversationId: newMessage.conversationId,
+                        senderId: newMessage.senderId,
+                        sender: { id: newMessage.senderId, name: senderName },
+                        content: newMessage.deletedAt ? null : newMessage.content,
+                        attachments: newMessage.deletedAt ? null : newMessage.attachments,
+                        isDeleted: !!newMessage.deletedAt,
+                        status: newMessage.status || 'SENT',
+                        replyTo: null, // Basic feed injection doesn't need deep replyTo logic as it will bg-refetch anyway
+                        createdAt: newMessage.createdAt,
+                        updatedAt: newMessage.updatedAt,
+                        _isRealtime: true,
+                    };
+
+                    // Optimistically inject into the messages cache so it's there before we even open the screen!
+                    qc.setQueryData(queryKey, (old) => {
+                        if (!old?.pages?.length) return old;
+
+                        // Check if already in cache
+                        const exists = old.pages.some(p => p.messages?.some(m => m.id === newMessage.id));
+                        if (exists) return old;
+
+                        const newPages = [...old.pages];
+                        newPages[0] = {
+                            ...newPages[0],
+                            messages: [formatted, ...(newPages[0].messages || [])],
+                        };
+                        return { ...old, pages: newPages };
+                    });
+                    
+                    // Keep invalidating so a background fresh fetch happens when the user eventually opens it
+                    qc.invalidateQueries({ queryKey });
+                }
+            );
+        });
+
+        channel.subscribe();
+
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }, [schoolId, userId, conversations, qc]);
 }

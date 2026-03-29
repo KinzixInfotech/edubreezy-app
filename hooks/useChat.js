@@ -22,7 +22,7 @@ export const useConversations = (schoolId, params = {}) => {
         queryKey: [...chatKeys.conversations(schoolId), restParams],
         queryFn: () => chatService.getConversations(schoolId, { ...restParams, userId }),
         enabled: !!schoolId && !!userId,
-        staleTime: 1000 * 60 * 5, // 5 minutes — realtime handles live updates
+        staleTime: 0, // Always fetch latest when returning to chat list
     });
 };
 
@@ -47,7 +47,7 @@ export const useMessages = (schoolId, conversationId) => {
         initialPageParam: undefined,
         getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
         enabled: !!schoolId && !!conversationId,
-        staleTime: 1000 * 60 * 2, // 2 minutes — realtime handles live updates
+        staleTime: 0, // Force background refetch when reopening a chat
     });
 };
 
@@ -251,6 +251,35 @@ export const useMarkAsRead = () => {
     return useMutation({
         mutationFn: ({ schoolId, conversationId, messageId }) =>
             chatService.markAsRead(schoolId, conversationId, messageId ? { messageId } : {}),
+
+        // ── Optimistic UI: instantly clear the unread badge ──
+        onMutate: async ({ schoolId, conversationId }) => {
+            // Cancel any outgoing refetches so they don't overwrite our optimistic update
+            await qc.cancelQueries({ queryKey: chatKeys.conversations(schoolId) });
+
+            // Snapshot previous value for rollback
+            const previous = qc.getQueryData(chatKeys.conversations(schoolId));
+
+            // Optimistically set unreadCount to 0 for this conversation
+            qc.setQueryData(chatKeys.conversations(schoolId), (old) => {
+                if (!old?.conversations) return old;
+                return {
+                    ...old,
+                    conversations: old.conversations.map((c) =>
+                        c.id === conversationId ? { ...c, unreadCount: 0 } : c
+                    ),
+                };
+            });
+
+            return { previous, schoolId };
+        },
+
+        // Rollback on error
+        onError: (_err, _vars, context) => {
+            if (context?.previous) {
+                qc.setQueryData(chatKeys.conversations(context.schoolId), context.previous);
+            }
+        },
 
         onSettled: (_data, _error, { schoolId }) => {
             qc.invalidateQueries({ queryKey: chatKeys.conversations(schoolId) });

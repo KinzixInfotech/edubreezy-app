@@ -2297,6 +2297,11 @@ export default function HomeScreen() {
                                                                             Roll: {child.rollNo}
                                                                         </Text>
                                                                     </View>
+                                                                    <View style={[styles.metaBadge, isSelected && styles.selectedBadge]}>
+                                                                        <Text style={[styles.metaText, isSelected && styles.selectedText]}>
+                                                                            {child.admissionNo || 'N/A'}
+                                                                        </Text>
+                                                                    </View>
                                                                 </View>
                                                             </View>
 

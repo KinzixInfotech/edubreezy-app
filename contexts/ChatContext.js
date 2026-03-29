@@ -12,6 +12,7 @@ import { supabase } from '../lib/supabase';
 import { chatKeys } from '../hooks/useChat';
 import { getCachedUser, sendHeartbeat } from '../services/chatService';
 import { useRouter, usePathname } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const ChatContext = createContext();
 
@@ -21,6 +22,7 @@ const BADGE_KEY = 'chatBadgeCount';
 function InAppToast({ visible, senderName, senderAvatar, message, onPress, onHide }) {
     const translateY = useRef(new Animated.Value(-120)).current;
     const opacity = useRef(new Animated.Value(0)).current;
+    const insets = useSafeAreaInsets();
 
     useEffect(() => {
         if (visible) {
@@ -44,9 +46,12 @@ function InAppToast({ visible, senderName, senderAvatar, message, onPress, onHid
     if (!visible) return null;
 
     const initial = (senderName || '?').charAt(0).toUpperCase();
+    
+    // Add safe area top padding so the notch/pill doesn't hide it
+    const topOffset = Math.max(insets.top + (Platform.OS === 'ios' ? 10 : 15), Platform.OS === 'ios' ? 50 : 30);
 
     return (
-        <Animated.View style={[styles.toastContainer, { transform: [{ translateY }], opacity }]}>
+        <Animated.View style={[styles.toastContainer, { top: topOffset, transform: [{ translateY }], opacity }]}>
             <View style={styles.toast}>
                 {senderAvatar ? (
                     <Image source={{ uri: senderAvatar }} style={styles.toastAvatar} />
@@ -278,7 +283,7 @@ export function useChat() {
 const styles = StyleSheet.create({
     toastContainer: {
         position: 'absolute',
-        top: Platform.OS === 'ios' ? 50 : 30,
+        // 'top' is overridden dynamically via inline styles in InAppToast
         left: 16,
         right: 16,
         zIndex: 9999,

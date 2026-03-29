@@ -316,7 +316,7 @@ export default function GalleryScreen() {
                 <View style={styles.modalBackdrop}>
                     <StatusBar style="light" />
                     <Animated.View
-                        entering={ZoomIn.duration(250)}
+                        entering={FadeInUp.duration(300).springify(false)}
                         style={[
                             styles.modalSheet,
                             mLandscape && { flexDirection: 'row', maxHeight: mH * 0.95 }
@@ -398,7 +398,7 @@ export default function GalleryScreen() {
 
                                         {/* Actions */}
                                         <View style={styles.modalActions}>
-                                            <HapticTouchable onPress={() => handleDownload(selectedImage)} disabled={!!downloadingId}>
+                                            <HapticTouchable style={{ flex: 1 }} onPress={() => handleDownload(selectedImage)} disabled={!!downloadingId}>
                                                 <View style={styles.modalActionBtn}>
                                                     {downloadingId === selectedImage.id
                                                         ? <ActivityIndicator size="small" color="#fff" />
@@ -407,7 +407,7 @@ export default function GalleryScreen() {
                                                     <Text style={styles.modalActionText}>Save</Text>
                                                 </View>
                                             </HapticTouchable>
-                                            <HapticTouchable onPress={() => handleShare(selectedImage)} disabled={!!downloadingId}>
+                                            <HapticTouchable style={{ flex: 1 }} onPress={() => handleShare(selectedImage)} disabled={!!downloadingId}>
                                                 <View style={[styles.modalActionBtn, { backgroundColor: '#EC4899' }]}>
                                                     <Share2 size={20} color="#fff" />
                                                     <Text style={styles.modalActionText}>Share</Text>

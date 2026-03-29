@@ -23,6 +23,7 @@ import { Swipeable } from 'react-native-gesture-handler';
 import { useQueryClient } from '@tanstack/react-query';
 import HapticTouchable from '../components/HapticTouch';
 import { useConversations, chatKeys } from '../../hooks/useChat';
+import { useChatFeedRealtime } from '../../hooks/useChatRealtime';
 import { usePresenceStatus } from '../../hooks/usePresenceStatus';
 import { useShimmer, Bone } from '../components/ScreenSkeleton';
 import { deleteConversation } from '../../services/chatService';
@@ -198,6 +199,8 @@ export default function ChatScreen() {
     }, []);
 
     const { data, isLoading, isRefetching, refetch } = useConversations(schoolId, { userId });
+    useChatFeedRealtime(schoolId, userId, data?.conversations || []);
+    
     const { isUserOnline } = usePresenceStatus(schoolId, { id: userId });
     const qc = useQueryClient();
 

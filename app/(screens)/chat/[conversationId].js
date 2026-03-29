@@ -390,7 +390,7 @@ export default function ChatRoomScreen() {
 
     useChatRealtime(schoolId, conversationId, { enabled: !!schoolId && !!conversationId });
     const { sendTyping, stopTyping, typingUsers } = useTypingIndicator(conversationId, currentUser, { enabled: !!conversationId && !!currentUser });
-    const { isUserOnline } = usePresenceStatus(schoolId, currentUser);
+    const { isUserOnline, getLastSeen } = usePresenceStatus(schoolId, currentUser);
 
     const lastSeenMsgId = useRef(null);
     useEffect(() => {
@@ -444,6 +444,18 @@ export default function ChatRoomScreen() {
         return paramProfilePicture || null;
     }, [conversation, currentUser?.id, paramProfilePicture, isGroup]);
 
+    // Find the latest incoming message timestamp from the other user
+    const latestIncomingTimestamp = useMemo(() => {
+        if (!messages?.length || !currentUser?.id) return null;
+        for (let i = 0; i < messages.length; i++) {
+            const msg = messages[i];
+            if (msg.senderId && msg.senderId !== currentUser.id && msg.createdAt) {
+                return msg.createdAt;
+            }
+        }
+        return null;
+    }, [messages, currentUser?.id]);
+
     const headerSubtitle = useMemo(() => {
         if (!conversation && !paramRole) return null;
         if (isGroup) {
@@ -454,15 +466,20 @@ export default function ChatRoomScreen() {
         const online = other ? isUserOnline(other.userId) : false;
         if (online) return 'online';
         const role = paramRole || '';
-        const cs = paramClassSection || '';
+        const cs = other?.classSection || paramClassSection || '';
         const roleInfo = role && cs ? `${role} · ${cs}` : role || cs || '';
-        const lastSeen = paramLastSeenAt || other?.lastSeenAt;
+        // Pick the most recent "last seen" from: latest message, presence leave, API, or params
+        const realtimeLastSeen = other ? getLastSeen(other.userId) : null;
+        const candidates = [latestIncomingTimestamp, realtimeLastSeen, paramLastSeenAt, other?.lastSeenAt].filter(Boolean);
+        const lastSeen = candidates.length > 0
+            ? candidates.reduce((a, b) => new Date(a) > new Date(b) ? a : b)
+            : null;
         if (lastSeen) {
             const label = formatLastSeen(lastSeen);
             return roleInfo ? `${roleInfo} · ${label}` : `last seen ${label}`;
         }
         return roleInfo || null;
-    }, [conversation, isGroup, currentUser?.id, isUserOnline, paramRole, paramClassSection, paramLastSeenAt]);
+    }, [conversation, isGroup, currentUser?.id, isUserOnline, getLastSeen, paramRole, paramClassSection, paramLastSeenAt, latestIncomingTimestamp]);
 
     const isOtherOnline = useMemo(() => {
         if (!conversation || isGroup) return false;

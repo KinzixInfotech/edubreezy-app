@@ -425,8 +425,9 @@ export const leaveConversation = async (schoolId, conversationId) => {
     return data;
 };
 
-export const getEligibleUsers = async (schoolId) => {
-    const { data } = await api.get(`/schools/${schoolId}/chat/eligible-users`);
+export const getEligibleUsers = async (schoolId, refresh = false) => {
+    const url = refresh ? `/schools/${schoolId}/chat/eligible-users?refresh=true` : `/schools/${schoolId}/chat/eligible-users`;
+    const { data } = await api.get(url);
     return data;
 };
 

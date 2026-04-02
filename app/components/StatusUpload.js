@@ -1,32 +1,33 @@
 import React, { useState, useCallback, useRef, memo, Suspense } from 'react';
 import {
     View, Text, StyleSheet, Alert, TextInput, ScrollView, KeyboardAvoidingView,
-    Platform, Dimensions, Modal, ActivityIndicator, Animated as RNAnimated
+    Platform, Dimensions, Modal, ActivityIndicator, Animated as RNAnimated, TouchableOpacity
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Video, ResizeMode } from 'expo-av';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
-    Camera, ImageIcon, Type, X, Send, ChevronDown, Users, UserCheck, BookOpen,
-    Play, Pause, Film, Check
+    Camera, ImageIcon, Type, X, Send, Users, UserCheck, BookOpen,
+    Play, Pause, Film, Check, Sparkles, ChevronLeft, Smile
 } from 'lucide-react-native';
 import HapticTouchable from './HapticTouch';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import * as ImagePicker from 'expo-image-picker';
 import api from '../../lib/api';
-import { uploadFile } from '../../lib/uploadthing';
+import { getPresignedUrls, uploadToR2 } from '../../lib/r2Upload';
 import { StatusBar } from 'expo-status-bar';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 
-// Lazy load to avoid crash if expo-video-thumbnails native module isn't in current build
 const VideoTrimmer = React.lazy(() => import('./VideoTrimmer'));
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const CARD_WIDTH = Math.floor((SCREEN_WIDTH - 42) / 2);
 
 const AUDIENCE_OPTIONS = [
-    { key: 'all', label: 'Whole School', icon: Users, color: '#0469ff' },
-    { key: 'teachers', label: 'Teachers Only', icon: UserCheck, color: '#8b5cf6' },
-    { key: 'class', label: 'My Classes', icon: BookOpen, color: '#10b981' },
+    { key: 'all', label: 'Whole School', icon: Users, color: '#0469ff', bg: '#EFF6FF', border: '#BFDBFE' },
+    { key: 'teachers', label: 'Teachers Only', icon: UserCheck, color: '#7C3AED', bg: '#F5F3FF', border: '#DDD6FE' },
+    { key: 'class', label: 'My Classes', icon: BookOpen, color: '#059669', bg: '#ECFDF5', border: '#A7F3D0' },
 ];
 
 const TEXT_BG_GRADIENTS = [
@@ -38,455 +39,491 @@ const TEXT_BG_GRADIENTS = [
     ['#a18cd1', '#fbc2eb'],
 ];
 
-/**
- * StatusUpload — Modern dark-themed picker for creating a status
- * Features: upload progress bar, toast success feedback, dark UI
- */
+const MODE_OPTIONS = [
+    { key: 'camera', label: 'Camera', subLabel: null, color: '#0469ff', icon: Camera },
+    { key: 'photo', label: 'Photo', subLabel: null, color: '#7C3AED', icon: ImageIcon },
+    { key: 'video', label: 'Video', subLabel: 'Max 30s', color: '#D97706', icon: Film },
+    { key: 'text', label: 'Text', subLabel: null, color: '#059669', icon: Type },
+];
+
 const StatusUpload = ({ visible, onClose, schoolId, userId }) => {
     const insets = useSafeAreaInsets();
     const queryClient = useQueryClient();
-    const [mode, setMode] = useState(null); // null | 'text' | 'preview'
+
+    const [mode, setMode] = useState(null);
     const [text, setText] = useState('');
     const [caption, setCaption] = useState('');
     const [audience, setAudience] = useState('all');
-    const [selectedMedia, setSelectedMedia] = useState(null); // { uri, type, fileName }
+    const [selectedMedia, setSelectedMedia] = useState(null);
     const [bgGradientIndex, setBgGradientIndex] = useState(0);
     const [uploading, setUploading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState(0);
     const [showTrimmer, setShowTrimmer] = useState(false);
-    const [pendingVideo, setPendingVideo] = useState(null); // video that needs trimming
+    const [pendingVideo, setPendingVideo] = useState(null);
     const [isPlaying, setIsPlaying] = useState(false);
     const [showToast, setShowToast] = useState(false);
+
     const videoRef = useRef(null);
     const progressAnim = useRef(new RNAnimated.Value(0)).current;
     const toastAnim = useRef(new RNAnimated.Value(0)).current;
+    const captionRef = useRef(null);
 
     const reset = useCallback(() => {
-        setMode(null);
-        setText('');
-        setCaption('');
-        setAudience('all');
-        setSelectedMedia(null);
-        setBgGradientIndex(0);
-        setUploading(false);
-        setUploadProgress(0);
-        setShowTrimmer(false);
-        setPendingVideo(null);
-        setIsPlaying(false);
-        setShowToast(false);
+        setMode(null); setText(''); setCaption(''); setAudience('all');
+        setSelectedMedia(null); setBgGradientIndex(0); setUploading(false);
+        setUploadProgress(0); setShowTrimmer(false); setPendingVideo(null);
+        setIsPlaying(false); setShowToast(false);
         progressAnim.setValue(0);
     }, []);
 
+    const handleClose = useCallback(() => { reset(); onClose?.(); }, [onClose, reset]);
+
     const togglePlayback = useCallback(async () => {
         if (!videoRef.current) return;
-        if (isPlaying) {
-            await videoRef.current.pauseAsync();
-        } else {
-            await videoRef.current.playAsync();
-        }
-        setIsPlaying(!isPlaying);
+        if (isPlaying) await videoRef.current.pauseAsync();
+        else await videoRef.current.playAsync();
+        setIsPlaying(p => !p);
     }, [isPlaying]);
 
-    const handleClose = useCallback(() => {
-        reset();
-        onClose?.();
-    }, [onClose, reset]);
-
-    // Pick image from gallery
     const pickImage = useCallback(async () => {
         try {
             const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                allowsEditing: true,
-                quality: 0.75,
+                mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, quality: 0.75,
             });
-
             if (!result.canceled && result.assets?.[0]) {
-                const asset = result.assets[0];
-                setSelectedMedia({
-                    uri: asset.uri,
-                    type: 'image',
-                    fileName: asset.fileName || `status_${Date.now()}.jpg`,
-                    mimeType: asset.mimeType || 'image/jpeg',
-                });
+                const a = result.assets[0];
+                setSelectedMedia({ uri: a.uri, type: 'image', fileName: a.fileName || `status_${Date.now()}.jpg`, mimeType: a.mimeType || 'image/jpeg' });
                 setMode('preview');
             }
-        } catch (err) {
-            Alert.alert('Error', 'Failed to pick image');
-        }
+        } catch { Alert.alert('Error', 'Failed to pick image'); }
     }, []);
 
-    // Pick video from gallery
     const pickVideo = useCallback(async () => {
         try {
             const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-                allowsEditing: true,
-                quality: 0.7,
+                mediaTypes: ImagePicker.MediaTypeOptions.Videos, allowsEditing: true, quality: 0.7,
             });
-
             if (!result.canceled && result.assets?.[0]) {
-                const asset = result.assets[0];
-                const durationSec = Math.ceil((asset.duration || 15000) / 1000);
-
-                // If video > 30 seconds, show trimmer
-                if (durationSec > 30) {
-                    setPendingVideo({
-                        uri: asset.uri,
-                        fileName: asset.fileName || `status_${Date.now()}.mp4`,
-                        mimeType: asset.mimeType || 'video/mp4',
-                        totalDuration: durationSec,
-                    });
-                    setShowTrimmer(true);
-                    return;
+                const a = result.assets[0];
+                const dur = Math.ceil((a.duration || 15000) / 1000);
+                if (dur > 30) {
+                    setPendingVideo({ uri: a.uri, fileName: a.fileName || `status_${Date.now()}.mp4`, mimeType: a.mimeType || 'video/mp4', totalDuration: dur });
+                    setShowTrimmer(true); return;
                 }
-
-                setSelectedMedia({
-                    uri: asset.uri,
-                    type: 'video',
-                    fileName: asset.fileName || `status_${Date.now()}.mp4`,
-                    mimeType: asset.mimeType || 'video/mp4',
-                    duration: durationSec,
-                });
+                setSelectedMedia({ uri: a.uri, type: 'video', fileName: a.fileName || `status_${Date.now()}.mp4`, mimeType: a.mimeType || 'video/mp4', duration: dur });
                 setMode('preview');
             }
-        } catch (err) {
-            Alert.alert('Error', 'Failed to pick video');
-        }
+        } catch { Alert.alert('Error', 'Failed to pick video'); }
     }, []);
 
-    // Handle trim confirmation
     const handleTrimConfirm = useCallback(({ uri, trimStart, trimEnd, duration }) => {
         setShowTrimmer(false);
-        setSelectedMedia({
-            uri,
-            type: 'video',
-            fileName: pendingVideo?.fileName || `status_${Date.now()}.mp4`,
-            mimeType: pendingVideo?.mimeType || 'video/mp4',
-            duration,
-            trimStart,
-            trimEnd,
-        });
-        setPendingVideo(null);
-        setMode('preview');
+        setSelectedMedia({ uri, type: 'video', fileName: pendingVideo?.fileName || `status_${Date.now()}.mp4`, mimeType: pendingVideo?.mimeType || 'video/mp4', duration, trimStart, trimEnd });
+        setPendingVideo(null); setMode('preview');
     }, [pendingVideo]);
 
-    const handleTrimCancel = useCallback(() => {
-        setShowTrimmer(false);
-        setPendingVideo(null);
-    }, []);
+    const handleTrimCancel = useCallback(() => { setShowTrimmer(false); setPendingVideo(null); }, []);
 
-    // Take photo with camera
     const takePhoto = useCallback(async () => {
         try {
             const { status } = await ImagePicker.requestCameraPermissionsAsync();
-            if (status !== 'granted') {
-                Alert.alert('Permission needed', 'Camera access is required to take photos.');
-                return;
-            }
-
-            const result = await ImagePicker.launchCameraAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                allowsEditing: true,
-                quality: 0.75,
-            });
-
+            if (status !== 'granted') { Alert.alert('Permission needed', 'Camera access is required.'); return; }
+            const result = await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, quality: 0.75 });
             if (!result.canceled && result.assets?.[0]) {
-                const asset = result.assets[0];
-                setSelectedMedia({
-                    uri: asset.uri,
-                    type: 'image',
-                    fileName: asset.fileName || `status_${Date.now()}.jpg`,
-                    mimeType: asset.mimeType || 'image/jpeg',
-                });
+                const a = result.assets[0];
+                setSelectedMedia({ uri: a.uri, type: 'image', fileName: a.fileName || `status_${Date.now()}.jpg`, mimeType: a.mimeType || 'image/jpeg' });
                 setMode('preview');
             }
-        } catch (err) {
-            Alert.alert('Error', 'Failed to capture photo');
-        }
+        } catch { Alert.alert('Error', 'Failed to capture photo'); }
     }, []);
 
-    // Show success toast
     const showSuccessToast = useCallback(() => {
         setShowToast(true);
         RNAnimated.sequence([
             RNAnimated.timing(toastAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
-            RNAnimated.delay(1500),
+            RNAnimated.delay(1800),
             RNAnimated.timing(toastAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
-        ]).start(() => {
-            setShowToast(false);
-        });
+        ]).start(() => setShowToast(false));
     }, [toastAnim]);
 
-    // Post status
     const postStatus = useCallback(async () => {
         if (uploading) return;
-        setUploading(true);
-        setUploadProgress(0);
-        progressAnim.setValue(0);
-
+        setUploading(true); setUploadProgress(0); progressAnim.setValue(0);
         try {
-            let mediaUrl = null;
-            let statusType = 'text';
-            let duration = null;
-
+            let mediaUrl = null, statusType = 'text', duration = null;
             if (selectedMedia) {
-                statusType = selectedMedia.type;
-                duration = selectedMedia.duration || null;
-
-                // Upload via existing upload route with progress tracking
-                // Phase 1: File upload → progress mapped to 0-80%
-                const formData = new FormData();
-                formData.append('file', {
-                    uri: selectedMedia.uri,
-                    name: selectedMedia.fileName,
-                    type: selectedMedia.mimeType,
+                statusType = selectedMedia.type; duration = selectedMedia.duration || null;
+                const [presigned] = await getPresignedUrls(
+                    [{ name: selectedMedia.fileName, type: selectedMedia.mimeType }],
+                    schoolId, 'status'
+                );
+                await uploadToR2(selectedMedia.uri, presigned.url, selectedMedia.mimeType, (progressEvent) => {
+                    if (progressEvent.total) {
+                        const pct = Math.round((progressEvent.loaded / progressEvent.total) * 80);
+                        setUploadProgress(pct);
+                        RNAnimated.timing(progressAnim, { toValue: pct / 100, duration: 200, useNativeDriver: false }).start();
+                    }
                 });
-                formData.append('schoolId', schoolId);
-                formData.append('userId', userId);
-                formData.append('type', 'status');
-
-                const uploadRes = await api.post('/mobile/upload', formData, {
-                    headers: { 'Content-Type': 'multipart/form-data' },
-                    timeout: 120000,
-                    onUploadProgress: (progressEvent) => {
-                        if (progressEvent.total) {
-                            // Map upload progress to 0-80% range
-                            const rawPct = Math.min(100, Math.round((progressEvent.loaded / progressEvent.total) * 100));
-                            const mappedPct = Math.round(rawPct * 0.8); // 0-80%
-                            setUploadProgress(mappedPct);
-                            RNAnimated.timing(progressAnim, {
-                                toValue: mappedPct / 100,
-                                duration: 200,
-                                useNativeDriver: false,
-                            }).start();
-                        }
-                    },
-                });
-
-                mediaUrl = uploadRes.data?.url;
+                mediaUrl = presigned.publicUrl;
                 if (!mediaUrl) throw new Error('Upload failed — no URL returned');
             }
-
-            // Phase 2: Server processing → animate 80-95%
             setUploadProgress(85);
-            RNAnimated.timing(progressAnim, {
-                toValue: 0.85,
-                duration: 400,
-                useNativeDriver: false,
-            }).start();
-
-            // Create status via API
+            RNAnimated.timing(progressAnim, { toValue: 0.85, duration: 400, useNativeDriver: false }).start();
             const createRes = await api.post(`/schools/${schoolId}/status`, {
-                userId,
-                type: statusType,
-                mediaUrl,
+                userId, type: statusType, mediaUrl,
                 text: statusType === 'text' ? text : null,
-                caption: caption || null,
-                audience,
-                duration,
+                caption: caption || null, audience, duration,
                 trimStart: selectedMedia?.trimStart || null,
                 trimEnd: selectedMedia?.trimEnd || null,
             });
-
-            // Done → 100%
-            setUploadProgress(100);
-            progressAnim.setValue(1);
-
-            // Optimistic update: inject new status into feed cache immediately
-            // so the thumbnail appears without waiting for server re-fetch
+            setUploadProgress(100); progressAnim.setValue(1);
             const newStatus = createRes.data?.status || createRes.data;
-            queryClient.setQueryData(
-                ['statusFeed', schoolId, userId],
-                (oldData) => {
-                    if (!oldData?.feed) return oldData;
-                    // Build optimistic status entry using local URI as fallback thumbnail
-                    const optimisticStatus = {
-                        id: newStatus?.id || `temp_${Date.now()}`,
-                        type: statusType,
-                        mediaUrl: mediaUrl || null,
-                        // Use local URI as thumbnail until server generates one
-                        thumbnailUrl: statusType === 'image' ? (selectedMedia?.uri || mediaUrl) : (newStatus?.thumbnailUrl || null),
-                        text: statusType === 'text' ? text : null,
-                        caption: caption || null,
-                        duration,
-                        trimStart: selectedMedia?.trimStart || null,
-                        trimEnd: selectedMedia?.trimEnd || null,
-                        createdAt: new Date().toISOString(),
-                        isSeen: true,
-                        viewCount: 0,
-                    };
-
-                    const updatedFeed = oldData.feed.map((group) => {
-                        if (group.userId === userId) {
-                            return {
-                                ...group,
-                                statuses: [...(group.statuses || []), optimisticStatus],
-                            };
-                        }
-                        return group;
-                    });
-
-                    // If user had no existing group, add one
-                    const hasGroup = oldData.feed.some((g) => g.userId === userId);
-                    if (!hasGroup) {
-                        updatedFeed.unshift({
-                            userId,
-                            userName: 'My Status',
-                            userAvatar: null,
-                            statuses: [optimisticStatus],
-                            hasUnseen: false,
-                        });
-                    }
-
-                    return { ...oldData, feed: updatedFeed };
+            queryClient.setQueryData(['statusFeed', schoolId, userId], (oldData) => {
+                if (!oldData?.feed) return oldData;
+                const optimisticStatus = {
+                    id: newStatus?.id || `temp_${Date.now()}`, type: statusType, mediaUrl: mediaUrl || null,
+                    thumbnailUrl: statusType === 'image' ? (selectedMedia?.uri || mediaUrl) : (newStatus?.thumbnailUrl || null),
+                    text: statusType === 'text' ? text : null, caption: caption || null, duration,
+                    trimStart: selectedMedia?.trimStart || null, trimEnd: selectedMedia?.trimEnd || null,
+                    createdAt: new Date().toISOString(), isSeen: true, viewCount: 0,
+                };
+                const updatedFeed = oldData.feed.map((g) =>
+                    g.userId === userId ? { ...g, statuses: [...(g.statuses || []), optimisticStatus] } : g
+                );
+                if (!oldData.feed.some((g) => g.userId === userId)) {
+                    updatedFeed.unshift({ userId, userName: 'My Status', userAvatar: null, statuses: [optimisticStatus], hasUnseen: false });
                 }
-            );
-
-            // Also invalidate in background to get server-generated data (thumbnail, etc.)
+                return { ...oldData, feed: updatedFeed };
+            });
             queryClient.invalidateQueries({ queryKey: ['statusFeed'] });
-
-            // Close immediately and show toast
             handleClose();
-            // Small delay so modal animates out first
             setTimeout(() => showSuccessToast(), 300);
-
         } catch (err) {
-            console.error('Post status error:', err);
             Alert.alert('Error', err.message || 'Failed to post status');
         } finally {
             setUploading(false);
         }
     }, [selectedMedia, text, caption, audience, schoolId, userId, uploading, handleClose, queryClient, progressAnim, showSuccessToast]);
 
+    const handleModePress = (key) => {
+        if (key === 'camera') takePhoto();
+        else if (key === 'photo') pickImage();
+        else if (key === 'video') pickVideo();
+        else setMode('text');
+    };
+
+    const selectedAudience = AUDIENCE_OPTIONS.find(o => o.key === audience);
+    const canPost = mode === 'text' ? text.trim().length > 0 : !!selectedMedia;
+
     if (!visible && !showToast) return null;
 
-    // Toast overlay (shows even after modal is closed)
     if (!visible && showToast) {
         return (
             <RNAnimated.View
-                style={[styles.toastContainer, {
+                style={[styles.toastContainer, { top: insets.top + 8 },
+                {
                     opacity: toastAnim,
-                    transform: [{ translateY: toastAnim.interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) }],
+                    transform: [{ translateY: toastAnim.interpolate({ inputRange: [0, 1], outputRange: [-14, 0] }) }],
                 }]}
                 pointerEvents="none"
             >
                 <View style={styles.toast}>
-                    <View style={styles.toastIcon}>
-                        <Check size={16} color="#fff" strokeWidth={3} />
-                    </View>
+                    <View style={styles.toastDot}><Check size={11} color="#fff" strokeWidth={3} /></View>
                     <Text style={styles.toastText}>Status posted!</Text>
                 </View>
             </RNAnimated.View>
         );
     }
 
+    // ═══════════════════════════════════════════════════════════
+    // PREVIEW SCREEN — full-bleed, WhatsApp-style
+    // ═══════════════════════════════════════════════════════════
+    if (mode === 'preview' && selectedMedia) {
+        return (
+            <Modal visible={visible} animationType="slide" transparent={false} statusBarTranslucent>
+                <StatusBar style="light" />
+                <KeyboardAvoidingView
+                    style={{ flex: 1, backgroundColor: '#000' }}
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    keyboardVerticalOffset={0}
+                >
+                    {/* ── Full-bleed media ── */}
+                    <View style={StyleSheet.absoluteFill}>
+                        {selectedMedia.type === 'video' ? (
+                            <Video
+                                ref={videoRef}
+                                source={{ uri: selectedMedia.uri }}
+                                style={StyleSheet.absoluteFill}
+                                resizeMode={ResizeMode.CONTAIN}
+                                isLooping
+                                onPlaybackStatusUpdate={(s) => {
+                                    if (s.isLoaded) setIsPlaying(s.isPlaying);
+                                }}
+                            />
+                        ) : (
+                            <Image
+                                source={{ uri: selectedMedia.uri }}
+                                style={StyleSheet.absoluteFill}
+                                contentFit="cover"
+                            />
+                        )}
+                    </View>
+
+                    {/* ── Top gradient scrim ── */}
+                    <LinearGradient
+                        colors={['rgba(0,0,0,0.6)', 'transparent']}
+                        style={[styles.previewTopScrim, { paddingTop: insets.top + 4 }]}
+                        pointerEvents="box-none"
+                    >
+                        {/* Upload progress bar pinned to very top */}
+                        {uploading && (
+                            <View style={styles.previewProgressTrack}>
+                                <RNAnimated.View style={[styles.previewProgressFill, {
+                                    width: progressAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
+                                }]} />
+                            </View>
+                        )}
+
+                        {/* Header row */}
+                        <View style={styles.previewHeader}>
+                            <HapticTouchable onPress={() => setMode(null)} style={styles.previewBackBtn}>
+                                <ChevronLeft size={22} color="#fff" />
+                            </HapticTouchable>
+
+                            <View style={styles.previewHeaderRight}>
+                                {/* Audience pill */}
+                                {selectedAudience && (
+                                    <View style={styles.audiencePill}>
+                                        <selectedAudience.icon size={11} color="#fff" strokeWidth={2.5} />
+                                        <Text style={styles.audiencePillText}>{selectedAudience.label}</Text>
+                                    </View>
+                                )}
+                            </View>
+                        </View>
+                    </LinearGradient>
+
+                    {/* ── Video play/pause button (center) ── */}
+                    {selectedMedia.type === 'video' && (
+                        <HapticTouchable onPress={togglePlayback} style={styles.previewPlayArea}>
+                            {!isPlaying && (
+                                <View style={styles.previewPlayBtn}>
+                                    <Play size={28} color="#fff" fill="#fff" />
+                                </View>
+                            )}
+                        </HapticTouchable>
+                    )}
+
+                    {/* ── Duration badge (video) ── */}
+                    {selectedMedia.type === 'video' && selectedMedia.duration && (
+                        <View style={styles.previewDurationBadge}>
+                            <Film size={10} color="#fff" />
+                            <Text style={styles.previewDurationText}>{selectedMedia.duration}s</Text>
+                        </View>
+                    )}
+
+                    {/* ── Bottom gradient scrim + caption + send ── */}
+                    <LinearGradient
+                        colors={['transparent', 'rgba(0,0,0,0.75)']}
+                        style={[styles.previewBottomScrim, { paddingBottom: insets.bottom + 8 }]}
+                        pointerEvents="box-none"
+                    >
+                        <View style={styles.previewCaptionRow} pointerEvents="box-none">
+                            {/* Emoji stub (cosmetic, like WhatsApp) */}
+                            <View style={styles.previewEmojiBtn}>
+                                <Smile size={20} color="rgba(255,255,255,0.8)" />
+                            </View>
+
+                            {/* Caption input */}
+                            <View style={styles.previewCaptionInputWrap}>
+                                <TextInput
+                                    ref={captionRef}
+                                    value={caption}
+                                    onChangeText={setCaption}
+                                    placeholder="Add a caption…"
+                                    placeholderTextColor="rgba(255,255,255,0.45)"
+                                    style={styles.previewCaptionInput}
+                                    maxLength={200}
+                                    multiline
+                                    returnKeyType="done"
+                                />
+                                {caption.length > 0 && (
+                                    <Text style={styles.previewCaptionCount}>{caption.length}/200</Text>
+                                )}
+                            </View>
+
+                            {/* Send button */}
+                            <HapticTouchable
+                                onPress={postStatus}
+                                disabled={uploading}
+                                style={[styles.previewSendBtn, uploading && { opacity: 0.5 }]}
+                            >
+                                {uploading
+                                    ? <ActivityIndicator size={16} color="#fff" />
+                                    : <Send size={18} color="#fff" />}
+                            </HapticTouchable>
+                        </View>
+
+                        {/* Upload % label */}
+                        {uploading && (
+                            <Text style={styles.previewUploadLabel}>{uploadProgress}% uploading…</Text>
+                        )}
+                    </LinearGradient>
+                </KeyboardAvoidingView>
+            </Modal>
+        );
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // MAIN MODAL (mode selector, text mode, trimmer)
+    // ═══════════════════════════════════════════════════════════
     return (
         <Modal visible={visible} animationType="slide" transparent={false}>
-            <StatusBar style='dark' />
+            <StatusBar style="dark" />
             <View style={[styles.container, { paddingTop: insets.top }]}>
-                {/* Header */}
+
+                {/* ── Header ── */}
                 <View style={styles.header}>
                     <HapticTouchable onPress={handleClose} style={styles.closeBtn}>
-                        <X size={22} color="#333" />
+                        <X size={18} color="#374151" />
                     </HapticTouchable>
-                    <Text style={styles.headerTitle}>
-                        {mode === 'text' ? 'Text Status' : mode === 'preview' ? 'Preview' : 'New Status'}
-                    </Text>
-                    {mode && (
+                    <View style={styles.headerCenter}>
+                        <Text style={styles.headerTitle}>
+                            {mode === 'text' ? 'Text Status' : 'New Status'}
+                        </Text>
+                        {mode && selectedAudience && (
+                            <Text style={styles.headerSub} numberOfLines={1}>
+                                {selectedAudience.label}
+                            </Text>
+                        )}
+                    </View>
+                    {mode === 'text' ? (
                         <HapticTouchable
                             onPress={postStatus}
-                            disabled={uploading || (mode === 'text' && !text.trim())}
-                            style={[styles.postBtn, uploading && { opacity: 0.6 }]}
+                            disabled={uploading || !canPost}
+                            style={[styles.postBtn, (!canPost || uploading) && { opacity: 0.4 }]}
                         >
-                            {uploading ? (
-                                <ActivityIndicator size={16} color="#fff" />
-                            ) : (
-                                <Send size={16} color="#fff" />
-                            )}
-                            <Text style={styles.postBtnText}>
-                                {uploading ? `${uploadProgress}%` : 'Post'}
-                            </Text>
+                            <LinearGradient
+                                colors={['#0469ff', '#0347b8']}
+                                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                                style={styles.postBtnInner}
+                            >
+                                {uploading
+                                    ? <ActivityIndicator size={12} color="#fff" />
+                                    : <Send size={12} color="#fff" />}
+                                <Text style={styles.postBtnText}>
+                                    {uploading ? `${uploadProgress}%` : 'Post'}
+                                </Text>
+                            </LinearGradient>
                         </HapticTouchable>
+                    ) : (
+                        <View style={{ width: 64 }} />
                     )}
                 </View>
 
-                {/* Upload Progress Bar */}
+                {/* ── Upload progress bar ── */}
                 {uploading && (
-                    <View style={styles.uploadProgressContainer}>
-                        <RNAnimated.View
-                            style={[styles.uploadProgressFill, {
-                                width: progressAnim.interpolate({
-                                    inputRange: [0, 1],
-                                    outputRange: ['0%', '100%'],
-                                }),
-                            }]}
-                        />
+                    <View style={styles.progressTrack}>
+                        <RNAnimated.View style={[styles.progressFill, {
+                            width: progressAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
+                        }]} />
                     </View>
                 )}
 
-                {/* Mode Selector (initial state) */}
+                {/* ── Mode selector ── */}
                 {!mode && (
-                    <View style={styles.modeSelector}>
-                        <Text style={styles.modeTitle}>What would you like to share?</Text>
+                    <ScrollView
+                        showsVerticalScrollIndicator={false}
+                        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + 24 }]}
+                    >
+                        <Animated.View entering={FadeInDown.delay(40).duration(380)}>
+                            <LinearGradient
+                                colors={['#0469ff', '#0347b8']}
+                                start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                                style={styles.heroCard}
+                            >
+                                <View style={styles.heroCircle1} />
+                                <View style={styles.heroCircle2} />
+                                <View style={styles.heroTop}>
+                                    <View style={{ flex: 1, paddingRight: 12 }}>
+                                        <Text style={styles.heroTitle}>Create a Status</Text>
+                                        <Text style={styles.heroSub}>Share a moment with your school</Text>
+                                    </View>
+                                    <View style={styles.heroBadge}>
+                                        <Sparkles size={11} color="#fff" />
+                                        <Text style={styles.heroBadgeText}>New</Text>
+                                    </View>
+                                </View>
+                                <Text style={styles.heroHint}>Pick a format to get started</Text>
+                            </LinearGradient>
+                        </Animated.View>
 
-                        <View style={styles.modeGrid}>
-                            <HapticTouchable onPress={takePhoto} style={styles.modeCard}>
-                                <LinearGradient colors={['#0469ff', '#0256d0']} style={styles.modeIconBg}>
-                                    <Camera size={28} color="#fff" />
-                                </LinearGradient>
-                                <Text style={styles.modeLabel}>Camera</Text>
-                            </HapticTouchable>
+                        <Animated.View entering={FadeInDown.delay(100).duration(380)}>
+                            <Text style={styles.sectionTitle}>Choose Format</Text>
+                            <View style={styles.modeGrid}>
+                                {MODE_OPTIONS.map((opt) => {
+                                    const Icon = opt.icon;
+                                    return (
+                                        <HapticTouchable
+                                            key={opt.key}
+                                            onPress={() => handleModePress(opt.key)}
+                                            style={styles.modeCard}
+                                        >
+                                            <View style={[styles.modeIconBox, { backgroundColor: opt.color + '18' }]}>
+                                                <Icon size={20} color={opt.color} strokeWidth={2} />
+                                            </View>
+                                            <Text style={styles.modeCardLabel} numberOfLines={1}>{opt.label}</Text>
+                                            {opt.subLabel ? (
+                                                <Text style={styles.modeCardSub} numberOfLines={1}>{opt.subLabel}</Text>
+                                            ) : null}
+                                        </HapticTouchable>
+                                    );
+                                })}
+                            </View>
+                        </Animated.View>
 
-                            <HapticTouchable onPress={pickImage} style={styles.modeCard}>
-                                <LinearGradient colors={['#8b5cf6', '#7c3aed']} style={styles.modeIconBg}>
-                                    <ImageIcon size={28} color="#fff" />
-                                </LinearGradient>
-                                <Text style={styles.modeLabel}>Photo</Text>
-                            </HapticTouchable>
-
-                            <HapticTouchable onPress={pickVideo} style={styles.modeCard}>
-                                <LinearGradient colors={['#f59e0b', '#d97706']} style={styles.modeIconBg}>
-                                    <Film size={28} color="#fff" />
-                                </LinearGradient>
-                                <Text style={styles.modeLabel}>Video</Text>
-                                <Text style={styles.modeSubLabel}>Max 30s</Text>
-                            </HapticTouchable>
-
-                            <HapticTouchable onPress={() => setMode('text')} style={styles.modeCard}>
-                                <LinearGradient colors={['#10b981', '#059669']} style={styles.modeIconBg}>
-                                    <Type size={28} color="#fff" />
-                                </LinearGradient>
-                                <Text style={styles.modeLabel}>Text</Text>
-                            </HapticTouchable>
-                        </View>
-
-                        {/* Audience Selector */}
-                        <Text style={styles.audienceTitle}>Share with</Text>
-                        <View style={styles.audienceRow}>
-                            {AUDIENCE_OPTIONS.map((opt) => (
-                                <HapticTouchable
-                                    key={opt.key}
-                                    onPress={() => setAudience(opt.key)}
-                                    style={[
-                                        styles.audienceChip,
-                                        audience === opt.key && { backgroundColor: opt.color + '20', borderColor: opt.color },
-                                    ]}
-                                >
-                                    <opt.icon size={14} color={audience === opt.key ? opt.color : '#aaa'} />
-                                    <Text style={[
-                                        styles.audienceChipText,
-                                        audience === opt.key && { color: opt.color, fontWeight: '600' },
-                                    ]}>
-                                        {opt.label}
-                                    </Text>
-                                </HapticTouchable>
-                            ))}
-                        </View>
-                    </View>
+                        <Animated.View entering={FadeInDown.delay(160).duration(380)}>
+                            <Text style={styles.sectionTitle}>Share With</Text>
+                            <View style={styles.audienceList}>
+                                {AUDIENCE_OPTIONS.map((opt) => {
+                                    const Icon = opt.icon;
+                                    const active = audience === opt.key;
+                                    return (
+                                        <HapticTouchable
+                                            key={opt.key}
+                                            onPress={() => setAudience(opt.key)}
+                                            style={[
+                                                styles.audienceItem,
+                                                active
+                                                    ? { backgroundColor: opt.bg, borderColor: opt.border }
+                                                    : { backgroundColor: '#fff', borderColor: '#E5E7EB' },
+                                            ]}
+                                        >
+                                            <View style={[
+                                                styles.audienceIconBox,
+                                                { backgroundColor: active ? opt.color + '20' : '#F3F4F6' },
+                                            ]}>
+                                                <Icon size={14} color={active ? opt.color : '#9CA3AF'} strokeWidth={2} />
+                                            </View>
+                                            <Text style={[
+                                                styles.audienceItemLabel,
+                                                active && { color: opt.color, fontWeight: '700' },
+                                            ]}>
+                                                {opt.label}
+                                            </Text>
+                                            {active && (
+                                                <View style={[styles.audienceTick, { backgroundColor: opt.color }]}>
+                                                    <Check size={9} color="#fff" strokeWidth={3} />
+                                                </View>
+                                            )}
+                                        </HapticTouchable>
+                                    );
+                                })}
+                            </View>
+                        </Animated.View>
+                    </ScrollView>
                 )}
 
-                {/* Text Mode */}
+                {/* ── Text mode ── */}
                 {mode === 'text' && (
                     <KeyboardAvoidingView
                         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -500,17 +537,17 @@ const StatusUpload = ({ visible, onClose, schoolId, userId }) => {
                                 value={text}
                                 onChangeText={setText}
                                 placeholder="Type something..."
-                                placeholderTextColor="rgba(255,255,255,0.5)"
+                                placeholderTextColor="rgba(255,255,255,0.4)"
                                 style={styles.textInput}
-                                multiline
-                                maxLength={280}
-                                autoFocus
+                                multiline maxLength={280} autoFocus
                             />
+                            <Text style={styles.charCount}>{text.length}/280</Text>
                         </LinearGradient>
-
-                        {/* Gradient picker */}
-                        <View style={styles.gradientPickerContainer}>
-                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.gradientPicker}>
+                        <View style={[styles.gradientBar, { paddingBottom: insets.bottom + 8 }]}>
+                            <ScrollView
+                                horizontal showsHorizontalScrollIndicator={false}
+                                contentContainerStyle={styles.gradientScroll}
+                            >
                                 {TEXT_BG_GRADIENTS.map((colors, idx) => (
                                     <HapticTouchable key={idx} onPress={() => setBgGradientIndex(idx)}>
                                         <LinearGradient
@@ -519,7 +556,11 @@ const StatusUpload = ({ visible, onClose, schoolId, userId }) => {
                                                 styles.gradientDot,
                                                 bgGradientIndex === idx && styles.gradientDotActive,
                                             ]}
-                                        />
+                                        >
+                                            {bgGradientIndex === idx && (
+                                                <Check size={12} color="#fff" strokeWidth={3} />
+                                            )}
+                                        </LinearGradient>
                                     </HapticTouchable>
                                 ))}
                             </ScrollView>
@@ -527,55 +568,13 @@ const StatusUpload = ({ visible, onClose, schoolId, userId }) => {
                     </KeyboardAvoidingView>
                 )}
 
-                {/* Image/Video Preview */}
-                {mode === 'preview' && selectedMedia && (
-                    <View style={styles.previewContainer}>
-                        {selectedMedia.type === 'video' ? (
-                            <View style={{ flex: 1, backgroundColor: '#000' }}>
-                                <Video
-                                    ref={videoRef}
-                                    source={{ uri: selectedMedia.uri }}
-                                    style={styles.previewMedia}
-                                    resizeMode={ResizeMode.CONTAIN}
-                                    isLooping
-                                    onPlaybackStatusUpdate={(status) => {
-                                        if (status.isLoaded) setIsPlaying(status.isPlaying);
-                                    }}
-                                />
-                                <HapticTouchable
-                                    onPress={togglePlayback}
-                                    style={styles.playPauseBtn}
-                                >
-                                    {isPlaying ? (
-                                        <Pause size={32} color="#fff" fill="#fff" />
-                                    ) : (
-                                        <Play size={32} color="#fff" fill="#fff" />
-                                    )}
-                                </HapticTouchable>
-                            </View>
-                        ) : (
-                            <View style={{ flex: 1, backgroundColor: '#000' }}>
-                                <Image
-                                    source={{ uri: selectedMedia.uri }}
-                                    style={styles.previewMedia}
-                                    contentFit="contain"
-                                />
-                            </View>
-                        )}
-                        <TextInput
-                            value={caption}
-                            onChangeText={setCaption}
-                            placeholder="Add a caption..."
-                            placeholderTextColor="#888"
-                            style={styles.captionInput}
-                            maxLength={200}
-                        />
-                    </View>
-                )}
-
-                {/* Video Trimmer */}
+                {/* ── Video Trimmer ── */}
                 {showTrimmer && (
-                    <Suspense fallback={<View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}><ActivityIndicator size="large" color="#0469ff" /></View>}>
+                    <Suspense fallback={
+                        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+                            <ActivityIndicator size="large" color="#0469ff" />
+                        </View>
+                    }>
                         <VideoTrimmer
                             visible={showTrimmer}
                             uri={pendingVideo?.uri}
@@ -591,232 +590,247 @@ const StatusUpload = ({ visible, onClose, schoolId, userId }) => {
 };
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#fff',
-    },
+    container: { flex: 1, backgroundColor: '#F9FAFB' },
+
+    // ── Header ──────────────────────────────────────────────────
     header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        borderBottomWidth: 1,
-        borderBottomColor: '#f0f0f0',
+        flexDirection: 'row', alignItems: 'center',
+        paddingHorizontal: 16, paddingTop: 8, paddingBottom: 10,
+        backgroundColor: '#fff',
+        borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#E5E7EB',
     },
     closeBtn: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        backgroundColor: '#f5f5f5',
-        alignItems: 'center',
-        justifyContent: 'center',
+        width: 34, height: 34, borderRadius: 17,
+        backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center',
     },
-    headerTitle: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: '#111',
+    headerCenter: { flex: 1, alignItems: 'center', paddingHorizontal: 6 },
+    headerTitle: { fontSize: 16, fontWeight: '700', color: '#111' },
+    headerSub: { fontSize: 11, color: '#6B7280', marginTop: 1 },
+    postBtn: { borderRadius: 16, overflow: 'hidden' },
+    postBtnInner: {
+        flexDirection: 'row', alignItems: 'center', gap: 5,
+        paddingHorizontal: 14, paddingVertical: 8,
     },
-    postBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        backgroundColor: '#0469ff',
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        borderRadius: 20,
-    },
-    postBtnText: {
-        color: '#fff',
-        fontSize: 14,
-        fontWeight: '600',
-    },
+    postBtnText: { color: '#fff', fontSize: 13, fontWeight: '700' },
 
-    // Upload progress bar
-    uploadProgressContainer: {
-        height: 3,
-        backgroundColor: '#eee',
-        overflow: 'hidden',
-    },
-    uploadProgressFill: {
-        height: '100%',
-        backgroundColor: '#0469ff',
-        borderRadius: 2,
-    },
+    // ── Progress bar ─────────────────────────────────────────────
+    progressTrack: { height: 2, backgroundColor: '#DBEAFE' },
+    progressFill: { height: '100%', backgroundColor: '#0469ff' },
 
-    // Toast
+    // ── Toast ────────────────────────────────────────────────────
     toastContainer: {
-        position: 'absolute',
-        top: 60,
-        left: 0,
-        right: 0,
-        alignItems: 'center',
-        zIndex: 999,
+        position: 'absolute', left: 0, right: 0,
+        alignItems: 'center', zIndex: 999,
     },
     toast: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-        backgroundColor: '#333',
-        paddingHorizontal: 20,
-        paddingVertical: 12,
-        borderRadius: 24,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-        elevation: 6,
+        flexDirection: 'row', alignItems: 'center', gap: 8,
+        backgroundColor: '#1F2937',
+        paddingHorizontal: 16, paddingVertical: 9, borderRadius: 18,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.18, shadowRadius: 8, elevation: 5,
     },
-    toastIcon: {
-        width: 24,
-        height: 24,
-        borderRadius: 12,
-        backgroundColor: '#10b981',
-        alignItems: 'center',
-        justifyContent: 'center',
+    toastDot: {
+        width: 18, height: 18, borderRadius: 9,
+        backgroundColor: '#10b981', alignItems: 'center', justifyContent: 'center',
     },
-    toastText: {
-        color: '#fff',
-        fontSize: 14,
-        fontWeight: '600',
+    toastText: { color: '#fff', fontSize: 13, fontWeight: '600' },
+
+    // ── Scroll content ────────────────────────────────────────────
+    scrollContent: { paddingHorizontal: 16, paddingTop: 16, gap: 18 },
+
+    // ── Hero card ─────────────────────────────────────────────────
+    heroCard: {
+        borderRadius: 20, padding: 20, overflow: 'hidden',
+        shadowColor: '#0469ff', shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.16, shadowRadius: 10, elevation: 5,
+    },
+    heroCircle1: {
+        position: 'absolute', top: -44, right: -44,
+        width: 140, height: 140, borderRadius: 70,
+        backgroundColor: 'rgba(255,255,255,0.08)',
+    },
+    heroCircle2: {
+        position: 'absolute', bottom: -28, left: -18,
+        width: 100, height: 100, borderRadius: 50,
+        backgroundColor: 'rgba(255,255,255,0.05)',
+    },
+    heroTop: {
+        flexDirection: 'row', alignItems: 'flex-start',
+        justifyContent: 'space-between', marginBottom: 10,
+    },
+    heroTitle: { fontSize: 18, fontWeight: '800', color: '#fff', letterSpacing: -0.3 },
+    heroSub: { fontSize: 12, color: 'rgba(255,255,255,0.72)', marginTop: 3 },
+    heroBadge: {
+        flexDirection: 'row', alignItems: 'center', gap: 4,
+        backgroundColor: 'rgba(255,255,255,0.18)',
+        paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20,
+    },
+    heroBadgeText: { fontSize: 11, color: '#fff', fontWeight: '700' },
+    heroHint: { fontSize: 12, color: 'rgba(255,255,255,0.55)' },
+
+    // ── Section title ─────────────────────────────────────────────
+    sectionTitle: {
+        fontSize: 10, fontWeight: '700', color: '#9CA3AF',
+        textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10,
     },
 
-    // Mode selector
-    modeSelector: {
-        flex: 1,
-        paddingHorizontal: 20,
-        paddingTop: 30,
-    },
-    modeTitle: {
-        fontSize: 20,
-        fontWeight: '700',
-        color: '#111',
-        marginBottom: 24,
-    },
-    modeGrid: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 14,
-        justifyContent: 'center',
-    },
+    // ── Mode grid ─────────────────────────────────────────────────
+    modeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
     modeCard: {
-        width: (SCREEN_WIDTH - 72) / 2,
-        backgroundColor: '#f8f9fa',
-        borderRadius: 16,
-        padding: 20,
-        alignItems: 'center',
-        gap: 10,
+        width: CARD_WIDTH, backgroundColor: '#fff',
+        borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: '#E5E7EB',
+        padding: 16, flexDirection: 'column', alignItems: 'flex-start', gap: 10,
+        shadowColor: '#000', shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.04, shadowRadius: 3, elevation: 1,
     },
-    modeIconBg: {
-        width: 60,
-        height: 60,
-        borderRadius: 18,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    modeLabel: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#333',
-    },
-    modeSubLabel: {
-        fontSize: 11,
-        color: '#888',
-        marginTop: -6,
-    },
+    modeIconBox: { width: 42, height: 42, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+    modeCardLabel: { fontSize: 15, fontWeight: '700', color: '#111' },
+    modeCardSub: { fontSize: 11, color: '#9CA3AF', fontWeight: '500', marginTop: -4 },
 
-    // Audience
-    audienceTitle: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#555',
-        marginTop: 32,
-        marginBottom: 12,
+    // ── Audience ──────────────────────────────────────────────────
+    audienceList: { gap: 8 },
+    audienceItem: {
+        flexDirection: 'row', alignItems: 'center', gap: 12,
+        paddingHorizontal: 14, paddingVertical: 12,
+        borderRadius: 14, borderWidth: 1,
     },
-    audienceRow: {
-        flexDirection: 'row',
-        gap: 8,
-        flexWrap: 'wrap',
-    },
-    audienceChip: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        paddingHorizontal: 14,
-        paddingVertical: 8,
-        borderRadius: 20,
-        borderWidth: 1.5,
-        borderColor: '#ddd',
-        backgroundColor: '#fafafa',
-    },
-    audienceChipText: {
-        fontSize: 13,
-        color: '#666',
-    },
+    audienceIconBox: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+    audienceItemLabel: { flex: 1, fontSize: 14, color: '#6B7280', fontWeight: '500' },
+    audienceTick: { width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
 
-    // Text input
-    textPreview: {
-        flex: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingHorizontal: 24,
-    },
+    // ── Text mode ─────────────────────────────────────────────────
+    textPreview: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
     textInput: {
-        color: '#fff',
-        fontSize: 26,
-        fontWeight: '700',
-        textAlign: 'center',
-        maxWidth: '90%',
-        lineHeight: 36,
+        color: '#fff', fontSize: 26, fontWeight: '700',
+        textAlign: 'center', lineHeight: 36, width: '100%',
     },
-    gradientPickerContainer: {
+    charCount: {
+        position: 'absolute', bottom: 14, right: 14,
+        fontSize: 10, color: 'rgba(255,255,255,0.45)', fontWeight: '600',
+    },
+    gradientBar: {
         backgroundColor: '#fff',
+        borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#E5E7EB',
+        paddingTop: 12,
     },
-    gradientPicker: {
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        maxHeight: 60,
-    },
+    gradientScroll: { paddingHorizontal: 16, gap: 8 },
     gradientDot: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        marginRight: 10,
+        width: 34, height: 34, borderRadius: 9,
+        alignItems: 'center', justifyContent: 'center',
     },
     gradientDotActive: {
-        borderWidth: 3,
-        borderColor: '#333',
+        borderWidth: 2, borderColor: '#111',
+        shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15, shadowRadius: 4, elevation: 2,
     },
 
-    // Preview
-    previewContainer: {
-        flex: 1,
-        backgroundColor: '#000',
+    // ══════════════════════════════════════════════════════════════
+    // PREVIEW SCREEN (full-bleed, WhatsApp-style)
+    // ══════════════════════════════════════════════════════════════
+
+    // Top scrim — gradient fades from black → transparent
+    previewTopScrim: {
+        position: 'absolute', top: 0, left: 0, right: 0,
+        zIndex: 10,
+        paddingHorizontal: 14,
+        paddingBottom: 20,
     },
-    previewMedia: {
-        flex: 1,
+    previewProgressTrack: {
+        height: 2, backgroundColor: 'rgba(255,255,255,0.25)',
+        marginBottom: 10, borderRadius: 1, overflow: 'hidden',
     },
-    playPauseBtn: {
-        position: 'absolute',
-        top: '50%',
-        left: '50%',
-        marginTop: -30,
-        marginLeft: -30,
-        width: 60,
-        height: 60,
-        borderRadius: 30,
+    previewProgressFill: {
+        height: '100%', backgroundColor: '#fff',
+    },
+    previewHeader: {
+        flexDirection: 'row', alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    previewBackBtn: {
+        width: 38, height: 38, borderRadius: 19,
+        backgroundColor: 'rgba(0,0,0,0.35)',
+        alignItems: 'center', justifyContent: 'center',
+    },
+    previewHeaderRight: {
+        flexDirection: 'row', alignItems: 'center', gap: 8,
+    },
+    audiencePill: {
+        flexDirection: 'row', alignItems: 'center', gap: 5,
+        backgroundColor: 'rgba(0,0,0,0.45)',
+        paddingHorizontal: 10, paddingVertical: 5,
+        borderRadius: 20,
+        borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)',
+    },
+    audiencePillText: {
+        fontSize: 11, color: '#fff', fontWeight: '600',
+    },
+
+    // Center tap-to-play area
+    previewPlayArea: {
+        ...StyleSheet.absoluteFillObject,
+        alignItems: 'center', justifyContent: 'center',
+        zIndex: 5,
+    },
+    previewPlayBtn: {
+        width: 64, height: 64, borderRadius: 32,
         backgroundColor: 'rgba(0,0,0,0.5)',
-        alignItems: 'center',
+        alignItems: 'center', justifyContent: 'center',
+        borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.3)',
+    },
+
+    // Duration badge
+    previewDurationBadge: {
+        position: 'absolute', top: '50%', right: 14,
+        flexDirection: 'row', alignItems: 'center', gap: 4,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        paddingHorizontal: 8, paddingVertical: 4, borderRadius: 7,
+        zIndex: 10,
+    },
+    previewDurationText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+
+    // Bottom scrim + caption bar
+    previewBottomScrim: {
+        position: 'absolute', bottom: 0, left: 0, right: 0,
+        zIndex: 10,
+        paddingTop: 40,
+        paddingHorizontal: 12,
+    },
+    previewCaptionRow: {
+        flexDirection: 'row', alignItems: 'flex-end', gap: 8,
+    },
+    previewEmojiBtn: {
+        width: 40, height: 40, borderRadius: 20,
+        alignItems: 'center', justifyContent: 'center',
+        marginBottom: 2,
+    },
+    previewCaptionInputWrap: {
+        flex: 1,
+        backgroundColor: 'rgba(255,255,255,0.15)',
+        borderRadius: 22,
+        borderWidth: 1, borderColor: 'rgba(255,255,255,0.22)',
+        paddingHorizontal: 14, paddingVertical: 10,
+        minHeight: 44, maxHeight: 110,
         justifyContent: 'center',
     },
-    captionInput: {
-        paddingHorizontal: 16,
-        paddingVertical: 14,
-        fontSize: 15,
-        color: '#111',
-        borderTopWidth: 1,
-        borderTopColor: '#f0f0f0',
-        backgroundColor: '#fff',
+    previewCaptionInput: {
+        color: '#fff', fontSize: 14, lineHeight: 20,
+        padding: 0, margin: 0,
+    },
+    previewCaptionCount: {
+        fontSize: 9, color: 'rgba(255,255,255,0.4)',
+        fontWeight: '600', marginTop: 3, textAlign: 'right',
+    },
+    previewSendBtn: {
+        width: 44, height: 44, borderRadius: 22,
+        backgroundColor: '#0469ff',
+        alignItems: 'center', justifyContent: 'center',
+        shadowColor: '#0469ff', shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.35, shadowRadius: 6, elevation: 4,
+        marginBottom: 2,
+    },
+    previewUploadLabel: {
+        textAlign: 'center', color: 'rgba(255,255,255,0.6)',
+        fontSize: 11, fontWeight: '500', marginTop: 8,
     },
 });
 

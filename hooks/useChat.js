@@ -58,7 +58,18 @@ export const useEligibleUsers = (schoolId) => {
         queryKey: chatKeys.eligibleUsers(schoolId),
         queryFn: () => chatService.getEligibleUsers(schoolId),
         enabled: !!schoolId,
-        staleTime: 1000 * 120, // 2 minutes
+        staleTime: Infinity, // never auto-refresh from cache mount, manual refresh only
+    });
+};
+
+export const useRefreshEligibleUsers = () => {
+    const qc = useQueryClient();
+
+    return useMutation({
+        mutationFn: (schoolId) => chatService.getEligibleUsers(schoolId, true),
+        onSuccess: (data, schoolId) => {
+            qc.setQueryData(chatKeys.eligibleUsers(schoolId), data);
+        },
     });
 };
 
@@ -309,6 +320,7 @@ export const useLeaveConversation = () => {
 
         onSettled: (_data, _error, { schoolId }) => {
             qc.invalidateQueries({ queryKey: chatKeys.conversations(schoolId) });
+            qc.invalidateQueries({ queryKey: chatKeys.eligibleUsers(schoolId) });
         },
     });
 };

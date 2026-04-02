@@ -12,7 +12,7 @@ import * as SecureStore from 'expo-secure-store';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ArrowLeft, Search, Users, User, GraduationCap, Check, Plus } from 'lucide-react-native';
 import HapticTouchable from '../../components/HapticTouch';
-import { useEligibleUsers, useCreateConversation } from '../../../hooks/useChat';
+import { useEligibleUsers, useCreateConversation, useRefreshEligibleUsers } from '../../../hooks/useChat';
 import { useShimmer, Bone } from '../../components/ScreenSkeleton';
 
 function CategoryChip({ label, active, onPress, icon }) {
@@ -76,11 +76,18 @@ function UserRow({ user, selected, onPress, isGroupMode }) {
             activeOpacity={isAlreadyAdded ? 0.6 : 0.7}
             haptic={isAlreadyAdded ? null : 'light'}
         >
-            {user.profilePicture
+            {user.profilePicture && user.profilePicture != 'default.png'
                 ? <Image source={{ uri: user.profilePicture }} style={styles.avatar} />
                 : (
                     <View style={[styles.avatar, styles.avatarFallback]}>
-                        <Text style={styles.avatarInitial}>{displayName.charAt(0).toUpperCase()}</Text>
+                        <Text style={styles.avatarInitial}>
+                            {(() => {
+                                if (!displayName) return '?';
+                                const parts = displayName.trim().split(/\s+/);
+                                if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+                                return parts[0].substring(0, 2).toUpperCase();
+                            })()}
+                        </Text>
                     </View>
                 )
             }
@@ -127,6 +134,7 @@ export default function NewConversationScreen() {
 
     const { data, isLoading, isFetching, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } = useEligibleUsers(schoolId);
     const createMutation = useCreateConversation();
+    const refreshMutation = useRefreshEligibleUsers();
 
     const allUsers = useMemo(() => {
         if (!data) return [];
@@ -146,7 +154,11 @@ export default function NewConversationScreen() {
         return list;
     }, [allUsers, category, searchQuery]);
 
-    const handleRefresh = useCallback(() => refetch(), [refetch]);
+    const handleRefresh = useCallback(() => {
+        if (!schoolId) return;
+        refreshMutation.mutate(schoolId);
+    }, [refreshMutation, schoolId]);
+
     const handleEndReached = useCallback(() => {
         if (hasNextPage && !isFetchingNextPage) fetchNextPage();
     }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
@@ -283,22 +295,22 @@ export default function NewConversationScreen() {
                         onPress={() => { setIsGroupMode(true); setCategory('all'); }}
                         icon={<Plus size={13} color={isGroupMode ? '#fff' : '#6b7280'} strokeWidth={2} />}
                     /> */}
-                    {/* {showTeachers && !isGroupMode && (
+                    {showTeachers && !isGroupMode && (
                         <CategoryChip
                             label="Teachers"
                             active={category === 'teachers'}
                             onPress={() => setCategory('teachers')}
                             icon={<GraduationCap size={13} color={category === 'teachers' ? '#fff' : '#6b7280'} strokeWidth={2} />}
                         />
-                    )} */}
-                    {/* {showParents && !isGroupMode && (
+                    )}
+                    {showParents && !isGroupMode && (
                         <CategoryChip
                             label="Parents"
                             active={category === 'parents'}
                             onPress={() => setCategory('parents')}
                             icon={<User size={13} color={category === 'parents' ? '#fff' : '#6b7280'} strokeWidth={2} />}
                         />
-                    )} */}
+                    )}
                 </ScrollView>
             </View>
 
@@ -347,7 +359,7 @@ export default function NewConversationScreen() {
                     keyboardShouldPersistTaps="handled"
                     refreshControl={
                         <RefreshControl
-                            refreshing={isFetching && !isLoading && !isFetchingNextPage}
+                            refreshing={refreshMutation.isPending}
                             onRefresh={handleRefresh}
                             tintColor="#0469ff"
                             colors={['#0469ff']}

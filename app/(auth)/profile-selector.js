@@ -431,6 +431,7 @@ export default function ProfileSelectorScreen() {
                             key={profile.id}
                             onPress={() => handleProfileSelect(profile)}
                             onLongPress={() => handleDeleteProfile(profile)}
+                            disabled={selectingProfile !== null}
                         >
                             <Animated.View
                                 entering={FadeIn.delay(300 + index * 100).duration(400)}
@@ -449,6 +450,11 @@ export default function ProfileSelectorScreen() {
                                         ) : (
                                             <View style={[styles.avatarPlaceholder, { backgroundColor: ROLE_COLORS[profile.role] || '#94A3B8' }]}>
                                                 <Text style={styles.avatarText}>{getInitials(profile.name)}</Text>
+                                            </View>
+                                        )}
+                                        {selectingProfile === profile.id && (
+                                            <View style={styles.spinnerOverlay}>
+                                                <ActivityIndicator size="large" color="#ffffff" />
                                             </View>
                                         )}
                                         {/* Role Badge */}
@@ -600,6 +606,13 @@ const styles = StyleSheet.create({
         borderRadius: 12,
         borderWidth: 2,
         borderColor: '#FFFFFF',
+    },
+    spinnerOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        borderRadius: PROFILE_SIZE / 2,
+        justifyContent: 'center',
+        alignItems: 'center',
     },
     roleBadgeText: {
         fontSize: 9,

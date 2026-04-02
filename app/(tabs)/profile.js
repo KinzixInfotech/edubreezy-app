@@ -2060,37 +2060,39 @@ const styles = StyleSheet.create({
   contentTablet: {
     paddingHorizontal: 32,
     width: '100%',
+    alignSelf: 'center',
+    maxWidth: 768,
   },
   profileHeaderTablet: {
-    paddingVertical: 40,
-    marginBottom: 32,
+    paddingVertical: 32,
+    marginBottom: 24,
   },
   avatarContainerTablet: {
     marginBottom: 24,
   },
   avatarTablet: {
-    width: 140,
-    height: 140,
-    borderRadius: 70,
-    borderWidth: 5,
+    width: 110,
+    height: 110,
+    borderRadius: 55,
+    borderWidth: 4,
   },
   avatarFallback: {
     alignItems: 'center',
     justifyContent: 'center',
   },
   statusDotTablet: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    bottom: 6,
-    right: 6,
-    borderWidth: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    bottom: 4,
+    right: 4,
+    borderWidth: 3,
   },
   userNameSmall: {
     fontSize: 20,
   },
   userNameTablet: {
-    fontSize: 32,
+    fontSize: 26,
     marginBottom: 8,
   },
   roleBadge: {
@@ -2098,19 +2100,19 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 20,
     marginBottom: 12,
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    alignSelf: 'center',
   },
   schoolBadgeTablet: {
     paddingHorizontal: 16,
     paddingVertical: 8,
   },
   schoolTextTablet: {
-    fontSize: 15,
+    fontSize: 14,
   },
   fallbackTextTablet: {
-    fontSize: 36,
+    fontSize: 28,
   },
   editNameModalOverlay: {
     flex: 1,
@@ -2184,11 +2186,11 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   footerTagline: {
-    fontSize: 44,
+    fontSize: isTablet ? 36 : (isSmallDevice ? 28 : 32),
     fontWeight: '900',
     color: '#CBD5E1',
     textAlign: 'left',
-    lineHeight: 52,
+    lineHeight: isTablet ? 44 : (isSmallDevice ? 34 : 40),
     marginBottom: 20,
   },
   footerDivider: {

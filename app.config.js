@@ -28,7 +28,6 @@ export default {
             },
             infoPlist: {
                 UIBackgroundModes: [
-                    "fetch",
                     "remote-notification"
                 ],
                 LSApplicationQueriesSchemes: [
@@ -95,7 +94,6 @@ export default {
                     }
                 }
             ],
-            "expo-background-fetch",
             [
                 "expo-location",
                 {
@@ -108,7 +106,7 @@ export default {
             "expo-web-browser",
             "expo-router",
             "expo-secure-store",
-            "expo-task-manager",
+            "expo-apple-authentication",
             [
                 "expo-image-picker",
                 {

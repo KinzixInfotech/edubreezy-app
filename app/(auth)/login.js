@@ -42,6 +42,7 @@ import { Ionicons } from '@expo/vector-icons';
 import api from '../../lib/api';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getDeviceInfo } from '../../lib/deviceInfo';
+import * as AppleAuthentication from 'expo-apple-authentication';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('screen');
 export const PRIMARY_COLOR = '#0b5cde';
@@ -277,6 +278,7 @@ export default function LoginScreen() {
     const [keyboardVisible, setKeyboardVisible] = useState(false);
     const [keyboardHeight, setKeyboardHeight] = useState(0);
     const [googleLoading, setGoogleLoading] = useState(false);
+    const [appleLoading, setAppleLoading] = useState(false);
 
     const buttonScale = useSharedValue(1);
 
@@ -728,6 +730,165 @@ export default function LoginScreen() {
         }
     };
 
+    const handleAppleLogin = async () => {
+        try {
+            setAppleLoading(true);
+            setErrors({});
+
+            // Clear any old tokens
+            await SecureStore.deleteItemAsync('token');
+
+            const { data: oauthData, error: oauthError } = await supabase.auth.signInWithOAuth({
+                provider: 'apple',
+                options: {
+                    redirectTo: 'edubreezy://(auth)/login',
+                    skipBrowserRedirect: true,
+                },
+            });
+
+            if (oauthError) throw oauthError;
+
+            if (!oauthData?.url) {
+                setErrors({ general: 'Failed to initiate Apple sign-in.' });
+                return;
+            }
+
+            // Open browser for Apple OAuth
+            const result = await WebBrowser.openAuthSessionAsync(oauthData.url, 'edubreezy://(auth)/login');
+
+            if (result.type !== 'success' || !result.url) {
+                setAppleLoading(false);
+                return;
+            }
+
+            // Extract tokens from redirect URL
+            const urlFragment = result.url.split('#')[1];
+            if (!urlFragment) {
+                setErrors({ general: 'Authentication failed. Please try again.' });
+                return;
+            }
+
+            const params = new URLSearchParams(urlFragment);
+            const access_token = params.get('access_token');
+            const refresh_token = params.get('refresh_token');
+
+            if (!access_token || !refresh_token) {
+                setErrors({ general: 'Authentication failed. Missing tokens.' });
+                return;
+            }
+
+            // Set the session in Supabase client
+            const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
+                access_token,
+                refresh_token,
+            });
+
+            if (sessionError || !sessionData?.user) {
+                setErrors({ general: sessionError?.message || 'Failed to establish session.' });
+                return;
+            }
+
+            console.log('✅ Apple OAuth session established for:', sessionData.user.email);
+
+            // Fetch user from backend (same as Google login)
+            const user = await fetchUser(sessionData.user.id, access_token);
+
+            if (!user) {
+                await supabase.auth.signOut();
+                setErrors({ general: 'No account found for this Apple ID. Please contact your school admin to create your account.' });
+                return;
+            }
+
+            // Block ADMIN, LIBRARIAN, SUPER_ADMIN roles from mobile app
+            if (BLOCKED_MOBILE_ROLES.includes(user.role?.name)) {
+                await supabase.auth.signOut();
+                Alert.alert(
+                    'Web Only',
+                    `${user.role?.name === 'ADMIN' ? 'Admin' : user.role?.name === 'LIBRARIAN' ? 'Librarian' : 'Super Admin'} accounts can only access the web dashboard at atlas.edubreezy.com.`,
+                    [{ text: 'OK' }]
+                );
+                setAppleLoading(false);
+                return;
+            }
+
+            // Store user data (same logic as handleGoogleLogin)
+            const minimalUser = {
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                profilePicture: user.profilePicture,
+                role: user.role,
+                schoolId: user.schoolId,
+                ...(user.studentData && {
+                    studentData: {
+                        name: user.studentData.name,
+                        email: user.studentData.email,
+                        admissionNo: user.studentData.admissionNo,
+                        class: user.studentData.class || null,
+                        section: user.studentData.section || null,
+                    },
+                }),
+                ...(user.parentData && {
+                    parentData: {
+                        id: user.parentData.id,
+                        name: user.parentData.name,
+                        email: user.parentData.email,
+                    },
+                }),
+                ...(user.teacherData && {
+                    teacherData: {
+                        name: user.teacherData.name,
+                        email: user.teacherData.email,
+                    },
+                }),
+                ...(user.school && {
+                    school: {
+                        id: user.school.id,
+                        name: user.school.name,
+                        schoolCode: user.school.schoolCode,
+                    },
+                }),
+            };
+            await SecureStore.setItemAsync('user', JSON.stringify(minimalUser));
+            await SecureStore.setItemAsync('userRole', user?.role?.name || '');
+            await SecureStore.setItemAsync('token', access_token);
+
+            // Save profile for this school code
+            const schoolCode = schoolConfig?.schoolcode || schoolConfig?.schoolCode;
+            if (schoolCode) {
+                try {
+                    await saveProfile(schoolCode, user, sessionData.session);
+                    console.log('✅ Profile saved for', schoolCode);
+                    await saveCurrentSchool(schoolCode, { school: schoolConfig });
+                } catch (saveError) {
+                    console.error('❌ Failed to save profile:', saveError);
+                }
+            }
+
+            // Create session for device tracking
+            try {
+                const deviceInfo = await getDeviceInfo();
+                const sessionRes = await api.post('/auth/sessions', {
+                    userId: user.id,
+                    supabaseSessionToken: access_token,
+                    ...deviceInfo,
+                });
+                if (sessionRes.data?.session?.id) {
+                    await SecureStore.setItemAsync('currentSessionId', sessionRes.data.session.id);
+                }
+            } catch (sessionErr) {
+                console.warn('Could not create session:', sessionErr.message);
+            }
+
+            router.replace('/(screens)/greeting');
+        } catch (err) {
+            console.error('Apple login error:', err);
+            setErrors({ general: err.message || 'Apple sign-in failed. Please try again.' });
+        } finally {
+            setAppleLoading(false);
+        }
+    };
+
     return (
         <KeyboardAvoidingView
             style={styles.container}
@@ -952,6 +1113,30 @@ export default function LoginScreen() {
                                 )}
                             </TouchableOpacity>
                         </Animated.View>
+
+                        {/* Apple Sign-In Button — iOS only */}
+                        {Platform.OS === 'ios' && (
+                            <Animated.View entering={FadeInDown.delay(450).duration(500)} style={{ marginTop: verticalScale(10) }}>
+                                <TouchableOpacity
+                                    style={[styles.appleButton, appleLoading && styles.appleButtonDisabled]}
+                                    onPress={handleAppleLogin}
+                                    disabled={appleLoading || loading}
+                                    activeOpacity={0.85}
+                                >
+                                    {appleLoading ? (
+                                        <View style={styles.loadingContainer}>
+                                            <ActivityIndicator size="small" color="#FFFFFF" />
+                                            <Text style={styles.appleButtonText}>Signing in...</Text>
+                                        </View>
+                                    ) : (
+                                        <View style={styles.googleButtonContent}>
+                                            <Ionicons name="logo-apple" size={20} color="#FFFFFF" />
+                                            <Text style={styles.appleButtonText}>Continue with Apple</Text>
+                                        </View>
+                                    )}
+                                </TouchableOpacity>
+                            </Animated.View>
+                        )}
                     </Animated.View>
                 </View>
             </ScrollView>
@@ -1412,6 +1597,22 @@ const styles = StyleSheet.create({
         fontSize: moderateScale(15, 0.3),
         fontWeight: '700',
         color: '#374151',
+        letterSpacing: 0.2,
+    },
+    appleButton: {
+        backgroundColor: '#000000',
+        borderRadius: moderateScale(12),
+        paddingVertical: moderateScale(14),
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    appleButtonDisabled: {
+        backgroundColor: '#4A4A4A',
+    },
+    appleButtonText: {
+        fontSize: moderateScale(15, 0.3),
+        fontWeight: '700',
+        color: '#FFFFFF',
         letterSpacing: 0.2,
     },
     footer: {

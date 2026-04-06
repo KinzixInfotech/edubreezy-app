@@ -3,6 +3,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router, useLocalSearchParams } from 'expo-router';
 import { Settings, Edit, LogOut, Mail, Phone, Calendar, MapPin, Award, BookOpen, School, X, Users, ClipboardList, FileText, Bell, Shield, Clock, Bus, Fuel, Gauge, UserCheck, ClipboardCheck, Megaphone, Camera, Link2 } from 'lucide-react-native';
 import * as WebBrowser from 'expo-web-browser';
+import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
 import HapticTouchable from '../components/HapticTouch';
@@ -695,6 +696,9 @@ export default function ProfileScreen() {
   const [googleLinked, setGoogleLinked] = useState(false);
   const [googleIdentity, setGoogleIdentity] = useState(null);
   const [linkingGoogle, setLinkingGoogle] = useState(false);
+  const [appleLinked, setAppleLinked] = useState(false);
+  const [appleIdentity, setAppleIdentity] = useState(null);
+  const [linkingApple, setLinkingApple] = useState(false);
   const [identityCount, setIdentityCount] = useState(0);
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
@@ -758,6 +762,9 @@ export default function ProfileScreen() {
       const googleId = identities.find(i => i.provider === 'google');
       setGoogleLinked(!!googleId);
       setGoogleIdentity(googleId || null);
+      const appleId = identities.find(i => i.provider === 'apple');
+      setAppleLinked(!!appleId);
+      setAppleIdentity(appleId || null);
     } catch (e) {
       console.log('Error checking identities:', e);
     }
@@ -1021,6 +1028,70 @@ export default function ProfileScreen() {
             } catch (e) {
               console.error('Error unlinking Google:', e);
               Alert.alert('Error', e.message || 'Failed to unlink Google account.');
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleLinkApple = async () => {
+    try {
+      setLinkingApple(true);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      const { data, error } = await supabase.auth.linkIdentity({
+        provider: 'apple',
+        options: {
+          redirectTo: 'edubreezy://',
+        },
+      });
+      if (error) throw error;
+      if (data?.url) {
+        const result = await WebBrowser.openAuthSessionAsync(data.url, 'edubreezy://');
+        console.log('WebBrowser result:', result.type);
+        await checkGoogleIdentity();
+        if (result.type === 'success') {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
+      }
+    } catch (e) {
+      console.error('Error linking Apple:', e);
+      Alert.alert('Link Failed', e.message || 'Failed to link Apple account.');
+    } finally {
+      setLinkingApple(false);
+    }
+  };
+
+  const handleUnlinkApple = () => {
+    if (identityCount < 2) {
+      Alert.alert(
+        'Cannot Unlink',
+        'You need at least one other login method (email/password) to unlink Apple. This is to prevent you from being locked out of your account.',
+      );
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    Alert.alert(
+      'Unlink Apple Account',
+      'Are you sure? You won\'t be able to sign in with Apple anymore, but your email/password login will still work.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unlink',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              if (!appleIdentity) return;
+              const { error } = await supabase.auth.unlinkIdentity(appleIdentity);
+              if (error) throw error;
+              setAppleLinked(false);
+              setAppleIdentity(null);
+              setIdentityCount(prev => prev - 1);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              Alert.alert('Success', 'Apple account unlinked successfully.');
+            } catch (e) {
+              console.error('Error unlinking Apple:', e);
+              Alert.alert('Error', e.message || 'Failed to unlink Apple account.');
             }
           },
         },
@@ -1540,6 +1611,92 @@ export default function ProfileScreen() {
               </View>
             </View>
           </Animated2.View>
+
+          {/* Linked Accounts - Apple (iOS only) */}
+          {Platform.OS === 'ios' && (
+            <Animated2.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
+              <Text style={styles.sectionTitle}>Apple Account</Text>
+              <View style={styles.menuContainer}>
+                <View style={[styles.menuItem, styles.lastMenuItem, { paddingVertical: 16 }]}>
+                  <View
+                    style={[
+                      styles.menuIconContainer,
+                      { backgroundColor: appleLinked ? '#10b98115' : '#1F1F1F15' },
+                    ]}
+                  >
+                    <Ionicons name="logo-apple" size={24} color={appleLinked ? '#10b981' : '#1F1F1F'} />
+                  </View>
+
+                  <View style={{ flex: 1, gap: 4 }}>
+                    <Text style={styles.menuText}>Apple Account</Text>
+
+                    {appleLinked && appleIdentity?.identity_data?.email && (
+                      <Text style={{ fontSize: 12, color: '#6B7280' }}>
+                        {appleIdentity.identity_data.email}
+                      </Text>
+                    )}
+
+                    {!appleLinked && (
+                      <Text style={{ fontSize: 12, color: '#9CA3AF' }}>
+                        Link your Apple account for easy sign-in
+                      </Text>
+                    )}
+
+                    {appleLinked && (
+                      <View
+                        style={{
+                          alignSelf: 'flex-start',
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 5,
+                          backgroundColor: '#DCFCE7',
+                          paddingHorizontal: 8,
+                          paddingVertical: 3,
+                          borderRadius: 10,
+                          marginTop: 2,
+                        }}
+                      >
+                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#16A34A' }} />
+                        <Text style={{ fontSize: 11, fontWeight: '600', color: '#16A34A' }}>Connected</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {appleLinked ? (
+                    <HapticTouchable onPress={handleUnlinkApple}>
+                      <View
+                        style={{
+                          backgroundColor: '#FEE2E2',
+                          paddingHorizontal: 14,
+                          paddingVertical: 8,
+                          borderRadius: 12,
+                        }}
+                      >
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: '#EF4444' }}>Unlink</Text>
+                      </View>
+                    </HapticTouchable>
+                  ) : (
+                    <HapticTouchable onPress={handleLinkApple} disabled={linkingApple}>
+                      {linkingApple ? (
+                        <ActivityIndicator size="small" color="#0469ff" />
+                      ) : (
+                        <View
+                          style={{
+                            backgroundColor: '#DBEAFE',
+                            paddingHorizontal: 14,
+                            paddingVertical: 8,
+                            borderRadius: 12,
+                          }}
+                        >
+                          <Text style={{ fontSize: 12, fontWeight: '600', color: '#2563EB' }}>Link</Text>
+                        </View>
+                      )}
+                    </HapticTouchable>
+                  )}
+                </View>
+              </View>
+            </Animated2.View>
+          )}
           {/* Logout */}
           <Animated2.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
             <View style={styles.menuContainer}>

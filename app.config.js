@@ -36,6 +36,8 @@ export default {
                 NSLocationWhenInUseUsageDescription:
                     "EduBreezy needs access to your location to show your position on the map and track bus routes while the app is in use.",
                 NSPhotoLibraryUsageDescription: "EduBreezy needs access to your photo library to let you upload profile pictures and assignments.",
+                NSCameraUsageDescription: "EduBreezy needs access to your camera to take photos for your profile and assignments.",
+                NSMicrophoneUsageDescription: "EduBreezy needs access to your microphone to record audio for features requiring video or voice.",
                 ITSAppUsesNonExemptEncryption: false
             }
         },
@@ -113,7 +115,8 @@ export default {
                 "expo-image-picker",
                 {
                     "photosPermission": "EduBreezy needs access to your photo library to let you upload profile pictures and assignments.",
-                    "microphonePermission": false
+                    "cameraPermission": "EduBreezy needs access to your camera to take photos for your profile and assignments.",
+                    "microphonePermission": "EduBreezy needs access to your microphone to record audio for features requiring video or voice."
                 }
             ],
             "./plugins/withModularHeaders",

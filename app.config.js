@@ -114,14 +114,7 @@ export default {
                     "microphonePermission": false
                 }
             ],
-            [
-                "expo-build-properties",
-                {
-                    "ios": {
-                        "useFrameworks": "static"
-                    }
-                }
-            ],
+            "./plugins/withModularHeaders",
             "./plugins/withProguardRules",
             "./plugins/withRemoveMediaPermissions"
         ],

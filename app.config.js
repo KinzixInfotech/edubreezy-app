@@ -31,11 +31,18 @@ export default {
                     "remote-notification"
                 ],
                 LSApplicationQueriesSchemes: [
-                    "itms-apps"
+                    "itms-apps",
+                    "tez",
+                    "phonepe",
+                    "paytm",
+                    "gpay",
+                    "bhim",
+                    "upi"
                 ],
                 NSLocationWhenInUseUsageDescription:
                     "EduBreezy needs access to your location to show your position on the map and track bus routes while the app is in use.",
                 NSPhotoLibraryUsageDescription: "EduBreezy needs access to your photo library to let you upload profile pictures and assignments.",
+                NSPhotoLibraryAddUsageDescription: "EduBreezy needs access to your photo library to download and save assignments or receipts.",
                 NSCameraUsageDescription: "EduBreezy needs access to your camera to take photos for your profile and assignments.",
                 NSMicrophoneUsageDescription: "EduBreezy needs access to your microphone to record audio for features requiring video or voice.",
                 ITSAppUsesNonExemptEncryption: false

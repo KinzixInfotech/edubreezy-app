@@ -34,7 +34,9 @@ export default {
                     "itms-apps"
                 ],
                 NSLocationWhenInUseUsageDescription:
-                    "EduBreezy needs access to your location to show your position on the map and track bus routes while the app is in use."
+                    "EduBreezy needs access to your location to show your position on the map and track bus routes while the app is in use.",
+                NSPhotoLibraryUsageDescription: "EduBreezy needs access to your photo library to let you upload profile pictures and assignments.",
+                ITSAppUsesNonExemptEncryption: false
             }
         },
 
@@ -110,7 +112,7 @@ export default {
             [
                 "expo-image-picker",
                 {
-                    "photosPermission": false,
+                    "photosPermission": "EduBreezy needs access to your photo library to let you upload profile pictures and assignments.",
                     "microphonePermission": false
                 }
             ],

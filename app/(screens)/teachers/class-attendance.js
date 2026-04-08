@@ -432,10 +432,22 @@ export default function TeacherClassAttendance() {
                             <HapticTouchable onPress={() => openStudentDetail(student)}>
                                 <View style={styles.studentCard}>
                                     <View style={styles.studentAvatar}>
+                                        {student.profilePicture && student.profilePicture !== 'default.png' ? (
+                                            <Image
+                                                source={{ uri: student.profilePicture }}
+                                                style={styles.profileImagecontaInit}
+                                            />
+                                        ) : (
+                                            <Text style={styles.studentInitial}>
+                                                {student.name.charAt(0).toUpperCase()}
+                                            </Text>
+                                        )}
+                                    </View>
+                                    {/* <View style={styles.studentAvatar}>
                                         <Text style={styles.studentInitial}>
                                             {student.name.charAt(0).toUpperCase()}
                                         </Text>
-                                    </View>
+                                    </View> */}
                                     <View style={styles.studentInfo}>
                                         <Text style={styles.studentName}>{student.name}</Text>
                                         <Text style={styles.studentMeta}>
@@ -1223,6 +1235,12 @@ const styles = StyleSheet.create({
         height: 80,
         borderRadius: 40,
         marginRight: 16,
+    },
+    profileImagecontaInit: {
+        width: 50,
+        borderWidth: 1,
+        height: 50,
+        borderRadius: 40,
     },
     profilePlaceholder: {
         width: 80,

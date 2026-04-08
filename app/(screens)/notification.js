@@ -12,6 +12,7 @@ import {
     Dimensions,
 } from 'react-native';
 import { router } from 'expo-router';
+import { useFocusEffect } from 'expo-router';
 import { ArrowLeft, CheckCheck, X, Bell, BellOff, Calendar, AlertCircle, Megaphone, CreditCard, GraduationCap } from 'lucide-react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as SecureStore from 'expo-secure-store';
@@ -113,23 +114,49 @@ export default function NotificationScreen() {
     const [selectedNotification, setSelectedNotification] = useState(null);
     const [modalVisible, setModalVisible] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
+    const [currentUser, setCurrentUser] = useState(null);
     const queryClient = useQueryClient();
+    const autoMarkKeyRef = React.useRef(null);
 
-    // Fetch User Data from SecureStore
-    const { data: userData } = useQuery({
-        queryKey: ['user-data'],
-        queryFn: async () => {
+    const syncStoredUser = useCallback(async () => {
+        try {
             const json = await SecureStore.getItemAsync('user');
-            return json ? JSON.parse(json) : null;
-        },
-    });
+            const parsed = json ? JSON.parse(json) : null;
+            setCurrentUser((prev) => {
+                if (
+                    prev?.id === parsed?.id &&
+                    (prev?.schoolId || prev?.school?.id) === (parsed?.schoolId || parsed?.school?.id)
+                ) {
+                    return prev;
+                }
+                return parsed;
+            });
+        } catch (error) {
+            console.error('Failed to load stored user for notifications:', error);
+        }
+    }, []);
 
-    const userId = userData?.id;
-    const schoolId = userData?.schoolId;
+    useFocusEffect(
+        useCallback(() => {
+            syncStoredUser();
+        }, [syncStoredUser])
+    );
+
+    useEffect(() => {
+        syncStoredUser();
+    }, [syncStoredUser]);
+
+    const userId = currentUser?.id;
+    const schoolId = currentUser?.schoolId || currentUser?.school?.id;
+    const notificationsQueryKey = ['notifications', userId, schoolId];
+
+    const setNotificationsCache = useCallback((updater) => {
+        queryClient.setQueryData(notificationsQueryKey, updater);
+    }, [queryClient, notificationsQueryKey]);
 
     // Fetch Notifications - optimized with caching
     const { data, isLoading, refetch } = useQuery({
-        queryKey: ['notifications', userId, schoolId],
+        queryKey: notificationsQueryKey,
         queryFn: async () => {
             if (!userId) return { notifications: { today: [], yesterday: [], earlier: [] }, unreadCount: 0 };
             const res = await api.get(`/notifications?userId=${userId}&schoolId=${schoolId}&limit=50`);
@@ -147,28 +174,33 @@ export default function NotificationScreen() {
         mutationFn: (ids) => api.put('/notifications', { notificationIds: ids, userId }),
         onMutate: async (ids) => {
             // Cancel any outgoing refetches (so they don't overwrite our optimistic update)
-            await queryClient.cancelQueries({ queryKey: ['notifications', userId, schoolId] });
+            await queryClient.cancelQueries({ queryKey: notificationsQueryKey });
 
             // Snapshot the previous value
-            const previousData = queryClient.getQueryData(['notifications', userId, schoolId]);
+            const previousData = queryClient.getQueryData(notificationsQueryKey);
 
             // Optimistically update to the new value
-            queryClient.setQueryData(['notifications', userId, schoolId], (old) => {
+            setNotificationsCache((old) => {
                 if (!old) return old;
 
                 const updateSection = (section) =>
                     section.map((n) => (ids.includes(n.id) ? { ...n, isRead: true } : n));
 
+                const nextNotifications = {
+                    today: updateSection(old.notifications.today),
+                    yesterday: updateSection(old.notifications.yesterday),
+                    earlier: updateSection(old.notifications.earlier),
+                };
+                const unreadCount = [
+                    ...nextNotifications.today,
+                    ...nextNotifications.yesterday,
+                    ...nextNotifications.earlier,
+                ].filter((n) => !n.isRead).length;
+
                 return {
                     ...old,
-                    notifications: {
-                        today: updateSection(old.notifications.today),
-                        yesterday: updateSection(old.notifications.yesterday),
-                        earlier: updateSection(old.notifications.earlier),
-                    },
-                    // We don't decrement unreadCount here because it's calculated from the filtered lists in the UI,
-                    // but we should technically update it if the API returns it.
-                    // For now, the UI calculates filteredUnreadCount which will reflect the change.
+                    unreadCount,
+                    notifications: nextNotifications,
                 };
             });
 
@@ -178,22 +210,21 @@ export default function NotificationScreen() {
         onError: (err, ids, context) => {
             // If the mutation fails, use the context returned from onMutate to roll back
             if (context?.previousData) {
-                queryClient.setQueryData(['notifications', userId, schoolId], context.previousData);
+                queryClient.setQueryData(notificationsQueryKey, context.previousData);
             }
         },
         onSettled: () => {
-            // Always refetch after error or success to guarantee server sync
-            queryClient.invalidateQueries({ queryKey: ['notifications', userId, schoolId] });
+            queryClient.invalidateQueries({ queryKey: notificationsQueryKey, refetchType: 'inactive' });
         }
     });
 
     const markAllReadMutation = useMutation({
         mutationFn: () => api.put('/notifications', { markAllAsRead: true, userId }),
         onMutate: async () => {
-            await queryClient.cancelQueries({ queryKey: ['notifications', userId, schoolId] });
-            const previousData = queryClient.getQueryData(['notifications', userId, schoolId]);
+            await queryClient.cancelQueries({ queryKey: notificationsQueryKey });
+            const previousData = queryClient.getQueryData(notificationsQueryKey);
 
-            queryClient.setQueryData(['notifications', userId, schoolId], (old) => {
+            setNotificationsCache((old) => {
                 if (!old) return old;
 
                 const markRead = (section) => section.map((n) => ({ ...n, isRead: true }));
@@ -213,20 +244,13 @@ export default function NotificationScreen() {
         },
         onError: (err, variables, context) => {
             if (context?.previousData) {
-                queryClient.setQueryData(['notifications', userId, schoolId], context.previousData);
+                queryClient.setQueryData(notificationsQueryKey, context.previousData);
             }
         },
         onSettled: () => {
-            queryClient.invalidateQueries({ queryKey: ['notifications', userId, schoolId] });
+            queryClient.invalidateQueries({ queryKey: notificationsQueryKey, refetchType: 'inactive' });
         }
     });
-
-    // Auto-mark all as read when screen opens
-    useEffect(() => {
-        if (userId && data?.unreadCount > 0) {
-            markAllReadMutation.mutate();
-        }
-    }, [userId, data?.unreadCount]);
 
     // State for inner content visibility to handle exit animations
     const [innerVisible, setInnerVisible] = useState(false);
@@ -271,6 +295,17 @@ export default function NotificationScreen() {
         ...yesterdayFiltered,
         ...earlierFiltered
     ].filter(n => !n.isRead).length;
+
+    // Auto-mark visible notifications as read when screen opens for the active profile.
+    useEffect(() => {
+        if (!userId || !schoolId || filteredUnreadCount <= 0 || markAllReadMutation.isPending) return;
+
+        const currentKey = `${userId}:${schoolId}:${filteredUnreadCount}`;
+        if (autoMarkKeyRef.current === currentKey) return;
+
+        autoMarkKeyRef.current = currentKey;
+        markAllReadMutation.mutate();
+    }, [userId, schoolId, filteredUnreadCount, markAllReadMutation.isPending]);
 
     // Flatten data for FlatList
     const flatData = [

@@ -570,7 +570,7 @@ export default function BulkAttendanceMarking() {
                 >
                   <View style={styles.studentInfo}>
                     <View style={styles.studentAvatar}>
-                      {student.profilePicture ? (
+                      {student.profilePicture && student.profilePicture !== 'default.png' ? (
                         <Image source={{ uri: student.profilePicture }} style={styles.avatarImage} />
                       ) : (
                         <Text style={styles.avatarText}>

@@ -66,6 +66,8 @@ const CHILD_CARD_WIDTH = isSmallDevice ? SCREEN_WIDTH * 0.7 : SCREEN_WIDTH * 0.7
 const CHILD_CARD_MARGIN = 6;
 const isShortDevice = SCREEN_HEIGHT < 700;
 const isTablet = SCREEN_WIDTH >= 768;
+const PARENT_QUICK_STAT_VALUE_FONT_SIZE = isTablet ? 30 : isSmallDevice ? 20 : SCREEN_WIDTH < 430 ? 24 : 28;
+const PARENT_QUICK_STAT_LABEL_FONT_SIZE = isTablet ? 13 : isSmallDevice ? 10 : 12;
 
 // Dynamic refresh offset calculation - accounts for safe area and header height
 const getRefreshOffset = (insetTop, headerHeight) => {
@@ -156,13 +158,59 @@ export default function HomeScreen() {
     // Track if initial load has happened - prevents refetch on back navigation
     const hasInitiallyLoadedRef = useRef(false);
 
-    // Only load user data on FIRST focus - prevents rerenders on tab switch
+    const loadUser = async (forceRefresh = false) => {
+        // Skip if already loaded and not forcing refresh
+        if (hasInitiallyLoadedRef.current && user && !forceRefresh) {
+            setLoading(false);
+            return;
+        }
+
+        try {
+            const stored = await SecureStore.getItemAsync('user');
+            if (stored) {
+                const parsed = JSON.parse(stored);
+                setUser(parsed);
+                hasInitiallyLoadedRef.current = true; // Mark as loaded
+            }
+        } catch (error) {
+            console.error('Failed to load user:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const syncStoredUser = useCallback(async () => {
+        try {
+            const stored = await SecureStore.getItemAsync('user');
+            const parsed = stored ? JSON.parse(stored) : null;
+
+            setUser((prev) => {
+                if (
+                    prev?.id === parsed?.id &&
+                    (prev?.schoolId || prev?.school?.id) === (parsed?.schoolId || parsed?.school?.id) &&
+                    prev?.role?.name === parsed?.role?.name
+                ) {
+                    return prev;
+                }
+                return parsed;
+            });
+
+            hasInitiallyLoadedRef.current = true;
+            setLoading(false);
+        } catch (error) {
+            console.error('Failed to sync user:', error);
+        }
+    }, []);
+
+    // Keep home in sync with the currently selected profile.
     useFocusEffect(
         useCallback(() => {
             if (!hasInitiallyLoadedRef.current) {
                 loadUser();
+            } else {
+                syncStoredUser();
             }
-        }, [])
+        }, [syncStoredUser])
     );
 
     // Safe navigation function - prevents multiple navigations
@@ -438,26 +486,6 @@ export default function HomeScreen() {
         return () => subscription.unsubscribe();
     }, []);
 
-    const loadUser = async (forceRefresh = false) => {
-        // Skip if already loaded and not forcing refresh
-        if (hasInitiallyLoadedRef.current && user && !forceRefresh) {
-            setLoading(false);
-            return;
-        }
-
-        try {
-            const stored = await SecureStore.getItemAsync('user');
-            if (stored) {
-                const parsed = JSON.parse(stored);
-                setUser(parsed);
-                hasInitiallyLoadedRef.current = true; // Mark as loaded
-            }
-        } catch (error) {
-            console.error('Failed to load user:', error);
-        } finally {
-            setLoading(false);
-        }
-    };
     const { data: teacher, isLoading } = useQuery({
         queryKey: ["teacher-profile", userId, schoolId],
         queryFn: async () => {
@@ -2416,10 +2444,15 @@ export default function HomeScreen() {
                                         <CheckCircle2 size={22} color="#fff" />
                                     </View>
                                     <View>
-                                        <Text style={styles.statValue}>
+                                        <Text
+                                            style={[styles.statValue, { fontSize: PARENT_QUICK_STAT_VALUE_FONT_SIZE }]}
+                                            numberOfLines={1}
+                                            adjustsFontSizeToFit
+                                            minimumFontScale={0.7}
+                                        >
                                             {childAttendance === 0 ? '0%' : `${Math.round(childAttendance)}%`}
                                         </Text>
-                                        <Text style={styles.statLabel}>Attendance</Text>
+                                        <Text style={[styles.statLabel, { fontSize: PARENT_QUICK_STAT_LABEL_FONT_SIZE }]}>Attendance</Text>
                                     </View>
                                 </LinearGradient>
                             </HapticTouchable>
@@ -2439,8 +2472,14 @@ export default function HomeScreen() {
                                         <TrendingUp size={22} color="#fff" />
                                     </View>
                                     <View>
-                                        <Text style={styles.statValue}>{childPerformance}</Text>
-                                        <Text style={styles.statLabel}>Performance</Text>
+                                        <Text
+                                            style={[styles.statValue, { fontSize: PARENT_QUICK_STAT_VALUE_FONT_SIZE }]}
+                                            numberOfLines={1}
+                                            ellipsizeMode="tail"
+                                        >
+                                            {childPerformance}
+                                        </Text>
+                                        <Text style={[styles.statLabel, { fontSize: PARENT_QUICK_STAT_LABEL_FONT_SIZE }]}>Performance</Text>
                                     </View>
                                 </LinearGradient>
                             </HapticTouchable>
@@ -2460,8 +2499,15 @@ export default function HomeScreen() {
                                         <DollarSign size={22} color="#fff" />
                                     </View>
                                     <View>
-                                        <Text style={styles.statValue}>{feeStatusDisplay}</Text>
-                                        <Text style={styles.statLabel}>Fee Status</Text>
+                                        <Text
+                                            style={[styles.statValue, { fontSize: PARENT_QUICK_STAT_VALUE_FONT_SIZE }]}
+                                            numberOfLines={1}
+                                            adjustsFontSizeToFit
+                                            minimumFontScale={0.7}
+                                        >
+                                            {feeStatusDisplay}
+                                        </Text>
+                                        <Text style={[styles.statLabel, { fontSize: PARENT_QUICK_STAT_LABEL_FONT_SIZE }]}>Fee Status</Text>
                                     </View>
                                 </LinearGradient>
                             </HapticTouchable>
@@ -3507,8 +3553,10 @@ export default function HomeScreen() {
                                 <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
                                 <View style={styles.statIcon}><DollarSign size={22} color="#fff" /></View>
                                 <View>
-                                    <Text style={styles.statValue}>₹{isLoading ? '...' : formatAbbr(fees?.totalFees)}</Text>
-                                    <Text style={styles.statLabel}>Total Fees</Text>
+                                    <Text style={styles.statValue} numberOfLines={1} ellipsizeMode="tail">
+                                        ₹{isLoading ? '...' : formatAbbr(fees?.totalFees)}
+                                    </Text>
+                                    <Text style={styles.statLabel} numberOfLines={1} ellipsizeMode="tail">Total Fees</Text>
                                 </View>
                             </LinearGradient>
                         </HapticTouchable>
@@ -3524,8 +3572,12 @@ export default function HomeScreen() {
                                 <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
                                 <View style={styles.statIcon}><CheckCircle2 size={22} color="#fff" /></View>
                                 <View>
-                                    <Text style={styles.statValue}>₹{isLoading ? '...' : formatAbbr(fees?.collected)}</Text>
-                                    <Text style={styles.statLabel}>Collected{fees?.collectionRate > 0 ? ` (${fees.collectionRate}%)` : ''}</Text>
+                                    <Text style={styles.statValue} numberOfLines={1} ellipsizeMode="tail">
+                                        ₹{isLoading ? '...' : formatAbbr(fees?.collected)}
+                                    </Text>
+                                    <Text style={styles.statLabel} numberOfLines={1} ellipsizeMode="tail">
+                                        Collected{fees?.collectionRate > 0 ? ` (${fees.collectionRate}%)` : ''}
+                                    </Text>
                                 </View>
                             </LinearGradient>
                         </HapticTouchable>
@@ -3541,8 +3593,10 @@ export default function HomeScreen() {
                                 <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
                                 <View style={styles.statIcon}><Clock size={22} color="#fff" /></View>
                                 <View>
-                                    <Text style={styles.statValue}>₹{isLoading ? '...' : formatAbbr(fees?.pending)}</Text>
-                                    <Text style={styles.statLabel}>Pending</Text>
+                                    <Text style={styles.statValue} numberOfLines={1} ellipsizeMode="tail">
+                                        ₹{isLoading ? '...' : formatAbbr(fees?.pending)}
+                                    </Text>
+                                    <Text style={styles.statLabel} numberOfLines={1} ellipsizeMode="tail">Pending</Text>
                                 </View>
                             </LinearGradient>
                         </HapticTouchable>

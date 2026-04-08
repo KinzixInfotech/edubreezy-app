@@ -47,7 +47,13 @@ export const useMessages = (schoolId, conversationId) => {
         initialPageParam: undefined,
         getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
         enabled: !!schoolId && !!conversationId,
-        staleTime: 0, // Force background refetch when reopening a chat
+        // Realtime is the source of truth while a room is open. Background
+        // refetches can overwrite optimistic messages before the inserted row
+        // becomes visible on production infrastructure.
+        staleTime: 30 * 1000,
+        refetchOnMount: false,
+        refetchOnReconnect: false,
+        refetchOnWindowFocus: false,
     });
 };
 
@@ -73,16 +79,56 @@ export const useRefreshEligibleUsers = () => {
     });
 };
 
+const sortConversationsByLastMessage = (conversations = []) => {
+    return [...conversations].sort((a, b) => {
+        if (!a.lastMessageAt && !b.lastMessageAt) return 0;
+        if (!a.lastMessageAt) return 1;
+        if (!b.lastMessageAt) return -1;
+        return new Date(b.lastMessageAt) - new Date(a.lastMessageAt);
+    });
+};
+
+const getConversationPreviewText = (message) => {
+    if (message?.content?.trim()) return message.content.trim();
+    if (message?.attachments?.length) {
+        return message.attachments.length === 1 ? 'Attachment' : `${message.attachments.length} attachments`;
+    }
+    return 'New message';
+};
+
+const updateConversationPreviewCaches = (qc, schoolId, conversationId, message) => {
+    const lastMessageAt = message?.createdAt || new Date().toISOString();
+    const lastMessageText = getConversationPreviewText(message);
+
+    qc.setQueriesData({ queryKey: chatKeys.conversations(schoolId) }, (old) => {
+        if (!old?.conversations) return old;
+
+        return {
+            ...old,
+            conversations: sortConversationsByLastMessage(
+                old.conversations.map((conversation) =>
+                    conversation.id === conversationId
+                        ? {
+                            ...conversation,
+                            lastMessageAt,
+                            lastMessageText,
+                        }
+                        : conversation
+                )
+            ),
+        };
+    });
+};
+
 // ── Mutations ──
 
 export const useSendMessage = () => {
     const qc = useQueryClient();
 
     return useMutation({
-        mutationFn: async ({ schoolId, conversationId, body, tempId, currentUser }) => {
-            // Phase 1: Direct Supabase insert → triggers realtime instantly
+        mutationFn: async ({ schoolId, conversationId, body, currentUser }) => {
             try {
-                const directMsg = await chatService.sendMessageDirect({
+                const message = await chatService.sendMessageDirect({
                     conversationId,
                     senderId: currentUser?.id,
                     content: body.content,
@@ -90,15 +136,7 @@ export const useSendMessage = () => {
                     replyToId: body.replyToId,
                 });
 
-                // Phase 2: Fire-and-forget API call for notifications, cache, metadata
-                chatService.sendMessagePersist(schoolId, conversationId, {
-                    ...body,
-                    _directMessageId: directMsg.id, // Tell API this message already exists
-                }).catch((err) => {
-                    console.warn('Background message persist failed (non-critical):', err.message);
-                });
-
-                return { success: true, message: directMsg };
+                return { success: true, message };
             } catch (supabaseErr) {
                 // Fallback: If direct insert fails, use API-only path
                 console.warn('Direct Supabase insert failed, falling back to API:', supabaseErr.message);
@@ -112,6 +150,7 @@ export const useSendMessage = () => {
             await qc.cancelQueries({ queryKey });
 
             const previous = qc.getQueryData(queryKey);
+            const previousConversationQueries = qc.getQueriesData({ queryKey: chatKeys.conversations(schoolId) });
 
             const optimisticMessage = {
                 id: tempId,
@@ -131,7 +170,15 @@ export const useSendMessage = () => {
             };
 
             qc.setQueryData(queryKey, (old) => {
-                if (!old?.pages?.length) return old;
+                if (!old?.pages?.length) {
+                    return {
+                        pages: [{
+                            messages: [optimisticMessage],
+                            nextCursor: null,
+                        }],
+                        pageParams: [undefined],
+                    };
+                }
                 const newPages = [...old.pages];
                 const existingIndex = newPages[0].messages.findIndex(m => m.id === tempId);
 
@@ -148,7 +195,9 @@ export const useSendMessage = () => {
                 return { ...old, pages: newPages };
             });
 
-            return { previous, queryKey };
+            updateConversationPreviewCaches(qc, schoolId, conversationId, optimisticMessage);
+
+            return { previous, previousConversationQueries, queryKey };
         },
 
         // Replace optimistic message with real message from Supabase
@@ -169,32 +218,41 @@ export const useSendMessage = () => {
                                     ...msg,
                                     id: realMsg.id,
                                     status: realMsg.status || 'SENT',
-                                    createdAt: realMsg.createdAt,
-                                    updatedAt: realMsg.updatedAt,
-                                    sender: currentUser || msg.sender,
+                                    content: realMsg.content ?? msg.content,
+                                    attachments: realMsg.attachments ?? msg.attachments,
+                                    createdAt: realMsg.createdAt || msg.createdAt,
+                                    updatedAt: realMsg.updatedAt || msg.updatedAt,
+                                    senderId: realMsg.senderId || msg.senderId,
+                                    sender: realMsg.sender || currentUser || msg.sender,
+                                    _isRealtime: true,
                                     isUploading: false,
                                     // Preserve replyTo from optimistic message
                                 }
-                                : msg
+                            : msg
                         ),
                     })),
                 };
             });
+
+            updateConversationPreviewCaches(qc, schoolId, conversationId, realMsg);
         },
 
         onError: (_err, _vars, context) => {
             if (context?.previous) {
                 qc.setQueryData(context.queryKey, context.previous);
             }
+            if (context?.previousConversationQueries?.length) {
+                context.previousConversationQueries.forEach(([key, data]) => {
+                    qc.setQueryData(key, data);
+                });
+            }
         },
 
-        onSettled: (_data, _error, { schoolId, conversationId }) => {
-            // Only invalidate conversations list (for last message preview update)
-            // Do NOT invalidate messages — realtime handles live updates
-            // Invalidating messages causes a full refetch which flashes the skeleton
-            setTimeout(() => {
-                qc.invalidateQueries({ queryKey: chatKeys.conversations(schoolId) });
-            }, 1500);
+        onSettled: () => {
+            // Realtime is the source of truth while the thread is open. Avoid
+            // forced refetches here because they reintroduce the production
+            // race that can remove an optimistic bubble before insert visibility
+            // catches up across infrastructure.
         },
     });
 };

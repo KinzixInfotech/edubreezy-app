@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import Animated, { FadeInDown, FadeInRight, FadeIn } from 'react-native-reanimated';
 import {
     BookOpen,
@@ -76,16 +76,6 @@ export default function ParentLibraryScreen() {
     const parentUserId = userData?.id;
     const studentId = childData?.studentId || childData?.id;
 
-    useFocusEffect(
-        useCallback(() => {
-            const refreshData = async () => {
-                await queryClient.invalidateQueries(['parent-library']);
-                await queryClient.invalidateQueries(['library-catalog']);
-            };
-            refreshData();
-        }, [])
-    );
-
     const { data: libraryData, isLoading } = useQuery({
         queryKey: ['parent-library', schoolId, parentId, studentId],
         queryFn: async () => {
@@ -96,7 +86,10 @@ export default function ParentLibraryScreen() {
             return res.data;
         },
         enabled: !!schoolId && !!parentId && !!studentId,
-        staleTime: 0,
+        staleTime: 60 * 1000,
+        placeholderData: (previousData) => previousData,
+        refetchOnMount: false,
+        refetchOnWindowFocus: false,
     });
 
     const { data: catalogBooks, isLoading: catalogLoading } = useQuery({
@@ -109,7 +102,10 @@ export default function ParentLibraryScreen() {
             return res.data || [];
         },
         enabled: !!schoolId && activeTab === 'catalog',
-        staleTime: 0,
+        staleTime: 2 * 60 * 1000,
+        placeholderData: (previousData) => previousData,
+        refetchOnMount: false,
+        refetchOnWindowFocus: false,
     });
 
     const borrowedBooks = libraryData?.borrowedBooks || [];

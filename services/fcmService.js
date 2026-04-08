@@ -169,6 +169,13 @@ class FCMService {
 
         if (enabled) {
             // console.log('Authorization status:', authStatus);
+            if (Platform.OS === 'ios' && !messaging().isDeviceRegisteredForRemoteMessages) {
+                try {
+                    await messaging().registerDeviceForRemoteMessages();
+                } catch (e) {
+                    console.warn('Failed to register device for remote messages on iOS:', e);
+                }
+            }
             return true;
         }
         return false;
@@ -176,6 +183,14 @@ class FCMService {
 
     async getToken() {
         try {
+            if (Platform.OS === 'ios') {
+                const apnsToken = await messaging().getAPNSToken();
+                if (!apnsToken) {
+                    console.warn('⚠️ No APNs token! FCM push will not work on this iOS device. Ensure "Push Notifications" capability is enabled in Apple Dev portal.');
+                } else {
+                    console.log('✅ APNs Token received successfully');
+                }
+            }
             const token = await messaging().getToken();
             // console.log('📱 FCM Token:', token);
             return token;
@@ -189,7 +204,7 @@ class FCMService {
         try {
             const token = await this.getToken();
             if (token) {
-                await api.post(`/users/${userId}/fcm-token`, { fcmToken: token });
+                await api.post(`/users/${userId}/fcm-token`, { fcmToken: token, platform: Platform.OS });
                 await SecureStore.setItemAsync('fcmToken', token);
                 console.log('✅ FCM token registered successfully');
             }
@@ -350,7 +365,7 @@ class FCMService {
 
                 // Only update if token actually changed
                 if (oldToken !== newToken) {
-                    await api.post(`/users/${userId}/fcm-token`, { fcmToken: newToken });
+                    await api.post(`/users/${userId}/fcm-token`, { fcmToken: newToken, platform: Platform.OS });
                     await SecureStore.setItemAsync('fcmToken', newToken);
                     console.log('[FCM Token Refresh] ✅ New token registered successfully');
                 } else {
@@ -386,7 +401,7 @@ class FCMService {
             if (pendingToken) {
                 console.log('[FCM Token Sync] Found pending token, syncing to backend...');
 
-                await api.post(`/users/${userId}/fcm-token`, { fcmToken: pendingToken });
+                await api.post(`/users/${userId}/fcm-token`, { fcmToken: pendingToken, platform: Platform.OS });
                 await SecureStore.setItemAsync('fcmToken', pendingToken);
                 await SecureStore.deleteItemAsync('pendingFcmToken');
 
@@ -412,7 +427,7 @@ class FCMService {
 
             if (currentToken && currentToken !== storedToken) {
                 console.log('[FCM Token Verify] Token mismatch detected, updating...');
-                await api.post(`/users/${userId}/fcm-token`, { fcmToken: currentToken });
+                await api.post(`/users/${userId}/fcm-token`, { fcmToken: currentToken, platform: Platform.OS });
                 await SecureStore.setItemAsync('fcmToken', currentToken);
                 console.log('[FCM Token Verify] ✅ Token updated');
             }

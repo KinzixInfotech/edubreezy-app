@@ -97,7 +97,30 @@ export function useChatRealtime(schoolId, conversationId, { enabled = true } = {
 
                     // Prepend new message to the first page of the infinite query
                     qc.setQueryData(queryKey, (old) => {
-                        if (!old?.pages?.length) return old;
+                        const formatted = {
+                            id: newMessage.id,
+                            conversationId: newMessage.conversationId,
+                            senderId: newMessage.senderId,
+                            sender,
+                            content: newMessage.deletedAt ? null : newMessage.content,
+                            attachments: newMessage.deletedAt ? null : newMessage.attachments,
+                            isDeleted: !!newMessage.deletedAt,
+                            status: newMessage.status || 'SENT',
+                            replyTo,
+                            createdAt: newMessage.createdAt,
+                            updatedAt: newMessage.updatedAt,
+                            _isRealtime: true,
+                        };
+
+                        if (!old?.pages?.length) {
+                            return {
+                                pages: [{
+                                    messages: [formatted],
+                                    nextCursor: null,
+                                }],
+                                pageParams: [undefined],
+                            };
+                        }
 
                         // Check if message already exists (e.g. from optimistic update)
                         const exists = old.pages.some((page) =>
@@ -125,20 +148,41 @@ export function useChatRealtime(schoolId, conversationId, { enabled = true } = {
                             };
                         }
 
-                        const formatted = {
-                            id: newMessage.id,
-                            conversationId: newMessage.conversationId,
-                            senderId: newMessage.senderId,
-                            sender,
-                            content: newMessage.deletedAt ? null : newMessage.content,
-                            attachments: newMessage.deletedAt ? null : newMessage.attachments,
-                            isDeleted: !!newMessage.deletedAt,
-                            status: newMessage.status || 'SENT',
-                            replyTo,
-                            createdAt: newMessage.createdAt,
-                            updatedAt: newMessage.updatedAt,
-                            _isRealtime: true,
-                        };
+                        // Production can briefly return a cache/refetch state before the
+                        // actual inserted row is visible. Replace a matching optimistic
+                        // temp message instead of appending a second copy or letting a
+                        // later refetch wipe the local one.
+                        const createdAtMs = new Date(newMessage.createdAt).getTime();
+                        const optimisticMatch = old.pages
+                            .flatMap((page) => page.messages || [])
+                            .find((msg) => {
+                                if (typeof msg.id !== 'string' || !msg.id.startsWith('temp-')) return false;
+                                if (msg.senderId !== newMessage.senderId) return false;
+                                if ((msg.content || '') !== (newMessage.content || '')) return false;
+
+                                const msgTime = msg.createdAt ? new Date(msg.createdAt).getTime() : 0;
+                                return Math.abs(createdAtMs - msgTime) < 30 * 1000;
+                            });
+
+                        if (optimisticMatch) {
+                            return {
+                                ...old,
+                                pages: old.pages.map((page) => ({
+                                    ...page,
+                                    messages: page.messages.map((msg) =>
+                                        msg.id === optimisticMatch.id
+                                            ? {
+                                                ...msg,
+                                                ...formatted,
+                                                attachments: formatted.attachments ?? msg.attachments,
+                                                replyTo: formatted.replyTo ?? msg.replyTo,
+                                                isUploading: false,
+                                            }
+                                            : msg
+                                    ),
+                                })),
+                            };
+                        }
 
                         const newPages = [...old.pages];
                         newPages[0] = {

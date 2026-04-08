@@ -738,53 +738,38 @@ export default function LoginScreen() {
             // Clear any old tokens
             await SecureStore.deleteItemAsync('token');
 
-            const { data: oauthData, error: oauthError } = await supabase.auth.signInWithOAuth({
-                provider: 'apple',
-                options: {
-                    redirectTo: 'edubreezy://(auth)/login',
-                    skipBrowserRedirect: true,
-                },
+            const appleAvailable = await AppleAuthentication.isAvailableAsync();
+            if (!appleAvailable) {
+                setErrors({ general: 'Apple sign-in is not available on this device.' });
+                return;
+            }
+
+            const credential = await AppleAuthentication.signInAsync({
+                requestedScopes: [
+                    AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+                    AppleAuthentication.AppleAuthenticationScope.EMAIL,
+                ],
             });
 
-            if (oauthError) throw oauthError;
-
-            if (!oauthData?.url) {
-                setErrors({ general: 'Failed to initiate Apple sign-in.' });
+            const identityToken = credential?.identityToken;
+            if (!identityToken) {
+                setErrors({ general: 'Authentication failed. Apple did not return an identity token.' });
                 return;
             }
 
-            // Open browser for Apple OAuth
-            const result = await WebBrowser.openAuthSessionAsync(oauthData.url, 'edubreezy://(auth)/login');
-
-            if (result.type !== 'success' || !result.url) {
-                setAppleLoading(false);
-                return;
-            }
-
-            // Extract tokens from redirect URL
-            const urlFragment = result.url.split('#')[1];
-            if (!urlFragment) {
-                setErrors({ general: 'Authentication failed. Please try again.' });
-                return;
-            }
-
-            const params = new URLSearchParams(urlFragment);
-            const access_token = params.get('access_token');
-            const refresh_token = params.get('refresh_token');
-
-            if (!access_token || !refresh_token) {
-                setErrors({ general: 'Authentication failed. Missing tokens.' });
-                return;
-            }
-
-            // Set the session in Supabase client
-            const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
-                access_token,
-                refresh_token,
+            const { data: sessionData, error: sessionError } = await supabase.auth.signInWithIdToken({
+                provider: 'apple',
+                token: identityToken,
             });
 
             if (sessionError || !sessionData?.user) {
                 setErrors({ general: sessionError?.message || 'Failed to establish session.' });
+                return;
+            }
+
+            const access_token = sessionData.session?.access_token;
+            if (!access_token) {
+                setErrors({ general: 'Failed to establish session.' });
                 return;
             }
 

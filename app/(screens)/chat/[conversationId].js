@@ -292,11 +292,9 @@ const BottomSheetModal = React.memo(function BottomSheetModal({ visible, title, 
                 <View style={bsStyles.handleWrapper}>
                     <View style={bsStyles.handle} />
                 </View>
-
                 {title ? (
                     <Text style={bsStyles.sheetTitle}>{title}</Text>
                 ) : null}
-
                 <View style={bsStyles.optionsList}>
                     {options.map((opt, i) => (
                         <React.Fragment key={opt.label}>
@@ -327,7 +325,6 @@ const BottomSheetModal = React.memo(function BottomSheetModal({ visible, title, 
                         </React.Fragment>
                     ))}
                 </View>
-
                 <TouchableOpacity style={bsStyles.cancelBtn} onPress={onClose} activeOpacity={0.7}>
                     <Text style={bsStyles.cancelText}>Cancel</Text>
                 </TouchableOpacity>

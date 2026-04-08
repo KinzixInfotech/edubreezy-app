@@ -16,7 +16,6 @@ function TabsLayout() {
   const { noticeBadgeCount } = useNotification();
   const { chatBadgeCount } = useChat();
   const insets = useSafeAreaInsets();
-
   useEffect(() => {
     const loadData = async () => {
       let savedRole = await SecureStore.getItemAsync('userRole');
@@ -33,7 +32,6 @@ function TabsLayout() {
       }
     };
     loadData();
-
     if (Platform.OS === 'android') {
       (async () => {
         try {
@@ -46,19 +44,15 @@ function TabsLayout() {
       })();
     }
   }, []);
-
   // Subscribe to profile picture changes - ONLY updates when profile.js emits event
   useEffect(() => {
     const unsubscribe = onProfilePictureChange((newUrl) => {
       console.log('📸 Tab bar received profile picture update:', newUrl);
       setUser(prev => prev ? { ...prev, profilePicture: newUrl } : prev);
     });
-
     return unsubscribe;
   }, []);
-
   if (!role) return null;
-
   const getTabConfig = () => {
     switch (role) {
       case 'STUDENT':

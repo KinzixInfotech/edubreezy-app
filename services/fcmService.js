@@ -160,6 +160,18 @@ import { router } from 'expo-router';
 
 const BADGE_KEY = 'noticeBadgeCount';
 
+const getNotificationImageUrl = (data = {}) => {
+    return (
+        data.imageUrl ||
+        data.image ||
+        data.fileUrl ||
+        data.file_url ||
+        data.mediaUrl ||
+        data.media_url ||
+        null
+    );
+};
+
 class FCMService {
     async requestPermission() {
         const authStatus = await messaging().requestPermission();
@@ -201,6 +213,10 @@ class FCMService {
     }
 
     async registerToken(userId) {
+        if (!userId) {
+            console.warn('[FCM] registerToken called without a userId. Skipping registration.');
+            return;
+        }
         try {
             const token = await this.getToken();
             if (token) {
@@ -215,8 +231,11 @@ class FCMService {
 
     async unregisterToken(userId) {
         try {
-            await api.delete(`/users/${userId}/fcm-token`);
+            if (userId) {
+                await api.delete(`/users/${userId}/fcm-token`);
+            }
             await SecureStore.deleteItemAsync('fcmToken');
+            await SecureStore.deleteItemAsync('pendingFcmToken');
         } catch (error) {
             console.error('Error unregistering FCM token:', error);
         }
@@ -497,9 +516,9 @@ class FCMService {
                 };
 
                 // Add image attachment if imageUrl is provided (works on iOS)
-                const imageUrl = remoteMessage.data.imageUrl;
+                const imageUrl = getNotificationImageUrl(remoteMessage.data);
                 if (imageUrl) {
-                    console.log(imageUrl, 'found');
+                    console.log('[FCM] Notification image found:', imageUrl);
 
                     notificationContent.attachments = [
                         { url: imageUrl, identifier: 'image' }

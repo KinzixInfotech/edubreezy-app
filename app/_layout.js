@@ -286,7 +286,22 @@ function RootLayoutContent() {
     // FCM TOKEN REGISTRATION - runs when user logs in or changes
     // ========================================================================
     useEffect(() => {
-        if (!loggedInUserId) return;
+        if (!loggedInUserId) {
+            const previousUserId = previousUserIdRef.current;
+
+            if (tokenRefreshUnsubRef.current) {
+                tokenRefreshUnsubRef.current();
+                tokenRefreshUnsubRef.current = null;
+            }
+
+            if (previousUserId) {
+                fcmService.unregisterToken(previousUserId).catch(e =>
+                    console.warn('[FCM Init] ⚠️ Logout token cleanup failed (non-blocking):', e)
+                );
+                previousUserIdRef.current = null;
+            }
+            return;
+        }
 
         async function registerFcm() {
             try {

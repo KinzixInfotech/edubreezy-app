@@ -21,6 +21,7 @@ import { pickAndUploadImage } from '../../lib/uploadthing';
 import Constants from 'expo-constants';
 import { emitProfilePictureChange } from '../../lib/profileEvents';
 import { stopForegroundLocationTracking } from '../../lib/transport-location-task';
+import fcmService from '../../services/fcmService';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const isSmallDevice = SCREEN_WIDTH < 375;
@@ -936,6 +937,16 @@ export default function ProfileScreen() {
                   console.warn('Could not stop location task:', e.message);
                 }
               }
+
+              if (user?.id) {
+                try {
+                  await fcmService.unregisterToken(user.id);
+                  console.log('✅ FCM token cleared on logout');
+                } catch (e) {
+                  console.warn('Could not clear FCM token on logout:', e.message);
+                }
+              }
+
               await SecureStore.deleteItemAsync('user');
               await SecureStore.deleteItemAsync('userRole');
               await SecureStore.deleteItemAsync('token');

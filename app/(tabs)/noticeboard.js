@@ -257,10 +257,9 @@ const NoticeBoardScreen = () => {
       })
       : '';
 
-    const hasImage = !!item.authorProfilePic;
-    // alert(JSON.stringify(item))
+    const noticeImage = item.fileUrl || item.imageUrl || item.image || null;
+    const hasImage = !!noticeImage;
     const authorName = item.authorName || item.issuedBy || 'Unknown';
-    const authorPic = item.authorProfilePic;
 
     return (
       <HapticTouchable onPress={() => openNoticeDetail(item)}>
@@ -268,7 +267,7 @@ const NoticeBoardScreen = () => {
           {/* Image Preview if exists */}
           {hasImage && (
             <Image
-              source={{ uri: item.authorProfilePic }}
+              source={{ uri: noticeImage }}
               style={styles.noticeThumb}
               contentFit="cover"
 

@@ -21,8 +21,14 @@ import Animated, { FadeIn, FadeOut, SlideInDown, SlideOutDown, Easing } from 're
 import { format, formatDistanceToNow } from 'date-fns';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import { Image } from 'expo-image';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+const getNotificationImageUrl = (item) => {
+    if (!item) return null;
+    return item.imageUrl || item.image || item.fileUrl || item.file_url || item.mediaUrl || item.media_url || null;
+};
 
 // Helper to get icon based on type
 const getNotificationIcon = (type) => {
@@ -69,6 +75,7 @@ const formatTimeAgo = (date) => {
 
 const NotificationItem = ({ item, onPress, isLast }) => {
     const { icon: Icon, color, bg } = getNotificationIcon(item.type || item.priority);
+    const imageUrl = getNotificationImageUrl(item);
 
     return (
         <TouchableOpacity
@@ -81,9 +88,17 @@ const NotificationItem = ({ item, onPress, isLast }) => {
             ]}
         >
             {/* Icon */}
-            <View style={[styles.iconWrapper, { backgroundColor: bg }]}>
-                <Icon size={20} color={color} strokeWidth={2} />
-            </View>
+            {imageUrl ? (
+                <Image
+                    source={{ uri: imageUrl }}
+                    style={styles.notificationThumb}
+                    contentFit="cover"
+                />
+            ) : (
+                <View style={[styles.iconWrapper, { backgroundColor: bg }]}>
+                    <Icon size={20} color={color} strokeWidth={2} />
+                </View>
+            )}
 
             {/* Content */}
             <View style={styles.contentWrapper}>
@@ -296,6 +311,8 @@ export default function NotificationScreen() {
         ...earlierFiltered
     ].filter(n => !n.isRead).length;
 
+    const selectedNotificationImage = getNotificationImageUrl(selectedNotification);
+
     // Auto-mark visible notifications as read when screen opens for the active profile.
     useEffect(() => {
         if (!userId || !schoolId || filteredUnreadCount <= 0 || markAllReadMutation.isPending) return;
@@ -446,6 +463,16 @@ export default function NotificationScreen() {
                                     }
                                 </Text>
 
+                                {selectedNotificationImage && (
+                                    <View style={styles.modalImageContainer}>
+                                        <Image
+                                            source={{ uri: selectedNotificationImage }}
+                                            style={styles.modalImage}
+                                            contentFit="cover"
+                                        />
+                                    </View>
+                                )}
+
                                 {/* Message */}
                                 <Text style={styles.modalMessage}>{selectedNotification?.message}</Text>
 
@@ -554,6 +581,13 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
         marginRight: 12,
+    },
+    notificationThumb: {
+        width: 44,
+        height: 44,
+        borderRadius: 12,
+        marginRight: 12,
+        backgroundColor: '#F2F2F7',
     },
     contentWrapper: {
         flex: 1,
@@ -679,6 +713,16 @@ const styles = StyleSheet.create({
         fontSize: 13,
         color: '#8E8E93',
         marginBottom: 20,
+    },
+    modalImageContainer: {
+        marginBottom: 20,
+        borderRadius: 16,
+        overflow: 'hidden',
+        backgroundColor: '#F2F2F7',
+    },
+    modalImage: {
+        width: '100%',
+        height: 220,
     },
     modalMessage: {
         fontSize: 16,

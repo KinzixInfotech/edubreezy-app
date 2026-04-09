@@ -28,6 +28,7 @@ export default {
             },
             infoPlist: {
                 UIBackgroundModes: [
+                    "fetch",
                     "remote-notification"
                 ],
                 LSApplicationQueriesSchemes: [

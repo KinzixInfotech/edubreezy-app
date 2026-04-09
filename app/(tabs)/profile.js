@@ -3,6 +3,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router, useLocalSearchParams } from 'expo-router';
 import { Settings, Edit, LogOut, Mail, Phone, Calendar, MapPin, Award, BookOpen, School, X, Users, ClipboardList, FileText, Bell, Shield, Clock, Bus, Fuel, Gauge, UserCheck, ClipboardCheck, Megaphone, Camera, Link2 } from 'lucide-react-native';
 import * as WebBrowser from 'expo-web-browser';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
@@ -1039,22 +1040,36 @@ export default function ProfileScreen() {
     try {
       setLinkingApple(true);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      const { data, error } = await supabase.auth.linkIdentity({
-        provider: 'apple',
-        options: {
-          redirectTo: 'edubreezy://',
-        },
-      });
-      if (error) throw error;
-      if (data?.url) {
-        const result = await WebBrowser.openAuthSessionAsync(data.url, 'edubreezy://');
-        console.log('WebBrowser result:', result.type);
-        await checkGoogleIdentity();
-        if (result.type === 'success') {
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        }
+      const appleAvailable = await AppleAuthentication.isAvailableAsync();
+      if (!appleAvailable) {
+        throw new Error('Apple sign-in is not available on this device.');
       }
+
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+
+      const identityToken = credential?.identityToken;
+      if (!identityToken) {
+        throw new Error('Apple did not return an identity token.');
+      }
+
+      const { error } = await supabase.auth.linkIdentity({
+        provider: 'apple',
+        token: identityToken,
+      });
+
+      if (error) throw error;
+
+      await checkGoogleIdentity();
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (e) {
+      if (e?.code === 'ERR_REQUEST_CANCELED') {
+        return;
+      }
       console.error('Error linking Apple:', e);
       Alert.alert('Link Failed', e.message || 'Failed to link Apple account.');
     } finally {

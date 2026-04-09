@@ -731,6 +731,23 @@ export default function LoginScreen() {
     };
 
     const handleAppleLogin = async () => {
+        const cleanupAppleIdentity = async () => {
+            try {
+                const { data, error } = await supabase.auth.getUserIdentities();
+                if (error) throw error;
+
+                const appleIdentity = data?.identities?.find((identity) => identity.provider === 'apple');
+                if (appleIdentity) {
+                    const { error: unlinkError } = await supabase.auth.unlinkIdentity(appleIdentity);
+                    if (unlinkError) throw unlinkError;
+                }
+            } catch (cleanupError) {
+                console.warn('Failed to unlink Apple identity during login cleanup:', cleanupError?.message || cleanupError);
+            } finally {
+                await supabase.auth.signOut();
+            }
+        };
+
         try {
             setAppleLoading(true);
             setErrors({});
@@ -779,14 +796,14 @@ export default function LoginScreen() {
             const user = await fetchUser(sessionData.user.id, access_token);
 
             if (!user) {
-                await supabase.auth.signOut();
+                await cleanupAppleIdentity();
                 setErrors({ general: 'No account found for this Apple ID. Please contact your school admin to create your account.' });
                 return;
             }
 
             // Block ADMIN, LIBRARIAN, SUPER_ADMIN roles from mobile app
             if (BLOCKED_MOBILE_ROLES.includes(user.role?.name)) {
-                await supabase.auth.signOut();
+                await cleanupAppleIdentity();
                 Alert.alert(
                     'Web Only',
                     `${user.role?.name === 'ADMIN' ? 'Admin' : user.role?.name === 'LIBRARIAN' ? 'Librarian' : 'Super Admin'} accounts can only access the web dashboard at atlas.edubreezy.com.`,

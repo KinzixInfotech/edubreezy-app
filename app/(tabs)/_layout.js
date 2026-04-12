@@ -1,4 +1,5 @@
 import { Tabs } from 'expo-router';
+import { Redirect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useState, useCallback } from 'react';
 import * as SecureStore from 'expo-secure-store';
@@ -13,6 +14,7 @@ import { onProfilePictureChange } from '../../lib/profileEvents';
 function TabsLayout() {
   const [role, setRole] = useState(null);
   const [user, setUser] = useState(null);
+  const [isAuthChecked, setIsAuthChecked] = useState(false);
   const { noticeBadgeCount } = useNotification();
   const { chatBadgeCount } = useChat();
   const insets = useSafeAreaInsets();
@@ -29,6 +31,8 @@ function TabsLayout() {
         }
       } catch (e) {
         console.log("Error loading user in tabs", e);
+      } finally {
+        setIsAuthChecked(true);
       }
     };
     loadData();
@@ -52,6 +56,13 @@ function TabsLayout() {
     });
     return unsubscribe;
   }, []);
+
+  if (!isAuthChecked) return null;
+
+  if (!user) {
+    return <Redirect href="/(auth)/schoolcode" />;
+  }
+
   if (!role) return null;
   const getTabConfig = () => {
     switch (role) {

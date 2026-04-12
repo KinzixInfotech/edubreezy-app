@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,22 +14,43 @@ import {
 import { NoticeboardSkeleton } from '../components/ScreenSkeleton';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { ArrowLeft, BellOff, FileText, X, Megaphone, Send, Inbox, Image as ImageIcon, Eye } from 'lucide-react-native';
+import { ArrowLeft, BellOff, FileText, X, Megaphone, Send, Inbox, Eye } from 'lucide-react-native';
 import { Image } from 'expo-image';
-import Animated, { FadeInDown, FadeIn, FadeOut, SlideInDown, SlideOutDown, Easing } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeOut, SlideInDown, SlideOutDown, Easing } from 'react-native-reanimated';
 import HapticTouchable from '../components/HapticTouch';
 import * as SecureStore from 'expo-secure-store';
 import api from '../../lib/api';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNotification } from '../../contexts/NotificationContext';
-import { useMarkNoticeRead } from '../../hooks/useMarkNoticeRead';
 import { StatusBar } from 'expo-status-bar';
 import { BlurView } from 'expo-blur';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const NOTICE_ROW_HEIGHT = 96;
+const PAGE_SIZE = Math.max(12, Math.ceil(SCREEN_HEIGHT / NOTICE_ROW_HEIGHT) + 2);
+const VIEWABILITY_CONFIG = {
+  itemVisiblePercentThreshold: 60,
+  minimumViewTime: 120,
+};
+const READ_SYNC_DEBOUNCE_MS = 350;
 
 const categories = ['All', 'Unread', 'GENERAL', 'EMERGENCY', 'EXAM', 'HOLIDAY'];
 const BROADCAST_ROLES = ['DIRECTOR', 'PRINCIPAL', 'TEACHING_STAFF'];
+
+const markNoticesReadInBulk = async ({ schoolId, userId, noticeIds }) => {
+  try {
+    await api.post(`/notices/${schoolId}/mark-read-bulk`, { userId, noticeIds });
+  } catch (error) {
+    const status = error?.response?.status;
+    if (![404, 405, 501].includes(status)) {
+      throw error;
+    }
+
+    await Promise.allSettled(
+      noticeIds.map((noticeId) => api.post(`/notices/${schoolId}/${noticeId}/mark-read`, { userId }))
+    );
+  }
+};
 
 // Empty State Component
 const EmptyState = React.memo(({ isSentTab }) => (
@@ -98,7 +119,8 @@ const NoticeBoardScreen = () => {
 
   const { clearNoticeBadge } = useNotification();
   const queryClient = useQueryClient();
-  const markRead = useMarkNoticeRead();
+  const pendingReadIdsRef = useRef(new Set());
+  const readFlushTimerRef = useRef(null);
 
   const canBroadcast = BROADCAST_ROLES.includes(userRole);
 
@@ -131,42 +153,89 @@ const NoticeBoardScreen = () => {
   const [activeTab, setActiveTab] = useState('received');
   const [selectedCategory, setSelectedCategory] = useState('All');
 
-  // Pagination state
-  const [page, setPage] = useState(1);
-  const [allNotices, setAllNotices] = useState([]);
-  const [hasMore, setHasMore] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const PAGE_SIZE = 20;
+  const receivedNoticesQueryKey = ['notices', 'feed', schoolId, userId, selectedCategory];
+  const sentNoticesQueryKey = ['notices', 'sent', schoolId, userId];
 
-  // Reset pagination when filters change
+  const markNoticeReadOptimistically = useCallback((ids) => {
+    if (!ids?.length) return;
+
+    const idSet = new Set(ids);
+    queryClient.setQueryData(receivedNoticesQueryKey, (old) => {
+      if (!old?.pages?.length) return old;
+
+      return {
+        ...old,
+        pages: old.pages.map((page) => ({
+          ...page,
+          notices: (page.notices || []).map((notice) => (
+            idSet.has(notice.id) ? { ...notice, read: true, unread: false } : notice
+          )),
+        })),
+      };
+    });
+  }, [queryClient, receivedNoticesQueryKey]);
+
+  const syncNoticeReadsMutation = useMutation({
+    mutationFn: async (ids) => {
+      await markNoticesReadInBulk({ schoolId, userId, noticeIds: ids });
+    },
+    onError: (error, ids) => {
+      console.error('Failed to sync notice read state:', error?.response?.data || error?.message || error);
+      ids?.forEach((id) => pendingReadIdsRef.current.add(id));
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: receivedNoticesQueryKey, refetchType: 'inactive' });
+    },
+  });
+
+  const flushPendingReads = useCallback(() => {
+    if (readFlushTimerRef.current) {
+      clearTimeout(readFlushTimerRef.current);
+      readFlushTimerRef.current = null;
+    }
+
+    if (!schoolId || !userId || pendingReadIdsRef.current.size === 0) return;
+
+    const ids = Array.from(pendingReadIdsRef.current);
+    pendingReadIdsRef.current.clear();
+    syncNoticeReadsMutation.mutate(ids);
+  }, [schoolId, userId, syncNoticeReadsMutation]);
+
+  const queueReadSync = useCallback((ids) => {
+    if (!ids?.length) return;
+
+    ids.forEach((id) => pendingReadIdsRef.current.add(id));
+    if (readFlushTimerRef.current) clearTimeout(readFlushTimerRef.current);
+    readFlushTimerRef.current = setTimeout(() => {
+      flushPendingReads();
+    }, READ_SYNC_DEBOUNCE_MS);
+  }, [flushPendingReads]);
+
   useEffect(() => {
-    setPage(1);
-    setAllNotices([]);
-    setHasMore(true);
-  }, [selectedCategory, activeTab, schoolId, userId]);
-
-  // Fetch notices
-  const {
-    data: noticesData,
-    isFetching,
-    isLoading,
-    refetch,
-  } = useQuery({
-    queryKey: ['notices', schoolId, userId, selectedCategory, activeTab, page],
-    queryFn: async () => {
-      if (!schoolId || !userId) return { notices: [], hasMore: false };
-
-      if (activeTab === 'sent' && canBroadcast) {
-        const res = await api.get(`/schools/${schoolId}/broadcast?limit=50`);
-        const allBroadcasts = res.data.broadcasts || [];
-        const mine = allBroadcasts.filter(b => b.senderId === userId);
-        return {
-          notices: mine.map(b => ({ ...b, read: true, isSent: true })),
-          hasMore: false,
-        };
+    return () => {
+      if (readFlushTimerRef.current) {
+        clearTimeout(readFlushTimerRef.current);
+        readFlushTimerRef.current = null;
       }
+    };
+  }, []);
 
-      let queryParams = `userId=${userId}&limit=${PAGE_SIZE}&page=${page}`;
+  const {
+    data: receivedPagesData,
+    isFetching: isFetchingReceived,
+    isLoading: isLoadingReceived,
+    isRefetching: isRefetchingReceived,
+    refetch: refetchReceived,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: receivedNoticesQueryKey,
+    initialPageParam: 1,
+    queryFn: async ({ pageParam = 1 }) => {
+      if (!schoolId || !userId) return { notices: [], pagination: { totalPages: 0, currentPage: 1 } };
+
+      let queryParams = `userId=${userId}&limit=${PAGE_SIZE}&page=${pageParam}`;
 
       if (selectedCategory === 'Unread') {
         queryParams += '&unread=true';
@@ -175,38 +244,62 @@ const NoticeBoardScreen = () => {
       }
 
       const res = await api.get(`/notices/${schoolId}?${queryParams}`);
-      const data = res.data;
-      return {
-        notices: data.notices || [],
-        hasMore: data.pagination ? page < data.pagination.totalPages : false,
-      };
+      return res.data || { notices: [], pagination: { totalPages: 0, currentPage: pageParam } };
     },
-    enabled: isUserLoaded && !!schoolId && !!userId,
+    getNextPageParam: (lastPage) => {
+      const currentPage = lastPage?.pagination?.currentPage ?? 1;
+      const totalPages = lastPage?.pagination?.totalPages ?? 0;
+      return currentPage < totalPages ? currentPage + 1 : undefined;
+    },
+    enabled: isUserLoaded && !!schoolId && !!userId && activeTab === 'received',
     staleTime: 30 * 1000,
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: false,
   });
 
-  // Accumulate notices across pages
-  useEffect(() => {
-    if (noticesData) {
-      if (page === 1) {
-        setAllNotices(noticesData.notices);
-      } else {
-        setAllNotices(prev => [...prev, ...noticesData.notices]);
-      }
-      setHasMore(noticesData.hasMore);
-      setLoadingMore(false);
-    }
-  }, [noticesData, page]);
+  const {
+    data: sentNoticesData,
+    isFetching: isFetchingSent,
+    isLoading: isLoadingSent,
+    refetch: refetchSent,
+  } = useQuery({
+    queryKey: sentNoticesQueryKey,
+    queryFn: async () => {
+      if (!schoolId || !userId || !canBroadcast) return [];
 
-  const notices = allNotices;
+      const res = await api.get(`/schools/${schoolId}/broadcast?limit=50`);
+      const allBroadcasts = res.data.broadcasts || [];
+      return allBroadcasts
+        .filter((broadcast) => broadcast.senderId === userId)
+        .map((broadcast) => ({ ...broadcast, read: true, unread: false, isSent: true }));
+    },
+    enabled: isUserLoaded && !!schoolId && !!userId && activeTab === 'sent' && canBroadcast,
+    staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+
+  const receivedNotices = useMemo(() => {
+    const seen = new Set();
+    const merged = [];
+
+    (receivedPagesData?.pages || []).forEach((page) => {
+      (page?.notices || []).forEach((notice) => {
+        if (!notice?.id || seen.has(notice.id)) return;
+        seen.add(notice.id);
+        merged.push(notice);
+      });
+    });
+
+    return merged;
+  }, [receivedPagesData]);
+
+  const notices = activeTab === 'sent' ? (sentNoticesData || []) : receivedNotices;
 
   const loadMore = useCallback(() => {
-    if (!hasMore || loadingMore || isFetching) return;
-    setLoadingMore(true);
-    setPage(p => p + 1);
-  }, [hasMore, loadingMore, isFetching]);
+    if (activeTab !== 'received' || !hasNextPage || isFetchingNextPage) return;
+    fetchNextPage();
+  }, [activeTab, fetchNextPage, hasNextPage, isFetchingNextPage]);
 
   // Reset category when tab changes
   useEffect(() => {
@@ -216,11 +309,12 @@ const NoticeBoardScreen = () => {
   }, [activeTab]);
 
   const onRefresh = useCallback(() => {
-    setPage(1);
-    setAllNotices([]);
-    setHasMore(true);
-    refetch();
-  }, [refetch]);
+    if (activeTab === 'sent') {
+      refetchSent();
+      return;
+    }
+    refetchReceived();
+  }, [activeTab, refetchReceived, refetchSent]);
 
   // Modal state
   const [selectedNotice, setSelectedNotice] = useState(null);
@@ -228,13 +322,14 @@ const NoticeBoardScreen = () => {
   const [innerVisible, setInnerVisible] = useState(false);
 
   const openNoticeDetail = useCallback((notice) => {
+    if (!notice.read && userId && !notice.isSent) {
+      markNoticeReadOptimistically([notice.id]);
+      queueReadSync([notice.id]);
+    }
     setSelectedNotice(notice);
     setModalVisible(true);
     requestAnimationFrame(() => setInnerVisible(true));
-    if (!notice.read && userId && !notice.isSent) {
-      markRead.mutate({ noticeId: notice.id, userId, schoolId });
-    }
-  }, [userId, markRead, schoolId]);
+  }, [markNoticeReadOptimistically, queueReadSync, userId]);
 
   const closeModal = useCallback(() => {
     setInnerVisible(false);
@@ -302,8 +397,23 @@ const NoticeBoardScreen = () => {
 
   const keyExtractor = useCallback((item) => item.id, []);
 
+  const onViewableItemsChanged = useCallback(({ viewableItems }) => {
+    if (activeTab !== 'received') return;
+
+    const idsToMark = viewableItems
+      .map((entry) => entry.item)
+      .filter((item) => item?.id && !item.isSent && !item.read)
+      .map((item) => item.id);
+
+    if (!idsToMark.length) return;
+
+    markNoticeReadOptimistically(idsToMark);
+    queueReadSync(idsToMark);
+  }, [activeTab, markNoticeReadOptimistically, queueReadSync]);
+
   // Show loading only on initial load
-  const showInitialLoader = !isUserLoaded || (isLoading && notices.length === 0);
+  const isCurrentTabLoading = activeTab === 'sent' ? isLoadingSent : isLoadingReceived;
+  const showInitialLoader = !isUserLoaded || (isCurrentTabLoading && notices.length === 0);
 
   return (
     // ── SafeAreaView wraps everything so header clears the status bar ──────────
@@ -382,14 +492,14 @@ const NoticeBoardScreen = () => {
           ]}
           refreshControl={
             <RefreshControl
-              refreshing={isFetching && page === 1}
+              refreshing={activeTab === 'sent' ? isFetchingSent : isRefetchingReceived}
               onRefresh={onRefresh}
               tintColor="#0469ff"
             />
           }
           ListEmptyComponent={<EmptyState isSentTab={activeTab === 'sent'} />}
           ListFooterComponent={
-            loadingMore ? (
+            isFetchingNextPage ? (
               <View style={{ paddingVertical: 16, alignItems: 'center' }}>
                 <ActivityIndicator size="small" color="#0469ff" />
               </View>
@@ -397,6 +507,8 @@ const NoticeBoardScreen = () => {
           }
           onEndReached={loadMore}
           onEndReachedThreshold={0.3}
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={VIEWABILITY_CONFIG}
           removeClippedSubviews={true}
           maxToRenderPerBatch={10}
           windowSize={5}
@@ -487,7 +599,6 @@ const NoticeBoardScreen = () => {
                         </View>
                       </View>
                     </View>
-
                     {/* Content */}
                     <View style={styles.contentSection}>
                       <Text style={styles.contentTitle}>{selectedNotice.title}</Text>

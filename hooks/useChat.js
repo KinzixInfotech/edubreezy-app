@@ -9,6 +9,7 @@ import * as chatService from '../services/chatService';
 export const chatKeys = {
     all: ['chat'],
     conversations: (schoolId) => ['chat', 'conversations', schoolId],
+    conversationsFeed: (schoolId, params = {}) => ['chat', 'conversations', schoolId, 'feed', params],
     conversation: (schoolId, id) => ['chat', 'conversation', schoolId, id],
     messages: (schoolId, conversationId) => ['chat', 'messages', schoolId, conversationId],
     eligibleUsers: (schoolId) => ['chat', 'eligible-users', schoolId],
@@ -17,10 +18,16 @@ export const chatKeys = {
 // ── Conversations ──
 
 export const useConversations = (schoolId, params = {}) => {
-    const { userId, ...restParams } = params;
-    return useQuery({
-        queryKey: [...chatKeys.conversations(schoolId), restParams],
-        queryFn: () => chatService.getConversations(schoolId, { ...restParams, userId }),
+    const { userId, limit = 20, ...restParams } = params;
+    return useInfiniteQuery({
+        queryKey: chatKeys.conversationsFeed(schoolId, { userId, limit, ...restParams }),
+        queryFn: ({ pageParam = 1 }) => chatService.getConversations(schoolId, { ...restParams, userId, limit, page: pageParam }),
+        initialPageParam: 1,
+        getNextPageParam: (lastPage) => {
+            const page = lastPage?.pagination?.page ?? 1;
+            const totalPages = lastPage?.pagination?.totalPages ?? 0;
+            return page < totalPages ? page + 1 : undefined;
+        },
         enabled: !!schoolId && !!userId,
         staleTime: 0, // Always fetch latest when returning to chat list
     });
@@ -88,6 +95,29 @@ const sortConversationsByLastMessage = (conversations = []) => {
     });
 };
 
+const mapConversationCache = (old, updater) => {
+    if (!old) return old;
+
+    if (Array.isArray(old?.pages)) {
+        return {
+            ...old,
+            pages: old.pages.map((page) => ({
+                ...page,
+                conversations: updater(page.conversations || []),
+            })),
+        };
+    }
+
+    if (Array.isArray(old?.conversations)) {
+        return {
+            ...old,
+            conversations: updater(old.conversations),
+        };
+    }
+
+    return old;
+};
+
 const getConversationPreviewText = (message) => {
     if (message?.content?.trim()) return message.content.trim();
     if (message?.attachments?.length) {
@@ -101,12 +131,9 @@ const updateConversationPreviewCaches = (qc, schoolId, conversationId, message) 
     const lastMessageText = getConversationPreviewText(message);
 
     qc.setQueriesData({ queryKey: chatKeys.conversations(schoolId) }, (old) => {
-        if (!old?.conversations) return old;
-
-        return {
-            ...old,
-            conversations: sortConversationsByLastMessage(
-                old.conversations.map((conversation) =>
+        return mapConversationCache(old, (conversations) =>
+            sortConversationsByLastMessage(
+                conversations.map((conversation) =>
                     conversation.id === conversationId
                         ? {
                             ...conversation,
@@ -115,8 +142,8 @@ const updateConversationPreviewCaches = (qc, schoolId, conversationId, message) 
                         }
                         : conversation
                 )
-            ),
-        };
+            )
+        );
     });
 };
 
@@ -327,26 +354,26 @@ export const useMarkAsRead = () => {
             await qc.cancelQueries({ queryKey: chatKeys.conversations(schoolId) });
 
             // Snapshot previous value for rollback
-            const previous = qc.getQueryData(chatKeys.conversations(schoolId));
+            const previousQueries = qc.getQueriesData({ queryKey: chatKeys.conversations(schoolId) });
 
             // Optimistically set unreadCount to 0 for this conversation
-            qc.setQueryData(chatKeys.conversations(schoolId), (old) => {
-                if (!old?.conversations) return old;
-                return {
-                    ...old,
-                    conversations: old.conversations.map((c) =>
+            qc.setQueriesData({ queryKey: chatKeys.conversations(schoolId) }, (old) => {
+                return mapConversationCache(old, (conversations) =>
+                    conversations.map((c) =>
                         c.id === conversationId ? { ...c, unreadCount: 0 } : c
-                    ),
-                };
+                    )
+                );
             });
 
-            return { previous, schoolId };
+            return { previousQueries, schoolId };
         },
 
         // Rollback on error
         onError: (_err, _vars, context) => {
-            if (context?.previous) {
-                qc.setQueryData(chatKeys.conversations(context.schoolId), context.previous);
+            if (context?.previousQueries?.length) {
+                context.previousQueries.forEach(([key, data]) => {
+                    qc.setQueryData(key, data);
+                });
             }
         },
 

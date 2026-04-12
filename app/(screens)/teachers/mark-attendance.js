@@ -38,6 +38,35 @@ const getISTDateString = (dateInput = new Date()) => {
   return istDate.toISOString().split('T')[0]; // "2025-11-12"
 };
 
+const buildAttendanceLookup = (records = []) => {
+  return records.reduce((acc, record) => {
+    if (!record?.userId || !record?.status) return acc;
+    acc[record.userId] = record.status;
+    return acc;
+  }, {});
+};
+
+const updateBulkAttendanceCache = (old, attendanceByUserId, markedBy) => {
+  if (!old?.students) return old;
+
+  return {
+    ...old,
+    students: old.students.map((student) => {
+      const nextStatus = attendanceByUserId[student.userId];
+      if (!nextStatus) return student;
+
+      return {
+        ...student,
+        attendance: {
+          ...(student.attendance || {}),
+          status: nextStatus,
+          markedBy: markedBy || student.attendance?.markedBy || null,
+        },
+      };
+    }),
+  };
+};
+
 export default function BulkAttendanceMarking() {
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
@@ -167,6 +196,7 @@ export default function BulkAttendanceMarking() {
 
   const students = studentsData?.students || [];
   const existingBulk = studentsData?.existingBulk;
+  const studentsQueryKey = ['bulk-attendance-students', schoolId, classId, sectionId, selectedDate];
 
   // Initialize attendance from existing data
   useEffect(() => {
@@ -188,10 +218,29 @@ export default function BulkAttendanceMarking() {
       const res = await api.post(`/schools/${schoolId}/attendance/bulk`, data);
       return res.data;
     },
+    onMutate: async (variables) => {
+      await queryClient.cancelQueries({ queryKey: studentsQueryKey });
+
+      const previousStudentsData = queryClient.getQueryData(studentsQueryKey);
+      const attendanceByUserId = buildAttendanceLookup(variables.attendance);
+
+      queryClient.setQueryData(
+        studentsQueryKey,
+        (old) => updateBulkAttendanceCache(old, attendanceByUserId, variables.markedBy)
+      );
+
+      return {
+        previousStudentsData,
+        variables,
+        attendanceByUserId,
+      };
+    },
     onSuccess: (data, variables) => {
       // Check if any records were skipped because they already exist
       const skippedRecords = data.results?.skipped || [];
       const alreadyMarked = skippedRecords.filter(r => r.reason === 'Already marked');
+      const failedRecords = data.results?.failed || [];
+      const failedUserIds = new Set(failedRecords.map((record) => record.userId).filter(Boolean));
 
       if (alreadyMarked.length > 0 && !variables.attendance[0]?.forceUpdate) {
         // We have skipped records and this wasn't a forced update
@@ -204,9 +253,21 @@ export default function BulkAttendanceMarking() {
               style: 'cancel',
               onPress: () => {
                 // Just clear incomplete state and show success for the ones that worked
-                queryClient.invalidateQueries(['bulk-attendance-students']);
-                setHasChanges(false);
-                Alert.alert('Done', `Marked attendance for ${data.results.success.length} new student(s). Skipped ${alreadyMarked.length} existing records.`);
+                queryClient.invalidateQueries({ queryKey: studentsQueryKey });
+
+                setAttendance((prev) => {
+                  const nextAttendance = { ...prev };
+                  failedUserIds.forEach((userId) => {
+                    delete nextAttendance[userId];
+                  });
+                  return nextAttendance;
+                });
+                setHasChanges(failedRecords.length > 0);
+
+                Alert.alert(
+                  'Done',
+                  `Marked attendance for ${data.results.success.length} new student(s). Skipped ${alreadyMarked.length} existing records.${failedRecords.length ? ` Failed for ${failedRecords.length} student(s).` : ''}`
+                );
               }
             },
             {
@@ -228,7 +289,30 @@ export default function BulkAttendanceMarking() {
         );
       } else {
         // Standard success path
-        queryClient.invalidateQueries(['bulk-attendance-students']);
+        queryClient.invalidateQueries({ queryKey: studentsQueryKey });
+
+        if (failedRecords.length > 0) {
+          setAttendance((prev) => {
+            const nextAttendance = { ...prev };
+            failedUserIds.forEach((userId) => {
+              delete nextAttendance[userId];
+            });
+            return nextAttendance;
+          });
+          setHasChanges(true);
+
+          const failedNames = failedRecords
+            .map((record) => record.studentName || record.userId)
+            .filter(Boolean)
+            .slice(0, 5);
+
+          Alert.alert(
+            'Partial Update',
+            `Saved ${data.results?.success?.length || 0} student(s). Failed for ${failedRecords.length} student(s)${failedNames.length ? `: ${failedNames.join(', ')}` : ''}.`
+          );
+          return;
+        }
+
         setHasChanges(false);
         const successCount = data.results?.success?.length || 0;
         const msg = successCount > 0
@@ -237,7 +321,11 @@ export default function BulkAttendanceMarking() {
         Alert.alert('Success! 🎉', msg);
       }
     },
-    onError: (error) => {
+    onError: (error, _variables, context) => {
+      if (context?.previousStudentsData) {
+        queryClient.setQueryData(studentsQueryKey, context.previousStudentsData);
+      }
+
       // ✅ ENHANCED ERROR HANDLING
       const errorData = error.response?.data;
 
@@ -351,10 +439,10 @@ export default function BulkAttendanceMarking() {
     setRefreshing(true);
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['teacher-profile'] }),
-      queryClient.invalidateQueries({ queryKey: ['bulk-attendance-students'] }),
+      queryClient.invalidateQueries({ queryKey: studentsQueryKey }),
     ]);
     setRefreshing(false);
-  }, [queryClient]);
+  }, [queryClient, studentsQueryKey]);
 
   if (!schoolId || !userId) {
     return (

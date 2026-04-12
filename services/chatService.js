@@ -36,6 +36,8 @@ export function primeUserCache(users) {
 
 export const getConversations = async (schoolId, params = {}) => {
     const userId = params.userId;
+    const page = Math.max(1, Number(params.page) || 1);
+    const limit = Math.max(1, Number(params.limit) || 20);
     if (!userId) throw new Error('userId is required for getConversations');
 
     // Step 1: Get my active participant records
@@ -51,7 +53,7 @@ export const getConversations = async (schoolId, params = {}) => {
     }
 
     if (!participantRows?.length) {
-        return { success: true, conversations: [], pagination: { page: 1, limit: 50, total: 0 } };
+        return { success: true, conversations: [], pagination: { page, limit, total: 0, totalPages: 0 } };
     }
 
     const conversationIds = participantRows.map(r => r.conversationId);
@@ -70,11 +72,30 @@ export const getConversations = async (schoolId, params = {}) => {
     // Filter by schoolId
     const schoolConversations = (conversations || []).filter(c => c.schoolId === schoolId);
     if (!schoolConversations.length) {
-        return { success: true, conversations: [], pagination: { page: 1, limit: 50, total: 0 } };
+        return { success: true, conversations: [], pagination: { page, limit, total: 0, totalPages: 0 } };
     }
 
-    const schoolConvIds = schoolConversations.map(c => c.id);
-    const convMap = Object.fromEntries(schoolConversations.map(c => [c.id, c]));
+    const sortedConversations = [...schoolConversations].sort((a, b) => {
+        if (!a.lastMessageAt && !b.lastMessageAt) return 0;
+        if (!a.lastMessageAt) return 1;
+        if (!b.lastMessageAt) return -1;
+        return new Date(b.lastMessageAt) - new Date(a.lastMessageAt);
+    });
+
+    const total = sortedConversations.length;
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    const pageConversations = sortedConversations.slice((page - 1) * limit, page * limit);
+
+    if (!pageConversations.length) {
+        return {
+            success: true,
+            conversations: [],
+            pagination: { page, limit, total, totalPages },
+        };
+    }
+
+    const schoolConvIds = pageConversations.map(c => c.id);
+    const convMap = Object.fromEntries(pageConversations.map(c => [c.id, c]));
 
     // Step 3: Get all participants for display names & avatars
     const { data: allParticipants } = await supabase
@@ -220,18 +241,10 @@ export const getConversations = async (schoolId, params = {}) => {
         };
     });
 
-    // Sort by lastMessageAt descending
-    formatted.sort((a, b) => {
-        if (!a.lastMessageAt && !b.lastMessageAt) return 0;
-        if (!a.lastMessageAt) return 1;
-        if (!b.lastMessageAt) return -1;
-        return new Date(b.lastMessageAt) - new Date(a.lastMessageAt);
-    });
-
     return {
         success: true,
         conversations: formatted,
-        pagination: { page: 1, limit: params.limit || 50, total: formatted.length },
+        pagination: { page, limit, total, totalPages },
     };
 };
 
@@ -407,6 +420,14 @@ export const deleteMessage = async (schoolId, messageId) => {
 export const markAsRead = async (schoolId, conversationId, body = {}) => {
     const { data } = await api.put(
         `/schools/${schoolId}/chat/conversations/${conversationId}/read`,
+        body
+    );
+    return data;
+};
+
+export const markConversationsReadBulk = async (schoolId, body = {}) => {
+    const { data } = await api.put(
+        `/schools/${schoolId}/chat/conversations/read-bulk`,
         body
     );
     return data;

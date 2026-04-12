@@ -14,19 +14,29 @@ import {
     Platform,
     ActivityIndicator,
     Animated as RNAnimated,
+    Dimensions,
 } from 'react-native';
 import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { MessageCircle, Plus, BellOff, Search, Users, Trash2 } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Swipeable } from 'react-native-gesture-handler';
-import { useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import HapticTouchable from '../components/HapticTouch';
 import { useConversations, chatKeys } from '../../hooks/useChat';
 import { useChatFeedRealtime } from '../../hooks/useChatRealtime';
 import { usePresenceStatus } from '../../hooks/usePresenceStatus';
 import { useShimmer, Bone } from '../components/ScreenSkeleton';
-import { deleteConversation } from '../../services/chatService';
+import { deleteConversation, markConversationsReadBulk } from '../../services/chatService';
+
+const CHAT_ROW_HEIGHT = 80;
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const PAGE_SIZE =  Math.max(12, Math.ceil(SCREEN_HEIGHT / CHAT_ROW_HEIGHT) + 2);
+const VIEWABILITY_CONFIG = {
+    itemVisiblePercentThreshold: 60,
+    minimumViewTime: 120,
+};
+const READ_SYNC_DEBOUNCE_MS = 350;
 
 // ── Skeleton ──
 function ChatListSkeleton() {
@@ -181,6 +191,8 @@ export default function ChatScreen() {
     const [userRole, setUserRole] = useState(null);
     const [isUserLoaded, setIsUserLoaded] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    const pendingReadIdsRef = useRef(new Set());
+    const readFlushTimerRef = useRef(null);
 
     useEffect(() => {
         SecureStore.getItemAsync('user')
@@ -198,14 +210,109 @@ export default function ChatScreen() {
             .finally(() => setIsUserLoaded(true));
     }, []);
 
-    const { data, isLoading, isRefetching, refetch } = useConversations(schoolId, { userId });
-    useChatFeedRealtime(schoolId, userId, data?.conversations || []);
-    
-    const { isUserOnline } = usePresenceStatus(schoolId, { id: userId });
+    const { data, isLoading, isRefetching, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } = useConversations(schoolId, { userId, limit: PAGE_SIZE });
     const qc = useQueryClient();
 
+    const mergedConversations = useMemo(() => {
+        const seen = new Set();
+        const merged = [];
+
+        (data?.pages || []).forEach((page) => {
+            (page?.conversations || []).forEach((conversation) => {
+                if (!conversation?.id || seen.has(conversation.id)) return;
+                seen.add(conversation.id);
+                merged.push(conversation);
+            });
+        });
+
+        return merged;
+    }, [data]);
+
+    useChatFeedRealtime(schoolId, userId, mergedConversations);
+    
+    const { isUserOnline } = usePresenceStatus(schoolId, { id: userId });
+
+    const markConversationsReadOptimistically = useCallback((conversationIds) => {
+        if (!conversationIds?.length) return;
+
+        const idSet = new Set(conversationIds);
+        qc.setQueriesData({ queryKey: chatKeys.conversations(schoolId) }, (old) => {
+            if (!old) return old;
+
+            if (Array.isArray(old?.pages)) {
+                return {
+                    ...old,
+                    pages: old.pages.map((page) => ({
+                        ...page,
+                        conversations: (page.conversations || []).map((conversation) => (
+                            idSet.has(conversation.id)
+                                ? { ...conversation, unreadCount: 0 }
+                                : conversation
+                        )),
+                    })),
+                };
+            }
+
+            if (Array.isArray(old?.conversations)) {
+                return {
+                    ...old,
+                    conversations: old.conversations.map((conversation) => (
+                        idSet.has(conversation.id)
+                            ? { ...conversation, unreadCount: 0 }
+                            : conversation
+                    )),
+                };
+            }
+
+            return old;
+        });
+    }, [qc, schoolId]);
+
+    const bulkReadMutation = useMutation({
+        mutationFn: (conversationIds) => markConversationsReadBulk(schoolId, { conversationIds }),
+        onError: (error, conversationIds) => {
+            console.error('Failed to sync chat read state:', error?.response?.data || error?.message || error);
+            conversationIds?.forEach((id) => pendingReadIdsRef.current.add(id));
+        },
+        onSettled: () => {
+            qc.invalidateQueries({ queryKey: chatKeys.conversations(schoolId), refetchType: 'inactive' });
+        },
+    });
+
+    const flushPendingReads = useCallback(() => {
+        if (readFlushTimerRef.current) {
+            clearTimeout(readFlushTimerRef.current);
+            readFlushTimerRef.current = null;
+        }
+
+        if (!schoolId || pendingReadIdsRef.current.size === 0) return;
+
+        const conversationIds = Array.from(pendingReadIdsRef.current);
+        pendingReadIdsRef.current.clear();
+        bulkReadMutation.mutate(conversationIds);
+    }, [bulkReadMutation, schoolId]);
+
+    const queueReadSync = useCallback((conversationIds) => {
+        if (!conversationIds?.length) return;
+
+        conversationIds.forEach((id) => pendingReadIdsRef.current.add(id));
+        if (readFlushTimerRef.current) clearTimeout(readFlushTimerRef.current);
+        readFlushTimerRef.current = setTimeout(() => {
+            flushPendingReads();
+        }, READ_SYNC_DEBOUNCE_MS);
+    }, [flushPendingReads]);
+
+    useEffect(() => {
+        return () => {
+            if (readFlushTimerRef.current) {
+                clearTimeout(readFlushTimerRef.current);
+                readFlushTimerRef.current = null;
+            }
+        };
+    }, []);
+
     const conversations = useMemo(() => {
-        const list = data?.conversations || [];
+        const list = mergedConversations;
         if (!searchQuery.trim()) return list;
         const q = searchQuery.toLowerCase();
         return list.filter(
@@ -213,13 +320,23 @@ export default function ChatScreen() {
                 c.title?.toLowerCase().includes(q) ||
                 c.lastMessageText?.toLowerCase().includes(q)
         );
-    }, [data, searchQuery]);
+    }, [mergedConversations, searchQuery]);
 
     // ── Delete conversation (swipe) ──
     const handleDeleteConversation = useCallback(async (convId) => {
         if (!schoolId) return;
         // Optimistic removal from cache
         qc.setQueriesData({ queryKey: chatKeys.conversations(schoolId) }, (old) => {
+            if (!old) return old;
+            if (Array.isArray(old?.pages)) {
+                return {
+                    ...old,
+                    pages: old.pages.map((page) => ({
+                        ...page,
+                        conversations: (page.conversations || []).filter((c) => c.id !== convId),
+                    })),
+                };
+            }
             if (!old?.conversations) return old;
             return {
                 ...old,
@@ -236,6 +353,11 @@ export default function ChatScreen() {
 
     // ── Navigate to conversation — includes profilePicture for the header avatar ──
     const handleConversationPress = useCallback((conv) => {
+        if ((conv.unreadCount || 0) > 0) {
+            markConversationsReadOptimistically([conv.id]);
+            queueReadSync([conv.id]);
+        }
+
         const isGroup =
             conv.type === 'TEACHER_CLASS' ||
             conv.type === 'COMMUNITY' ||
@@ -262,7 +384,7 @@ export default function ChatScreen() {
                 lastSeenAt: otherParticipant?.lastSeenAt || undefined,
             },
         });
-    }, [schoolId]);
+    }, [markConversationsReadOptimistically, queueReadSync, schoolId]);
 
     const handleNewConversation = useCallback(() => {
         router.push({ pathname: '/(screens)/chat/new', params: { schoolId } });
@@ -310,6 +432,23 @@ export default function ChatScreen() {
 
     const keyExtractor = useCallback((item) => item.id, []);
 
+    const onViewableItemsChanged = useCallback(({ viewableItems }) => {
+        const conversationIds = viewableItems
+            .map((entry) => entry.item)
+            .filter((item) => item?.id && (item.unreadCount || 0) > 0)
+            .map((item) => item.id);
+
+        if (!conversationIds.length) return;
+
+        markConversationsReadOptimistically(conversationIds);
+        queueReadSync(conversationIds);
+    }, [markConversationsReadOptimistically, queueReadSync]);
+
+    const handleEndReached = useCallback(() => {
+        if (!hasNextPage || isFetchingNextPage || searchQuery.trim()) return;
+        fetchNextPage();
+    }, [fetchNextPage, hasNextPage, isFetchingNextPage, searchQuery]);
+
     if (!isUserLoaded) return null;
 
     return (
@@ -325,7 +464,6 @@ export default function ChatScreen() {
                     <Plus size={22} color="#0469ff" strokeWidth={2.5} />
                 </HapticTouchable>
             </View>
-
             {/* Search */}
             <View style={styles.searchSection}>
                 <View style={styles.searchContainer}>
@@ -340,7 +478,6 @@ export default function ChatScreen() {
                     />
                 </View>
             </View>
-
             {/* List */}
             {isLoading ? (
                 <ChatListSkeleton />
@@ -360,6 +497,17 @@ export default function ChatScreen() {
                             tintColor="#0469ff"
                             colors={['#0469ff']}
                         />
+                    }
+                    onViewableItemsChanged={onViewableItemsChanged}
+                    viewabilityConfig={VIEWABILITY_CONFIG}
+                    onEndReached={handleEndReached}
+                    onEndReachedThreshold={0.35}
+                    ListFooterComponent={
+                        isFetchingNextPage ? (
+                            <View style={styles.footerLoader}>
+                                <ActivityIndicator size="small" color="#0469ff" />
+                            </View>
+                        ) : null
                     }
                 />
             )}
@@ -409,6 +557,7 @@ const styles = StyleSheet.create({
 
     // List
     listContent: { paddingBottom: Platform.OS === 'ios' ? 100 : 80 },
+    footerLoader: { paddingVertical: 16, alignItems: 'center' },
 
     // Conversation row
     conversationItem: {

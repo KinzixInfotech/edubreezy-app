@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
     View,
     Text,
@@ -13,8 +13,8 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
-import { ArrowLeft, CheckCheck, X, Bell, BellOff, Calendar, AlertCircle, Megaphone, CreditCard, GraduationCap } from 'lucide-react-native';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, CheckCheck, X, Bell, BellOff, AlertCircle, Megaphone, CreditCard, GraduationCap } from 'lucide-react-native';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as SecureStore from 'expo-secure-store';
 import api from '../../lib/api';
 import Animated, { FadeIn, FadeOut, SlideInDown, SlideOutDown, Easing } from 'react-native-reanimated';
@@ -22,8 +22,16 @@ import { format, formatDistanceToNow } from 'date-fns';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { Image } from 'expo-image';
+import { homeQueryKeys } from '../../features/home-modules/queryKeys';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const ESTIMATED_ROW_HEIGHT = 72;
+const PAGE_SIZE = Math.max(12, Math.ceil(SCREEN_HEIGHT / ESTIMATED_ROW_HEIGHT) + 2);
+const VIEWABILITY_CONFIG = {
+    itemVisiblePercentThreshold: 60,
+    minimumViewTime: 120,
+};
+const READ_SYNC_DEBOUNCE_MS = 350;
 
 const getNotificationImageUrl = (item) => {
     if (!item) return null;
@@ -71,6 +79,63 @@ const formatTimeAgo = (date) => {
     } catch {
         return '';
     }
+};
+
+const EMPTY_NOTIFICATION_GROUPS = { today: [], yesterday: [], earlier: [] };
+
+const flattenNotificationGroups = (notifications = EMPTY_NOTIFICATION_GROUPS) => {
+    return ['today', 'yesterday', 'earlier'].flatMap((section) =>
+        (notifications?.[section] || []).map((notification) => ({
+            ...notification,
+            __section: section,
+        }))
+    );
+};
+
+const mergeUniqueNotifications = (pages = []) => {
+    const seen = new Set();
+    const merged = [];
+
+    pages.forEach((page) => {
+        page.forEach((notification) => {
+            if (!notification?.id || seen.has(notification.id)) return;
+            seen.add(notification.id);
+            merged.push(notification);
+        });
+    });
+
+    return merged;
+};
+
+const groupNotifications = (notifications = []) => {
+    return notifications.reduce((groups, notification) => {
+        const section = notification.__section || 'earlier';
+        if (!groups[section]) groups[section] = [];
+        groups[section].push(notification);
+        return groups;
+    }, { today: [], yesterday: [], earlier: [] });
+};
+
+const updatePagedNotifications = (oldData, updater) => {
+    if (!oldData?.pages?.length) return oldData;
+
+    return {
+        ...oldData,
+        pages: oldData.pages.map((page) => page.map((notification) => updater(notification))),
+    };
+};
+
+const updateSummaryNotifications = (oldData, updater) => {
+    if (!oldData?.notifications) return oldData;
+
+    return {
+        ...oldData,
+        notifications: {
+            today: (oldData.notifications.today || []).map(updater),
+            yesterday: (oldData.notifications.yesterday || []).map(updater),
+            earlier: (oldData.notifications.earlier || []).map(updater),
+        },
+    };
 };
 
 const NotificationItem = ({ item, onPress, isLast }) => {
@@ -131,7 +196,8 @@ export default function NotificationScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [currentUser, setCurrentUser] = useState(null);
     const queryClient = useQueryClient();
-    const autoMarkKeyRef = React.useRef(null);
+    const pendingReadIdsRef = useRef(new Set());
+    const readFlushTimerRef = useRef(null);
 
     const syncStoredUser = useCallback(async () => {
         try {
@@ -163,107 +229,114 @@ export default function NotificationScreen() {
 
     const userId = currentUser?.id;
     const schoolId = currentUser?.schoolId || currentUser?.school?.id;
-    const notificationsQueryKey = ['notifications', userId, schoolId];
+    const notificationsQueryKey = homeQueryKeys.notificationsFeed(userId, schoolId);
+    const notificationsSummaryQueryKey = homeQueryKeys.notificationsSummary(userId, schoolId);
 
     const setNotificationsCache = useCallback((updater) => {
         queryClient.setQueryData(notificationsQueryKey, updater);
     }, [queryClient, notificationsQueryKey]);
 
-    // Fetch Notifications - optimized with caching
-    const { data, isLoading, refetch } = useQuery({
+    const markNotificationsReadOptimistically = useCallback((ids) => {
+        if (!ids?.length) return;
+
+        const idSet = new Set(ids);
+        setNotificationsCache((old) =>
+            updatePagedNotifications(old, (notification) => (
+                idSet.has(notification.id) ? { ...notification, isRead: true } : notification
+            ))
+        );
+        queryClient.setQueryData(notificationsSummaryQueryKey, (old) =>
+            updateSummaryNotifications(old, (notification) => (
+                idSet.has(notification.id) ? { ...notification, isRead: true } : notification
+            ))
+        );
+    }, [notificationsSummaryQueryKey, queryClient, setNotificationsCache]);
+
+    const flushPendingReads = useCallback(() => {
+        if (readFlushTimerRef.current) {
+            clearTimeout(readFlushTimerRef.current);
+            readFlushTimerRef.current = null;
+        }
+
+        if (!userId || pendingReadIdsRef.current.size === 0) return;
+
+        const ids = Array.from(pendingReadIdsRef.current);
+        pendingReadIdsRef.current.clear();
+        markReadMutation.mutate(ids);
+    }, [userId]);
+
+    const queueReadSync = useCallback((ids) => {
+        if (!ids?.length) return;
+
+        ids.forEach((id) => pendingReadIdsRef.current.add(id));
+        if (readFlushTimerRef.current) clearTimeout(readFlushTimerRef.current);
+        readFlushTimerRef.current = setTimeout(() => {
+            flushPendingReads();
+        }, READ_SYNC_DEBOUNCE_MS);
+    }, [flushPendingReads]);
+
+    useEffect(() => {
+        return () => {
+            if (readFlushTimerRef.current) {
+                clearTimeout(readFlushTimerRef.current);
+                readFlushTimerRef.current = null;
+            }
+        };
+    }, []);
+
+    // Fetch notifications one screenful at a time.
+    const {
+        data,
+        isLoading,
+        refetch,
+        fetchNextPage,
+        hasNextPage,
+        isFetchingNextPage,
+        isRefetching,
+    } = useInfiniteQuery({
         queryKey: notificationsQueryKey,
-        queryFn: async () => {
-            if (!userId) return { notifications: { today: [], yesterday: [], earlier: [] }, unreadCount: 0 };
-            const res = await api.get(`/notifications?userId=${userId}&schoolId=${schoolId}&limit=50`);
-            return res.data;
+        queryFn: async ({ pageParam = 0 }) => {
+            if (!userId || !schoolId) return [];
+            const res = await api.get(
+                `/notifications?userId=${userId}&schoolId=${schoolId}&limit=${PAGE_SIZE}&offset=${pageParam}`
+            );
+            return flattenNotificationGroups(res.data?.notifications);
         },
         enabled: !!userId && !!schoolId,
+        initialPageParam: 0,
+        getNextPageParam: (lastPage, allPages) => {
+            if (!lastPage?.length || lastPage.length < PAGE_SIZE) return undefined;
+            const loadedCount = allPages.reduce((total, page) => total + page.length, 0);
+            return loadedCount;
+        },
         staleTime: 1000 * 60 * 2, // 2 min stale time - prevents refetch on remount
         gcTime: 1000 * 60 * 30, // 30 min garbage collection
         refetchOnMount: false, // Don't refetch on every mount
         refetchOnWindowFocus: false, // Don't refetch on app focus
     });
 
-    // Mutations
     const markReadMutation = useMutation({
         mutationFn: (ids) => api.put('/notifications', { notificationIds: ids, userId }),
-        onMutate: async (ids) => {
-            // Cancel any outgoing refetches (so they don't overwrite our optimistic update)
-            await queryClient.cancelQueries({ queryKey: notificationsQueryKey });
-
-            // Snapshot the previous value
-            const previousData = queryClient.getQueryData(notificationsQueryKey);
-
-            // Optimistically update to the new value
-            setNotificationsCache((old) => {
-                if (!old) return old;
-
-                const updateSection = (section) =>
-                    section.map((n) => (ids.includes(n.id) ? { ...n, isRead: true } : n));
-
-                const nextNotifications = {
-                    today: updateSection(old.notifications.today),
-                    yesterday: updateSection(old.notifications.yesterday),
-                    earlier: updateSection(old.notifications.earlier),
-                };
-                const unreadCount = [
-                    ...nextNotifications.today,
-                    ...nextNotifications.yesterday,
-                    ...nextNotifications.earlier,
-                ].filter((n) => !n.isRead).length;
-
-                return {
-                    ...old,
-                    unreadCount,
-                    notifications: nextNotifications,
-                };
-            });
-
-            // Return a context object with the snapshotted value
-            return { previousData };
-        },
-        onError: (err, ids, context) => {
-            // If the mutation fails, use the context returned from onMutate to roll back
-            if (context?.previousData) {
-                queryClient.setQueryData(notificationsQueryKey, context.previousData);
+        onError: (error, ids) => {
+            console.error('Failed to sync notification read state:', error?.response?.data || error?.message || error);
+            if (ids?.length) {
+                ids.forEach((id) => pendingReadIdsRef.current.add(id));
             }
         },
         onSettled: () => {
             queryClient.invalidateQueries({ queryKey: notificationsQueryKey, refetchType: 'inactive' });
+            queryClient.invalidateQueries({ queryKey: notificationsSummaryQueryKey, refetchType: 'inactive' });
         }
     });
 
     const markAllReadMutation = useMutation({
-        mutationFn: () => api.put('/notifications', { markAllAsRead: true, userId }),
-        onMutate: async () => {
-            await queryClient.cancelQueries({ queryKey: notificationsQueryKey });
-            const previousData = queryClient.getQueryData(notificationsQueryKey);
-
-            setNotificationsCache((old) => {
-                if (!old) return old;
-
-                const markRead = (section) => section.map((n) => ({ ...n, isRead: true }));
-
-                return {
-                    ...old,
-                    unreadCount: 0,
-                    notifications: {
-                        today: markRead(old.notifications.today),
-                        yesterday: markRead(old.notifications.yesterday),
-                        earlier: markRead(old.notifications.earlier),
-                    },
-                };
-            });
-
-            return { previousData };
-        },
-        onError: (err, variables, context) => {
-            if (context?.previousData) {
-                queryClient.setQueryData(notificationsQueryKey, context.previousData);
-            }
+        mutationFn: (ids) => api.put('/notifications', { notificationIds: ids, userId }),
+        onError: (error) => {
+            console.error('Failed to mark all loaded notifications as read:', error?.response?.data || error?.message || error);
         },
         onSettled: () => {
             queryClient.invalidateQueries({ queryKey: notificationsQueryKey, refetchType: 'inactive' });
+            queryClient.invalidateQueries({ queryKey: notificationsSummaryQueryKey, refetchType: 'inactive' });
         }
     });
 
@@ -272,7 +345,8 @@ export default function NotificationScreen() {
 
     const handlePress = (item) => {
         if (!item.isRead) {
-            markReadMutation.mutate([item.id]);
+            markNotificationsReadOptimistically([item.id]);
+            queueReadSync([item.id]);
         }
         setSelectedNotification(item);
         setModalVisible(true);
@@ -301,28 +375,53 @@ export default function NotificationScreen() {
         return notifications.filter(n => n.sender?.id !== userId);
     };
 
-    const todayFiltered = filterSentByMe(data?.notifications?.today);
-    const yesterdayFiltered = filterSentByMe(data?.notifications?.yesterday);
-    const earlierFiltered = filterSentByMe(data?.notifications?.earlier);
+    const groupedNotifications = useMemo(() => {
+        const mergedNotifications = mergeUniqueNotifications(data?.pages || []);
+        return groupNotifications(mergedNotifications);
+    }, [data]);
 
-    const filteredUnreadCount = [
+    const todayFiltered = filterSentByMe(groupedNotifications.today);
+    const yesterdayFiltered = filterSentByMe(groupedNotifications.yesterday);
+    const earlierFiltered = filterSentByMe(groupedNotifications.earlier);
+
+    const visibleNotifications = useMemo(() => [
         ...todayFiltered,
         ...yesterdayFiltered,
-        ...earlierFiltered
-    ].filter(n => !n.isRead).length;
+        ...earlierFiltered,
+    ], [todayFiltered, yesterdayFiltered, earlierFiltered]);
+
+    const filteredUnreadIds = useMemo(() => (
+        visibleNotifications.filter((notification) => !notification.isRead).map((notification) => notification.id)
+    ), [visibleNotifications]);
+
+    const filteredUnreadCount = filteredUnreadIds.length;
 
     const selectedNotificationImage = getNotificationImageUrl(selectedNotification);
 
-    // Auto-mark visible notifications as read when screen opens for the active profile.
-    useEffect(() => {
-        if (!userId || !schoolId || filteredUnreadCount <= 0 || markAllReadMutation.isPending) return;
+    const onViewableItemsChanged = useCallback(({ viewableItems }) => {
+        const idsToMark = viewableItems
+            .map((entry) => entry.item)
+            .filter((item) => item?.id && !item.type && !item.isRead)
+            .map((item) => item.id);
 
-        const currentKey = `${userId}:${schoolId}:${filteredUnreadCount}`;
-        if (autoMarkKeyRef.current === currentKey) return;
+        if (!idsToMark.length) return;
 
-        autoMarkKeyRef.current = currentKey;
-        markAllReadMutation.mutate();
-    }, [userId, schoolId, filteredUnreadCount, markAllReadMutation.isPending]);
+        markNotificationsReadOptimistically(idsToMark);
+        queueReadSync(idsToMark);
+    }, [markNotificationsReadOptimistically, queueReadSync]);
+
+    const handleEndReached = useCallback(() => {
+        if (!hasNextPage || isFetchingNextPage) return;
+        fetchNextPage();
+    }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
+
+    const handleMarkAllRead = useCallback(() => {
+        if (!filteredUnreadIds.length || markAllReadMutation.isPending) return;
+
+        flushPendingReads();
+        markNotificationsReadOptimistically(filteredUnreadIds);
+        markAllReadMutation.mutate(filteredUnreadIds);
+    }, [filteredUnreadIds, flushPendingReads, markAllReadMutation, markNotificationsReadOptimistically]);
 
     // Flatten data for FlatList
     const flatData = [
@@ -352,8 +451,8 @@ export default function NotificationScreen() {
                 <Text style={styles.headerTitle}>Notifications</Text>
 
                 <TouchableOpacity
-                    onPress={() => markAllReadMutation.mutate()}
-                    disabled={!filteredUnreadCount}
+                    onPress={handleMarkAllRead}
+                    disabled={!filteredUnreadCount || markAllReadMutation.isPending}
                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
                     <CheckCheck size={24} color={filteredUnreadCount ? "#000" : "#C7C7CC"} />
@@ -365,12 +464,23 @@ export default function NotificationScreen() {
                 data={flatData}
                 keyExtractor={(item, index) => item.id || `header-${index}`}
                 contentContainerStyle={styles.listContent}
+                onViewableItemsChanged={onViewableItemsChanged}
+                viewabilityConfig={VIEWABILITY_CONFIG}
+                onEndReached={handleEndReached}
+                onEndReachedThreshold={0.35}
                 refreshControl={
                     <RefreshControl
-                        refreshing={refreshing}
+                        refreshing={refreshing || isRefetching}
                         onRefresh={handleRefresh}
                         tintColor="#000"
                     />
+                }
+                ListFooterComponent={
+                    isFetchingNextPage ? (
+                        <View style={styles.footerLoader}>
+                            <ActivityIndicator size="small" color="#8E8E93" />
+                        </View>
+                    ) : null
                 }
                 ListEmptyComponent={
                     <Animated.View entering={FadeIn.delay(200)} style={styles.emptyContainer}>
@@ -544,6 +654,9 @@ const styles = StyleSheet.create({
     // List
     listContent: {
         paddingBottom: 40,
+    },
+    footerLoader: {
+        paddingVertical: 20,
     },
 
     // Section Header

@@ -12,27 +12,78 @@ import Animated, {
 import Svg, { Circle, Rect, Path } from 'react-native-svg';
 import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
+import { supabase } from '../../lib/supabase';
+import { getCurrentSchool, getProfilesForSchool } from '../../lib/profileManager';
+import { tryRestoreSession } from '../../lib/tokenManager';
 import { responsiveFontSize, responsiveHeight, responsiveWidth } from '../utils/responsive';
 const { height, width } = Dimensions.get('window');
 
 export default function GreetingScreen() {
     const [user, setUser] = useState(null);
+    const [isAuthReady, setIsAuthReady] = useState(false);
+
     const loadUser = async () => {
         try {
             const stored = await SecureStore.getItemAsync('user');
             if (stored) {
                 const parsed = JSON.parse(stored);
                 setUser(parsed);
-                // console.log(parsed);
-
+                return parsed;
             }
+            return null;
         } catch (error) {
             console.error('Failed to load user:', error);
+            return null;
         }
     };
+
     useEffect(() => {
         loadUser();
-    }, [user])
+    }, []);
+
+    useEffect(() => {
+        const validateAuth = async () => {
+            try {
+                const storedUser = await loadUser();
+                if (!storedUser?.id) {
+                    router.replace('/(auth)/schoolcode');
+                    return;
+                }
+
+                const { data: { session } } = await supabase.auth.getSession();
+                if (session?.access_token) {
+                    setIsAuthReady(true);
+                    return;
+                }
+
+                const currentSchool = await getCurrentSchool();
+                if (currentSchool?.schoolCode) {
+                    const profiles = await getProfilesForSchool(currentSchool.schoolCode);
+                    const matchingProfile = (profiles || []).find(
+                        (profile) => profile?.userId === storedUser.id || profile?.email === storedUser.email
+                    );
+
+                    if (matchingProfile) {
+                        const restored = await tryRestoreSession(currentSchool.schoolCode, matchingProfile);
+                        if (restored?.success) {
+                            setIsAuthReady(true);
+                            return;
+                        }
+                    }
+                }
+
+                await SecureStore.deleteItemAsync('user');
+                await SecureStore.deleteItemAsync('userRole');
+                await SecureStore.deleteItemAsync('token');
+                router.replace(currentSchool?.schoolCode ? '/(auth)/profile-selector' : '/(auth)/schoolcode');
+            } catch (error) {
+                console.error('Greeting auth validation failed:', error);
+                router.replace('/(auth)/schoolcode');
+            }
+        };
+
+        validateAuth();
+    }, []);
 
     // Get title based on gender
     const getGenderTitle = (gender) => {
@@ -113,6 +164,8 @@ export default function GreetingScreen() {
     const nameScale = useSharedValue(0.8);
 
     useEffect(() => {
+        if (!isAuthReady) return;
+
         // Initial entrance animation
         const entranceAnimation = () => {
             // Animate "Good"
@@ -141,7 +194,7 @@ export default function GreetingScreen() {
         };
 
         entranceAnimation();
-    }, []);
+    }, [isAuthReady]);
 
     const goodAnimatedStyle = useAnimatedStyle(() => ({
         opacity: goodOpacity.value,

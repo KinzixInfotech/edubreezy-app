@@ -36,7 +36,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as Notifications from 'expo-notifications';
 import * as Location from 'expo-location';
 import HapticTouchable from '../components/HapticTouch';
-import { useEffect, useMemo, useState, useCallback, useRef, memo } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef, memo, useReducer } from 'react';
 import Animated, { FadeInDown, FadeInRight, FadeInUp, useSharedValue, useAnimatedScrollHandler, useAnimatedStyle, interpolate, Extrapolation } from 'react-native-reanimated';
 import { dataUi } from '../data/_uidata';
 
@@ -52,18 +52,13 @@ import AddChildModal from '../components/AddChildModal';
 import DelegationCheckModal from '../components/DelegationCheckModal';
 import BannerCarousel from '../components/BannerCarousel';
 import StatusRow from '../components/StatusRow';
+import StatusViewer from '../components/StatusViewer';
+import StatusUpload from '../components/StatusUpload';
 import { useActiveTrip } from '../../hooks/useActiveTrip';
 import { stopForegroundLocationTracking, isForegroundTrackingActive } from '../../lib/transport-location-task';
 import LocationDisclosureModal from '../components/LocationDisclosureModal';
+import ProfileAvatar from '../components/ProfileAvatar';
 import ActionSearchModal from '../components/ActionSearchModal';
-import { homeQueryKeys } from '../../features/home-modules/queryKeys';
-import { HOME_CACHE_CONFIG } from '../../features/home-modules/cacheConfig';
-import { mapParentChildren } from '../../features/home-modules/parentUtils';
-import StatusModals from '../../features/home-modules/StatusModals';
-import { useHomeProfile } from '../../features/home-modules/useHomeProfile';
-import { useHomeRefresh } from '../../features/home-modules/useHomeRefresh';
-import HomeHeader from '../../features/home-modules/HomeHeader';
-import ParentHome from '../../features/home-modules/roles/ParentHome';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const isSmallDevice = SCREEN_WIDTH < 375;
@@ -91,14 +86,51 @@ const IconMap = {
     settings: Settings,
 };
 
+// ============================================
+// CENTRALIZED QUERY KEYS
+// ============================================
+const QUERY_KEYS = {
+    notifications: (userId) => ['notifications', userId],
+    parentChildren: (schoolId, parentId) => ['parent-children', schoolId, parentId],
+    todaysClasses: (userId, schoolId) => ['todaysClasses', userId, schoolId],
+    subjects: (userId, schoolId) => ['subjects', userId, schoolId],
+    upcomingExam: (userId, schoolId) => ['upcomingExam', userId, schoolId],
+    dashboardOverview: (schoolId, academicYearId) => ['dashboard', 'overview', schoolId, academicYearId],
+};
+
+// ============================================
+// CENTRALIZED CACHE CONFIGURATION
+// Prevents screen reload on back navigation
+// ============================================
+const CACHE_CONFIG = {
+    // Static data (events, profile, syllabus) - long cache
+    STATIC: {
+        staleTime: 1000 * 60 * 10, // 10 min
+        gcTime: 1000 * 60 * 60, // 1 hour
+        refetchOnMount: false,
+        refetchOnWindowFocus: false, // No auto-refresh
+    },
+    // Semi-dynamic data (stats, homework, attendance)
+    MODERATE: {
+        staleTime: 1000 * 60 * 15, // 15 min - prevents reload on back navigation
+        gcTime: 1000 * 60 * 60, // 1 hour - keep cached data longer
+        refetchOnMount: false,
+        refetchOnWindowFocus: false, // No auto-refresh
+    },
+    // Real-time data (notifications) - no auto polling
+    REALTIME: {
+        staleTime: 1000 * 60 * 2, // 2 min
+        gcTime: 1000 * 60 * 30,
+        refetchOnMount: false,
+        refetchOnWindowFocus: false, // No auto-refresh
+        // Removed refetchInterval - user must manually refresh
+    },
+};
+
 export default function HomeScreen() {
-    const {
-        user,
-        loading,
-        setLoading,
-        loadUser,
-        hasInitiallyLoadedRef,
-    } = useHomeProfile();
+    const [user, setUser] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
     const [notificationPermission, setNotificationPermission] = useState(false);
     // Use refs for modal states so opening/closing     s doesn't re-render
     // the entire HomeScreen (which would remount inline view components)
@@ -122,6 +154,64 @@ export default function HomeScreen() {
 
     // Navigation guard to prevent double-clicking
     const isNavigatingRef = useRef(false);
+
+    // Track if initial load has happened - prevents refetch on back navigation
+    const hasInitiallyLoadedRef = useRef(false);
+
+    const loadUser = async (forceRefresh = false) => {
+        // Skip if already loaded and not forcing refresh
+        if (hasInitiallyLoadedRef.current && user && !forceRefresh) {
+            setLoading(false);
+            return;
+        }
+
+        try {
+            const stored = await SecureStore.getItemAsync('user');
+            if (stored) {
+                const parsed = JSON.parse(stored);
+                setUser(parsed);
+                hasInitiallyLoadedRef.current = true; // Mark as loaded
+            }
+        } catch (error) {
+            console.error('Failed to load user:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const syncStoredUser = useCallback(async () => {
+        try {
+            const stored = await SecureStore.getItemAsync('user');
+            const parsed = stored ? JSON.parse(stored) : null;
+
+            setUser((prev) => {
+                if (
+                    prev?.id === parsed?.id &&
+                    (prev?.schoolId || prev?.school?.id) === (parsed?.schoolId || parsed?.school?.id) &&
+                    prev?.role?.name === parsed?.role?.name
+                ) {
+                    return prev;
+                }
+                return parsed;
+            });
+
+            hasInitiallyLoadedRef.current = true;
+            setLoading(false);
+        } catch (error) {
+            console.error('Failed to sync user:', error);
+        }
+    }, []);
+
+    // Keep home in sync with the currently selected profile.
+    useFocusEffect(
+        useCallback(() => {
+            if (!hasInitiallyLoadedRef.current) {
+                loadUser();
+            } else {
+                syncStoredUser();
+            }
+        }, [syncStoredUser])
+    );
 
     // Safe navigation function - prevents multiple navigations
     const navigateOnce = useCallback((path, params) => {
@@ -172,6 +262,7 @@ export default function HomeScreen() {
         );
         return { opacity, transform: [{ translateY: interpolate(scrollY.value, [0, 60], [0, -20], Extrapolation.CLAMP) }] };
     });
+
     // Name stays visible when collapsed (doesn't fade out)
     // Also shifts left slightly when collapsed
     const headerNameStyle = useAnimatedStyle(() => {
@@ -242,8 +333,6 @@ export default function HomeScreen() {
     const user_acc = useMemo(() => user, [user]);
     const userId = user_acc?.id;
     const schoolId = user_acc?.schoolId || user_acc?.school?.id;
-    const userRole = user_acc?.role?.name;
-    const parentId = user_acc?.parentData?.id;
 
     console.log('🏫 Home Screen - User:', userId, 'SchoolId:', schoolId, 'Role:', user_acc?.role?.name, user_acc);
 
@@ -288,7 +377,7 @@ export default function HomeScreen() {
 
     // Fetch notifications with unread count
     const { data: notificationData, refetch: refetchNotifications } = useQuery({
-        queryKey: homeQueryKeys.notificationsSummary(userId, schoolId),
+        queryKey: ['notifications', userId, schoolId],
         queryFn: async () => {
             const res = await api.get(
                 `/notifications?userId=${userId}&schoolId=${schoolId}&limit=20`
@@ -296,7 +385,7 @@ export default function HomeScreen() {
             return res.data;
         },
         enabled: !!schoolId && !!userId,
-        ...HOME_CACHE_CONFIG.REALTIME,
+        ...CACHE_CONFIG.REALTIME,
     });
 
     // Filter out self-sent notifications and calculate unread count
@@ -406,14 +495,14 @@ export default function HomeScreen() {
             return res.data.teacher;
         },
         enabled: user_acc?.role?.name === "TEACHING_STAFF" && !!schoolId && !!userId,
-        ...HOME_CACHE_CONFIG.STATIC,
+        ...CACHE_CONFIG.STATIC,
     });
 
 
 
     // Share cache with TeacherView to ensure real-time bypassing of backend Redis cache
     const { data: dashboardData } = useQuery({
-        queryKey: homeQueryKeys.teacherDashboard(schoolId, userId),
+        queryKey: ['teacher-dashboard', schoolId, userId],
         queryFn: async () => { return null; }, // Let TeacherView do the fetching
         enabled: false, // Don't fetch here, just subscribe to the cache!
     });
@@ -431,13 +520,13 @@ export default function HomeScreen() {
     const isTransportRole = user_acc?.role?.name === 'DRIVER' || user_acc?.role?.name === 'CONDUCTOR';
 
     const { data: transportStaffData, isLoading: isTransportStaffLoading } = useQuery({
-        queryKey: homeQueryKeys.transportStaff(schoolId, userId),
+        queryKey: ['transport-staff-home', schoolId, userId],
         queryFn: async () => {
             const res = await api.get(`/schools/transport/staff?schoolId=${schoolId}&userId=${userId}`);
             return res.data;
         },
         enabled: isTransportRole && !!schoolId && !!userId,
-        ...HOME_CACHE_CONFIG.MODERATE,
+        ...CACHE_CONFIG.MODERATE,
     });
 
     const transportStaff = transportStaffData?.staff?.[0];
@@ -445,7 +534,7 @@ export default function HomeScreen() {
 
     // Pre-fetch trips for Driver/Conductor
     const { data: transportTripsData, isLoading: isTransportTripsLoading } = useQuery({
-        queryKey: homeQueryKeys.transportTrips(schoolId, transportStaffId),
+        queryKey: ['transport-trips-home', schoolId, transportStaffId],
         queryFn: async () => {
             const today = new Date().toISOString().split('T')[0];
             const weekAgo = new Date();
@@ -459,21 +548,21 @@ export default function HomeScreen() {
             return res.data;
         },
         enabled: isTransportRole && !!schoolId && !!transportStaffId,
-        ...HOME_CACHE_CONFIG.MODERATE,
+        ...CACHE_CONFIG.MODERATE,
     });
 
     // Check if transport data is still loading
     const isTransportDataLoading = isTransportRole && (isTransportStaffLoading || (transportStaffId && isTransportTripsLoading));
 
     const { data: upcomingEventsData, isLoading: eventsLoading } = useQuery({
-        queryKey: homeQueryKeys.upcomingEvents(schoolId),
+        queryKey: ['upcomingEvents', schoolId],
         queryFn: async () => {
             if (!schoolId) return { events: [], total: 0 };
             const res = await api.get(`/schools/${schoolId}/calendar/upcoming?limit=5`);
             return res.data;
         },
         enabled: !!schoolId,
-        ...HOME_CACHE_CONFIG.STATIC,
+        ...CACHE_CONFIG.STATIC,
     });
     // Helper function to get category icon
     const getCategoryIcon = (category, eventType) => {
@@ -536,15 +625,17 @@ export default function HomeScreen() {
     // const unreadCount = notificationData?.unreadCount || uiData.notifications.today.filter(n => !n.read).length;
 
     // Pull to refresh handler - forces data reload
-    const { refreshing, onRefresh } = useHomeRefresh({
-        queryClient,
-        loadUser,
-        role: userRole,
-        schoolId,
-        userId,
-        parentId,
-        transportStaffId,
-    });
+    const onRefresh = useCallback(async () => {
+        setRefreshing(true);
+        try {
+            await queryClient.invalidateQueries();
+            await loadUser(true); // Force refresh
+        } catch (error) {
+            console.error('Refresh failed:', error);
+        } finally {
+            setRefreshing(false);
+        }
+    }, [queryClient]);
 
     const getInitials = useCallback((name) => {
         if (!name) return '';
@@ -571,7 +662,7 @@ export default function HomeScreen() {
         )
     }
 
-    if (!user_acc?.id || !schoolId || !user_acc?.role?.name) {
+    if (!user_acc) {
         return (
             <View style={styles.loaderContainer}>
                 <Text style={{ fontSize: 16, color: '#666' }}>No user found</Text>
@@ -647,6 +738,107 @@ export default function HomeScreen() {
     };
 
     // === DYNAMIC HEADER ===
+    const Header = memo(() => {
+        const roleKey = user_acc?.role?.name?.toLowerCase() ?? '';
+        const config = uiData.header[roleKey] || uiData.header.student;
+        const title = replaceDynamic(config.title, roleKey);
+        const subtitle = config.subtitle.map((item, i) => {
+            const text = replaceDynamic(item.text, roleKey);
+            const baseStyle =
+                item.type === 'role' ? styles.role :
+                    item.type === 'separator' ? styles.separator :
+                        item.type === 'school' ? styles.school :
+                            item.type === 'department' ? styles.school :
+                                item.type === 'childClass' ? styles.school :
+                                    item.type === 'static' ? styles.role : styles.role;
+
+            // Override color for white background
+            return <Text key={i} style={[baseStyle, { color: 'rgba(255,255,255,0.9)' }]} numberOfLines={1}>{text}</Text>;
+        });
+
+        const icons = config.icons.map((key, i) => {
+            const Icon = IconMap[key];
+            if (!Icon) return null;
+
+            const isBell = key === 'bell';
+            const isRefresh = key === 'refresh';
+
+            return (
+                <HapticTouchable
+                    key={i}
+                    onPress={
+                        isBell ? () => router.push('(screens)/notification') :
+                            isRefresh ? onRefresh :
+                                undefined
+                    }
+                >
+                    <View style={[styles.iconButton, {
+                        backgroundColor: '#fff',
+                        shadowColor: '#000',
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: 0.1,
+                        shadowRadius: 4,
+                        elevation: 3
+                    }]}>
+                        <Icon size={isSmallDevice ? 18 : 20} color="#0469ff" />
+
+                        {isBell && unreadCount > 0 && (
+                            <View style={[styles.badge, { backgroundColor: '#FF6B6B', borderWidth: 2, borderColor: '#fff' }]}>
+                                <Text style={[styles.badgeText, { color: '#fff', fontSize: 10 }]}>
+                                    {unreadCount > 99 ? '99+' : unreadCount}
+                                </Text>
+                            </View>
+                        )}
+                    </View>
+                </HapticTouchable>
+            );
+        });
+        return (
+            <LinearGradient
+                colors={['#0469ff', '#0256d0']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.header, {
+                    width: '100%',
+                    borderBottomWidth: 0,
+                    paddingBottom: 30,
+                    marginBottom: 16,
+                    // Ensure content starts below status bar transparently
+                    paddingTop: (isSmallDevice ? 40 : 50),
+                    borderBottomLeftRadius: 32,
+                    borderBottomRightRadius: 32,
+                    alignSelf: 'stretch',
+                }]}
+            >
+                {/* Background Pattern - Shaded Look */}
+                <Text style={{ position: 'absolute', top: -10, right: 80, fontSize: 40, color: 'rgba(255,255,255,0.1)', fontWeight: 'bold' }}>+</Text>
+                <Text style={{ position: 'absolute', top: 50, right: 30, fontSize: 24, color: 'rgba(255,255,255,0.08)', fontWeight: 'bold' }}>×</Text>
+                <Text style={{ position: 'absolute', bottom: 20, right: 100, fontSize: 32, color: 'rgba(255,255,255,0.08)', fontWeight: 'bold' }}>÷</Text>
+                <Text style={{ position: 'absolute', top: 20, left: '25%', fontSize: 22, color: 'rgba(255,255,255,0.08)', fontWeight: 'bold' }}>△</Text>
+                <Text style={{ position: 'absolute', bottom: 15, left: '60%', fontSize: 28, color: 'rgba(255,255,255,0.1)', fontWeight: 'bold' }}>○</Text>
+                <View style={{ position: 'absolute', top: -50, right: -50, width: 220, height: 220, borderRadius: 110, backgroundColor: 'rgba(255,255,255,0.05)' }} />
+                <View style={{ position: 'absolute', bottom: -60, left: -40, width: 180, height: 180, borderRadius: 90, backgroundColor: 'rgba(255,255,255,0.05)' }} />
+
+                <View style={styles.headerLeft}>
+                    <ProfileAvatar
+                        user={user_acc}
+                        onPress={() => navigateOnce('(tabs)/profile')}
+                    />
+                    <View style={styles.headerInfo}>
+                        <Text style={[styles.welcomeText, { color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: '500' }]}>{getGreeting()},</Text>
+                        <Text style={[styles.name, { color: '#fff', fontSize: 18, marginTop: 2 }]} numberOfLines={1}>{title}</Text>
+                        <View style={[styles.parentEmail, { marginTop: 4 }]}>{subtitle}</View>
+                    </View>
+                </View>
+                <View style={styles.iconRow}>{icons}</View>
+            </LinearGradient>
+        );
+    });
+    // === ROLE-BASED CONTENT ===
+    const headerComponent = <Header />;
+
+
+
     const permissionBanner = showPermissionBanner ? (
         <Animated.View entering={FadeInDown.duration(400)} style={styles.permissionBanner}>
             <View style={styles.permissionBannerContent}>
@@ -671,10 +863,10 @@ export default function HomeScreen() {
         </Animated.View>
     ) : null;
 
-    const role = user_acc?.role?.name ? user_acc.role.name.toLowerCase() : '';
-    const paddingTop = HEADER_MAX_HEIGHT + 20;
-
     const renderContent = () => {
+        const role = user_acc?.role?.name ? user_acc.role.name.toLowerCase() : '';
+        const paddingTop = HEADER_MAX_HEIGHT + 20;
+
         switch (role) {
             case 'student':
                 return <StudentView refreshing={refreshing} onRefresh={onRefresh} banner={permissionBanner} paddingTop={paddingTop} refreshOffset={refreshOffset} navigateOnce={navigateOnce} />;
@@ -683,11 +875,9 @@ export default function HomeScreen() {
             case 'admin':
                 return <AdminView refreshing={refreshing} onRefresh={onRefresh} banner={permissionBanner} paddingTop={paddingTop} refreshOffset={refreshOffset} navigateOnce={navigateOnce} />;
             case 'parent':
-                return <ParentHome
-                    schoolId={schoolId}
-                    parentId={user_acc?.parentData?.id}
-                    userId={userId}
-                    user={user_acc}
+                return <ParentView
+                    schoolId={user_acc?.schoolId}
+                    parentId={user_acc?.parentData.id}
                     refreshing={refreshing}
                     onRefresh={onRefresh}
                     onScroll={scrollHandler}
@@ -695,16 +885,7 @@ export default function HomeScreen() {
                     refreshOffset={refreshOffset}
                     banner={permissionBanner}
                     navigateOnce={navigateOnce}
-                    todaysEvents={todaysEvents}
-                    setSelectedStatusGroup={setSelectedStatusGroup}
-                    setShowStatusUpload={setShowStatusUpload}
-                    styles={styles}
-                    isTablet={isTablet}
-                    SCREEN_WIDTH={SCREEN_WIDTH}
-                    PARENT_QUICK_STAT_VALUE_FONT_SIZE={PARENT_QUICK_STAT_VALUE_FONT_SIZE}
-                    PARENT_QUICK_STAT_LABEL_FONT_SIZE={PARENT_QUICK_STAT_LABEL_FONT_SIZE}
-                />
-
+                />;
             case 'driver':
                 return <DriverView
                     refreshing={refreshing}
@@ -719,7 +900,7 @@ export default function HomeScreen() {
                     navigateOnce={navigateOnce}
                     upcomingEvents={upcomingEvents}
                     user_acc={user_acc}
-                    user={user_acc}
+                    user={user_acc}  /* Pass as user too for consistency */
                     banner={permissionBanner}
                 />;
             case 'conductor':
@@ -744,8 +925,10 @@ export default function HomeScreen() {
                     refreshing={refreshing}
                     onRefresh={onRefresh}
                     paddingTop={paddingTop}
+
                     schoolId={schoolId}
                     userId={userId}
+                    header={headerComponent}
                     refreshOffset={refreshOffset}
                     navigateOnce={navigateOnce}
                 />;
@@ -756,6 +939,7 @@ export default function HomeScreen() {
                     schoolId={schoolId}
                     userId={userId}
                     paddingTop={paddingTop}
+                    header={headerComponent}
                     refreshOffset={refreshOffset}
                     navigateOnce={navigateOnce}
                 />;
@@ -771,7 +955,7 @@ export default function HomeScreen() {
                     navigateOnce={navigateOnce}
                 />;
             default:
-                return <StudentView refreshing={refreshing} onRefresh={onRefresh} banner={permissionBanner} paddingTop={paddingTop} refreshOffset={refreshOffset} navigateOnce={navigateOnce} />;
+                return <StudentView refreshing={refreshing} onRefresh={onRefresh} header={headerComponent} refreshOffset={refreshOffset} navigateOnce={navigateOnce} />;
         }
     };
 
@@ -802,14 +986,14 @@ export default function HomeScreen() {
 
         // Consolidated dashboard API - single call for all student data
         const { data: dashboardData, isLoading: isDashboardLoading } = useQuery({
-            queryKey: homeQueryKeys.studentDashboard(schoolId, userId),
+            queryKey: ['student-dashboard', schoolId, userId],
             queryFn: async () => {
                 if (!schoolId || !userId) return null;
                 const res = await api.get(`/mobile/dashboard/student?schoolId=${schoolId}&userId=${userId}`);
                 return res.data?.data || res.data;
             },
             enabled: !!schoolId && !!userId,
-            ...HOME_CACHE_CONFIG.MODERATE,
+            ...CACHE_CONFIG.MODERATE,
         });
 
         // Extract data from consolidated response
@@ -1337,19 +1521,1213 @@ export default function HomeScreen() {
 
         </ScrollView>
     );
+
+
+
+    // / Complete ParentView Component
+    const ParentView = ({ schoolId, parentId, refreshing, onRefresh, onScroll, paddingTop, refreshOffset, banner, navigateOnce }) => {
+        const [showSearchModal, setShowSearchModal] = useState(false);
+        const [searchQuery, setSearchQuery] = useState('');
+        const [showAddChildModal, setShowAddChildModal] = useState(false);
+        // Use ref to track if we've restored from cache - prevents flash of null
+        const hasRestoredChild = useRef(false);
+        const [selectedChild, setSelectedChild] = useState(() => {
+            // Synchronously try to get cached child (will be null on first render, populated on subsequent)
+            return null;
+        });
+
+        // Local state for lastViewed timestamps - refreshed on focus to clear badges
+        const [lastViewedTimestamps, setLastViewedTimestamps] = useState({
+            homework: null,
+            exams: null,
+        });
+
+        // Helper function to refresh timestamps from SecureStore
+        const refreshBadgeTimestamps = useCallback(async (studentId) => {
+            if (!studentId) return;
+
+            const [homeworkLastViewed, examLastViewed] = await Promise.all([
+                SecureStore.getItemAsync(`homework_last_viewed_${studentId}`),
+                SecureStore.getItemAsync(`exam_last_viewed_${studentId}`),
+            ]);
+
+            setLastViewedTimestamps({
+                homework: homeworkLastViewed,
+                exams: examLastViewed,
+            });
+        }, []);
+
+        // Refresh timestamps when selectedChild changes (handles initial load)
+        useEffect(() => {
+            if (selectedChild?.studentId) {
+                refreshBadgeTimestamps(selectedChild.studentId);
+            }
+        }, [selectedChild?.studentId, refreshBadgeTimestamps]);
+
+        // Also refresh timestamps when screen gains focus (handles back navigation)
+        useFocusEffect(
+            useCallback(() => {
+                if (selectedChild?.studentId) {
+                    refreshBadgeTimestamps(selectedChild.studentId);
+                }
+            }, [selectedChild?.studentId, refreshBadgeTimestamps])
+        );
+
+        const queryClient = useQueryClient();
+
+        // Consolidated dashboard API - fetches base parent data (notices, events) in one call
+        // Child-specific stats are fetched separately when a child is selected
+        const {
+            data: dashboardData,
+            isFetching,
+            isLoading,
+            refetch,
+        } = useQuery({
+            queryKey: ['parent-dashboard', schoolId, parentId, selectedChild?.studentId],
+            queryFn: async () => {
+                if (!schoolId || !parentId) return null;
+                let url = `/mobile/dashboard/parent?schoolId=${schoolId}&parentId=${parentId}&userId=${userId}`;
+                if (selectedChild?.studentId) {
+                    url += `&childId=${selectedChild.studentId}`;
+                }
+                const res = await api.get(url);
+                return res.data?.data || res.data;
+            },
+            enabled: !!schoolId && !!parentId,
+            keepPreviousData: true,
+            ...CACHE_CONFIG.MODERATE,
+        });
+
+        // Extract notices from dashboard response
+        const notices = (dashboardData?.notices || []).map((n) => ({
+            id: n.id,
+            title: n.title,
+            time: new Date(n.time || n.createdAt).toLocaleString(),
+            unread: n.unread ?? !n.read,
+        }));
+
+        // Extract child stats from dashboard response (when child is selected)
+        const childStats = dashboardData?.childStats;
+        // Only show loading on INITIAL load, not background refetches
+        const isChildStatsFetching = isLoading && !!selectedChild?.studentId && !dashboardData;
+
+        // Fetch last viewed timestamps for badge calculation
+        const { data: badgeTimestamps } = useQuery({
+            queryKey: ['parent-badge-timestamps', selectedChild?.studentId],
+            queryFn: async () => {
+                if (!selectedChild?.studentId) return { homework: null, exams: null };
+                const [homeworkLastViewed, examLastViewed] = await Promise.all([
+                    SecureStore.getItemAsync(`homework_last_viewed_${selectedChild.studentId}`),
+                    SecureStore.getItemAsync(`exam_last_viewed_${selectedChild.studentId}`),
+                ]);
+                return { homework: homeworkLastViewed, exams: examLastViewed };
+            },
+            enabled: !!selectedChild?.studentId,
+            staleTime: 0,
+        });
+
+        // Extract stats from dashboard response
+        const attendanceStats = childStats?.attendance;
+        const homeworkData = {
+            homework: childStats?.homework?.homework || [],
+            lastViewed: badgeTimestamps?.homework
+        };
+        const examBadgeData = {
+            results: childStats?.exams?.results || [],
+            stats: childStats?.exams?.stats || {},
+            lastViewed: badgeTimestamps?.exams
+        };
+
+        // Academic year from dashboard response
+        const academicYearData = dashboardData?.academicYear;
+
+        // Fee data from dashboard response (childStats includes fees when child is selected)
+        const feeData = childStats?.fees;
+
+        // Helper for abbreviated currency formatting (K, L, Cr) - clean whole numbers
+        const formatAbbr = (amount) => {
+            if (!amount || amount === 0) return '0';
+            const value = Math.abs(amount);
+            if (value >= 10000000) return `${Math.round(value / 10000000)}Cr`;
+            if (value >= 100000) return `${(value / 100000).toFixed(1).replace(/\.0$/, '')}L`;
+            if (value >= 1000) return `${(value / 1000).toFixed(1).replace(/\.0$/, '')}K`;
+            return `${Math.round(value)}`;
+        };
+
+        // Calculate dashboard card values
+        const childAttendance = attendanceStats?.monthlyStats?.attendancePercentage ?? 0;
+
+        // Fee status calculation
+        const totalFee = feeData?.originalAmount || 0;
+        const paidFee = feeData?.paidAmount || 0;
+        const pendingFee = feeData?.balanceAmount || 0;
+
+        const feeStatusDisplay = `₹${formatAbbr(paidFee)}`;
+
+        // Events from dashboard response
+        const upcomingEvents = dashboardData?.events || [];
+
+        // Get recent unread notice only (don't show if already read)
+        const recentNotice = notices?.find(n => n.unread) || null;
+        const nextEvent = upcomingEvents?.[0] || null;
+
+
+        // Count only new homework (created after last viewed, if exists)
+        const pendingHomework = (homeworkData?.homework || []).filter(hw => {
+            const isPending = !hw.mySubmission || hw.mySubmission.status === 'PENDING';
+            if (!isPending) return false;
+
+            // Use focus-refreshed lastViewed timestamp for accurate badge count
+            if (lastViewedTimestamps.homework) {
+                const lastViewedDate = new Date(lastViewedTimestamps.homework);
+                const homeworkDate = new Date(hw.createdAt);
+                return homeworkDate > lastViewedDate;
+            }
+            return true; // No lastViewed = show all pending
+        }).length;
+
+        // Combined loading state for stats cards
+        // Only show stats loading on initial load (not background refetches)
+        const isStatsLoading = isLoading && !dashboardData;
+
+        // Count new exam results (CREATED after last viewed) - uses focus-refreshed timestamp
+        // Uses createdAt (when result was published), NOT examDate (which can be in the future)
+        const newExamResults = (() => {
+            if (!lastViewedTimestamps.exams) {
+                // First time viewing - no badge
+                return 0;
+            }
+            const lastViewedDate = new Date(lastViewedTimestamps.exams);
+
+            // Count results that were CREATED after user last viewed
+            // (ignoring examDate which might be in the future for scheduled exams)
+            return (examBadgeData?.results || []).filter(r => {
+                // Use createdAt (when result was published to system)
+                const createdDate = r.createdAt ? new Date(r.createdAt) : null;
+                return createdDate && createdDate > lastViewedDate;
+            }).length;
+        })();
+
+        // Calculate performance using same formula as performance page (40% attendance + 60% exams)
+        const childPerformance = (() => {
+            let score = 0;
+            let weight = 0;
+
+            // Attendance component (40% weight)
+            const attendancePercent = attendanceStats?.monthlyStats?.attendancePercentage;
+            if (attendancePercent !== undefined && attendancePercent !== null) {
+                score += (attendancePercent || 0) * 0.4;
+                weight += 0.4;
+            }
+
+            // Exam component (60% weight)
+            const examPercent = examBadgeData?.stats?.avgPercentage;
+            if (examPercent !== undefined && examPercent !== null) {
+                score += (examPercent || 0) * 0.6;
+                weight += 0.6;
+            }
+
+            if (weight > 0) {
+                return `${Math.round(score / weight)}%`;
+            }
+            return '0';
+        })();
+
+        // qucik access for parent
+        const actionGroups = [
+            {
+                title: 'Quick Actions',
+                actions: [
+                    {
+                        icon: TrendingUp,
+                        label: 'Performance',
+                        color: '#0469ff',
+                        bgColor: '#E3F2FD',
+                        href: "/my-child/parent-performance",
+                        params: { childData: JSON.stringify(selectedChild) },
+                    },
+                    {
+                        icon: Calendar, label: 'Attendance', color: '#4ECDC4', bgColor: '#E0F7F4', href: "/my-child/attendance",
+                        params: { childData: JSON.stringify(selectedChild) },
+                    },
+                    {
+                        icon: Calendar,
+                        label: 'School Calendar',
+                        color: '#4CAF50',     // green icon
+                        bgColor: '#E8F5E9',   // light green background
+                        href: "/(screens)/calendarscreen"
+                    },
+                    {
+                        icon: ScrollText,
+                        label: 'Syllabus',
+                        color: '#9C27B0',
+                        bgColor: '#F3E5F5',
+                        href: "/syllabusview"
+                    },
+                    {
+                        icon: Book,
+                        label: 'Homework',
+                        color: '#FF6B6B',
+                        bgColor: '#FFE9E9',
+                        href: '/my-child/parent-homework',
+                        params: { childData: JSON.stringify(selectedChild) },
+                        badge: pendingHomework > 0 ? pendingHomework : null,
+                    },
+                    {
+                        icon: FileText,
+                        label: 'Documents',
+                        color: '#8B5CF6',
+                        bgColor: '#F3E8FF',
+                        href: '/my-child/parent-documents',
+                        params: { childData: JSON.stringify(selectedChild) },
+                    },
+                    {
+                        icon: Calendar,
+                        label: 'Timetable',
+                        color: '#0EA5E9',
+                        bgColor: '#E0F2FE',
+                        href: '/my-child/parent-timetable',
+                        params: { childData: JSON.stringify(selectedChild) },
+                    },
+                    {
+                        icon: BookOpen,
+                        label: 'Library',
+                        color: '#6366F1',
+                        bgColor: '#EEF2FF',
+                        href: '/my-child/parent-library',
+                        params: { childData: JSON.stringify(selectedChild) },
+                    },
+                    {
+                        icon: GraduationCap,
+                        label: 'Progress Card',
+                        color: '#8B5CF6',
+                        bgColor: '#F3E8FF',
+                        href: '/hpc/parent-view',
+                        params: { studentId: selectedChild?.studentId, studentName: selectedChild?.name },
+                    },
+                    {
+                        icon: ImageIcon,
+                        label: 'Gallery',
+                        color: '#EC4899',
+                        bgColor: '#FCE7F3',
+                        href: '/(screens)/gallery',
+                    },
+                ],
+            },
+            {
+                title: 'Examination',
+                actions: [
+                    {
+                        icon: Award,
+                        label: 'Exam Results',
+                        color: '#FFD93D',
+                        bgColor: '#FFF9E0',
+                        href: '/my-child/parent-exams',
+                        params: { childData: JSON.stringify(selectedChild) },
+                        badge: newExamResults > 0 ? newExamResults : null,
+                    },
+                ],
+            },
+            {
+                title: 'Fee Management',
+                actions: [
+                    {
+                        icon: DollarSign,
+                        label: 'Pay Fees',
+                        color: '#FF6B6B',
+                        bgColor: '#FFE9E9',
+                        href: "/(screens)/payfees",
+                        params: { childData: JSON.stringify(selectedChild) },
+                    },
+                    {
+                        icon: TimerIcon,
+                        label: 'History',
+                        color: '#4CAF50',
+                        bgColor: '#E7F5E9',
+                        href: "/(screens)/paymenthistory",
+                        params: {
+                            childData: JSON.stringify({
+                                ...selectedChild,
+                                parentId
+                            })
+                        }
+                    },
+                ],
+            },
+            {
+                title: 'Transport',
+                actions: [
+                    {
+                        icon: Users,
+                        label: 'Bus Request',
+                        color: '#3B82F6',
+                        bgColor: '#DBEAFE',
+                        href: "/(screens)/transport/bus-request",
+                        params: { childData: JSON.stringify(selectedChild) },
+                    },
+                    {
+                        icon: Calendar,
+                        label: 'Track Bus',
+                        color: '#10B981',
+                        bgColor: '#D1FAE5',
+                        href: "/(screens)/transport/bus-tracking",
+                        params: { childData: JSON.stringify(selectedChild) },
+                    },
+                    {
+                        icon: CheckCircle2,
+                        label: 'Bus Attendance',
+                        color: '#8B5CF6',
+                        bgColor: '#EDE9FE',
+                        href: "/(screens)/transport/attendance-history",
+                        params: { childData: JSON.stringify(selectedChild) },
+                    },
+                    {
+                        icon: DollarSign,
+                        label: 'Transport Fee',
+                        color: '#F59E0B',
+                        bgColor: '#FEF3C7',
+                        href: "/(screens)/transport/transport-fee",
+                        params: { childData: JSON.stringify(selectedChild) },
+                    },
+                ],
+            },
+        ];
+
+        // Use children from consolidated dashboard response
+        const data = dashboardData ? { children: dashboardData.children || [] } : null;
+        const isPending = isLoading;
+
+        const uiChildren = useMemo(() =>
+            data?.children?.map((child) => ({
+                id: child.studentId,
+                studentId: child.studentId,
+                name: child.name,
+                class: child.class,
+                classId: child.classId,
+                section: child.section,
+                sectionId: child.sectionId,
+                admissionNo: child.admissionNo,
+                rollNo: child.rollNumber,
+                avatar: child.profilePicture,
+                attendance: Math.floor(Math.random() * 21) + 80,
+                feeStatus: "Paid",
+                performance: "Excellent",
+                pendingFee: 0
+            })) || [],
+            [data]);
+        // alert(JSON.stringify(data.children));
+
+
+        const icon = require("../../assets/avatar_face.png");
+        const parentData = useMemo(() => ({
+            name: "Sarah Johnson",
+            email: "sarah.johnson@email.com",
+            phone: "+91 9876543210",
+            // upcomingEvents: [
+            //     { id: 1, title: "Parent-Teacher Meeting", date: "Nov 15, 2025", icon: "👥", color: "#FF6B6B" },
+            //     { id: 2, title: "Annual Sports Day", date: "Nov 20, 2025", icon: "⚽", color: "#4ECDC4" },
+            //     { id: 3, title: "Science Exhibition", date: "Nov 25, 2025", icon: "🔬", color: "#FFD93D" }
+            // ],
+            recentNotices: [
+                { id: 1, title: "Winter Break Schedule", time: "2 hours ago", unread: true },
+                { id: 2, title: "Fee Payment Reminder", time: "1 day ago", unread: true },
+                { id: 3, title: "School Uniform Guidelines", time: "3 days ago", unread: false }
+            ]
+        }), []);
+
+        // Restore selectedChild from cache on mount, then persist on change
+        useEffect(() => {
+            const restoreSelectedChild = async () => {
+                if (hasRestoredChild.current) return;
+                hasRestoredChild.current = true;
+
+                try {
+                    const cachedChild = await SecureStore.getItemAsync(`selectedChild_${parentId}`);
+                    if (cachedChild) {
+                        const parsed = JSON.parse(cachedChild);
+                        // Validate cached child exists in current children list
+                        if (uiChildren.some(c => c.studentId === parsed.studentId)) {
+                            setSelectedChild(parsed);
+                            return;
+                        }
+                    }
+                } catch (e) {
+                    console.log('Error restoring selected child:', e);
+                }
+
+                // Fallback to first child if no valid cache
+                if (uiChildren.length > 0 && !selectedChild) {
+                    setSelectedChild(uiChildren[0]);
+                }
+            };
+
+            if (uiChildren.length > 0) {
+                restoreSelectedChild();
+            }
+        }, [uiChildren, parentId]);
+
+        // Persist selectedChild when it changes
+        useEffect(() => {
+            const persistSelectedChild = async () => {
+                if (selectedChild && parentId) {
+                    try {
+                        await SecureStore.setItemAsync(
+                            `selectedChild_${parentId}`,
+                            JSON.stringify(selectedChild)
+                        );
+                    } catch (e) {
+                        console.log('Error persisting selected child:', e);
+                    }
+                }
+            };
+            persistSelectedChild();
+        }, [selectedChild, parentId]);
+
+        const handleAddChildSuccess = useCallback(async () => {
+            try {
+                // Refresh the children list
+                await queryClient.invalidateQueries(QUERY_KEYS.parentChildren(schoolId, parentId));
+                // Trigger parent refresh
+                if (onRefresh && typeof onRefresh === 'function') {
+                    onRefresh();
+                }
+            } catch (error) {
+                console.error('Failed to refresh after adding child:', error);
+            }
+        }, [queryClient, schoolId, parentId, onRefresh]);
+
+        // Note: removed aggressive `if (isPending)` loading guard here.
+        // The smarter check at `isCriticalDataLoading` below handles initial-only loading
+        // without blocking the UI during background refetches.
+
+        // Empty state - No children added yet
+        if (!isPending && uiChildren.length === 0) {
+            return (
+                <View style={styles.container}>
+                    <ScrollView
+                        contentContainerStyle={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}
+                        refreshControl={
+                            <RefreshControl
+                                refreshing={refreshing}
+                                onRefresh={onRefresh}
+                                tintColor="#0469ff"
+                                colors={['#0469ff']}
+                            />
+                        }
+                    >
+                        <View style={{ alignItems: 'center' }}>
+
+                            <View style={{
+                                width: 120,
+                                height: 120,
+                                borderRadius: 60,
+                                backgroundColor: '#E3F2FD',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                                marginBottom: 24
+                            }}>
+                                <Users size={48} color="#0469ff" />
+                            </View>
+                            <Text style={{ fontSize: 20, fontWeight: '700', color: '#111', marginBottom: 8 }}>
+                                No Children Added
+                            </Text>
+                            <Text style={{ fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 32, lineHeight: 20, paddingHorizontal: 16 }}>
+                                Add your child to view their information and stay connected with their education
+                            </Text>
+                            <HapticTouchable onPress={() => setShowAddChildModal(true)}>
+                                <View style={{
+                                    backgroundColor: '#0469ff',
+                                    paddingHorizontal: 32,
+                                    paddingVertical: 16,
+                                    borderRadius: 12,
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    gap: 8
+                                }}>
+                                    <Plus size={20} color="#fff" />
+                                    <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>
+                                        Add Your Child
+                                    </Text>
+                                </View>
+                            </HapticTouchable>
+                        </View>
+                    </ScrollView>
+
+                    {/* Add Child Modal */}
+                    <AddChildModal
+                        visible={showAddChildModal}
+                        onClose={() => setShowAddChildModal(false)}
+                        parentId={parentId}
+                        schoolId={schoolId}
+                        onSuccess={handleAddChildSuccess}
+                    />
+                </View>
+            );
+        }
+        const ActionButtonWithBadge = ({ action, onPress }) => {
+            return (
+                <HapticTouchable onPress={onPress}>
+                    <View style={[styles.actionButton, { backgroundColor: action.bgColor }]}>
+                        <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
+                            <action.icon size={22} color={action.color} />
+                            {action.badge && (
+                                <View style={styles.badgeContainer}>
+                                    <Text style={styles.badgeText}>{action.badge}</Text>
+                                </View>
+                            )}
+                        </View>
+                        <Text style={styles.actionLabel} numberOfLines={1}>
+                            {action.label}
+                        </Text>
+                    </View>
+                </HapticTouchable>
+            );
+        };
+
+        // Loading state - only block UI on INITIAL load (no cached data), not background refetches
+        const isCriticalDataLoading = (isPending && !dashboardData) || !selectedChild;
+
+        if (isCriticalDataLoading) {
+            return (
+                <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                    <ActivityIndicator size="large" color="#0469ff" />
+                    <Text style={{ marginTop: 12, color: '#666', fontSize: 14 }}>Loading...</Text>
+                </View>
+            );
+        }
+
+
+        // Main content - child selected
+        return (
+            <Animated.ScrollView
+                style={styles.container}
+                showsVerticalScrollIndicator={false}
+                onScroll={onScroll}
+                scrollEventThrottle={16}
+                contentContainerStyle={{ paddingTop: paddingTop }}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
+                        tintColor="#0469ff"
+                        colors={['#0469ff']}
+                        progressViewOffset={refreshOffset}
+                    />
+                }
+            >
+                {banner}
+
+                {/* Status Row */}
+                <StatusRow
+                    schoolId={schoolId}
+                    userId={userId}
+                    userRole={user_acc?.role?.name}
+                    userName={user_acc?.name}
+                    userAvatar={user_acc?.profilePicture}
+                    onStatusPress={(group) => setSelectedStatusGroup(group)}
+                    onMyStatusPress={() => setShowStatusUpload(true)}
+                />
+
+                {todaysEvents.length > 0 && (
+                    <Animated.View entering={FadeInDown.delay(500).duration(600)} style={styles.section}>
+                        <View style={styles.sectionHeader}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                <Text style={styles.sectionTitle}>Today's Events</Text>
+                                <View style={styles.todayBadge}>
+                                    <Text style={styles.todayBadgeText}>NOW</Text>
+                                </View>
+                            </View>
+                        </View>
+                        <View style={styles.eventsContainer}>
+                            {todaysEvents.map((event, index) => (
+                                <Animated.View key={event.id} entering={FadeInRight.delay(600 + index * 100).duration(500)}>
+                                    <HapticTouchable>
+                                        <LinearGradient
+                                            colors={[event.color, event.color + 'DD']}
+                                            style={styles.todayEventCard}
+                                        >
+                                            <View style={styles.todayEventIcon}>
+                                                <Text style={styles.eventEmoji}>{event.icon}</Text>
+                                            </View>
+                                            <View style={styles.eventInfo}>
+                                                <Text style={styles.todayEventTitle}>{event.title}</Text>
+                                                {event.location && (
+                                                    <Text style={styles.todayEventLocation}>📍 {event.location}</Text>
+                                                )}
+                                            </View>
+                                            <View style={styles.pulsingDot} />
+                                        </LinearGradient>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))}
+                        </View>
+                    </Animated.View>
+                )}
+                {/* School Banner Carousel */}
+                <BannerCarousel schoolId={schoolId} role={user_acc?.role?.name} />
+                {/* Children Selector */}
+                <Animated.View entering={FadeInDown.delay(100).duration(600)} style={styles.section}>
+                    <View style={styles.sectionHeader}>
+                        <View>
+                            <Text style={styles.sectionTitle}>Your Children</Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', gap: 6 }}>
+                            <Text style={styles.childrenCount}>{uiChildren?.length || 0}</Text>
+                            <HapticTouchable onPress={() => setShowAddChildModal(true)}>
+                                <Plus style={styles.childrenCount} color={'#0469ff'} strokeWidth={0.9} />
+                            </HapticTouchable>
+                        </View>
+                    </View>
+                    {/* Carousel Container */}
+                    <View style={{ marginTop: 12 }}>
+                        {uiChildren.length === 1 ? (
+                            // Single child - full width card
+                            <Animated.View entering={FadeInRight.delay(200).duration(500)}>
+                                <HapticTouchable onPress={() => setSelectedChild(uiChildren[0])}>
+                                    <LinearGradient
+                                        colors={['#0469ff', '#0347b8']}
+                                        style={{
+                                            flexDirection: 'row',
+                                            padding: 16,
+                                            borderRadius: 16,
+                                            gap: 12,
+                                            position: 'relative',
+                                            overflow: 'hidden',
+                                            alignItems: 'center',
+                                            shadowColor: '#0469ff',
+                                            shadowOpacity: 0.3,
+                                            shadowRadius: 12,
+                                            shadowOffset: { width: 0, height: 6 },
+                                            elevation: 8,
+                                        }}
+                                    >
+                                        <Text style={{ position: 'absolute', top: 5, right: 50, fontSize: 24, color: 'rgba(255,255,255,0.25)', fontWeight: '300' }}>+</Text>
+                                        <Text style={{ position: 'absolute', top: 40, right: 15, fontSize: 18, color: 'rgba(255,255,255,0.2)', fontWeight: '300' }}>×</Text>
+                                        <Text style={{ position: 'absolute', bottom: 8, right: 80, fontSize: 20, color: 'rgba(255,255,255,0.18)', fontWeight: '300' }}>÷</Text>
+                                        <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+
+                                        <Image
+                                            source={
+                                                uiChildren[0]?.avatar && !uiChildren[0].avatar.includes('default.png')
+                                                    ? { uri: uiChildren[0].avatar }
+                                                    : icon
+                                            }
+                                            style={styles.childAvatar}
+                                        />
+                                        <View style={styles.childInfo}>
+                                            <Text style={[styles.childName, styles.selectedText]} numberOfLines={1}>
+                                                {uiChildren[0].name}
+                                            </Text>
+                                            <Text style={[styles.childClass, styles.selectedSubText]}>
+                                                Class {uiChildren[0].class} - {uiChildren[0].section}
+                                            </Text>
+                                            <View style={styles.childMeta}>
+                                                <View style={[styles.metaBadge, styles.selectedBadge]}>
+                                                    <Text style={[styles.metaText, styles.selectedText]}>
+                                                        Roll: {uiChildren[0].rollNo}
+                                                    </Text>
+                                                </View>
+                                                <View style={[styles.metaBadge, styles.selectedBadge]}>
+                                                    <Text style={[styles.metaText, styles.selectedText]}>
+                                                        {uiChildren[0].admissionNo || 'N/A'}
+                                                    </Text>
+                                                </View>
+                                            </View>
+                                        </View>
+                                        <View style={styles.selectedIndicator}>
+                                            <Text style={styles.checkmark}>✓</Text>
+                                        </View>
+                                    </LinearGradient>
+                                </HapticTouchable>
+                            </Animated.View>
+                        ) : (
+                            // Multiple children - snap carousel, each card = full section width
+                            (() => {
+                                const CARD_WIDTH = SCREEN_WIDTH - 32;
+                                const CARD_GAP = 12;
+                                const SNAP_INTERVAL = CARD_WIDTH + CARD_GAP;
+                                const selectedIndex = Math.max(0, uiChildren.findIndex(c => c.id === selectedChild?.id));
+
+                                return (
+                                    <FlatList
+                                        data={uiChildren}
+                                        horizontal
+                                        pagingEnabled={false}
+                                        showsHorizontalScrollIndicator={false}
+                                        snapToInterval={SNAP_INTERVAL}
+                                        snapToAlignment="start"
+                                        decelerationRate="fast"
+                                        initialScrollIndex={selectedIndex}
+                                        getItemLayout={(_, index) => ({
+                                            length: SNAP_INTERVAL,
+                                            offset: SNAP_INTERVAL * index,
+                                            index,
+                                        })}
+                                        contentContainerStyle={{ paddingRight: 32 }}
+                                        keyExtractor={(item) => item.id}
+                                        // NO onMomentumScrollEnd - selection only changes on tap
+                                        renderItem={({ item: child, index }) => {
+                                            const isSelected = selectedChild?.id === child.id;
+                                            return (
+                                                <Animated.View
+                                                    entering={FadeInRight.delay(200 + index * 100).duration(500)}
+                                                    style={{
+                                                        width: CARD_WIDTH,
+                                                        marginRight: CARD_GAP,
+                                                    }}
+                                                >
+                                                    <HapticTouchable onPress={() => setSelectedChild(child)}>
+                                                        <LinearGradient
+                                                            colors={isSelected ? ['#0469ff', '#0347b8'] : ['#f8f9fa', '#e9ecef']}
+                                                            style={{
+                                                                flexDirection: 'row',
+                                                                padding: 16,
+                                                                borderRadius: 16,
+                                                                gap: 12,
+                                                                position: 'relative',
+                                                                overflow: 'hidden',
+                                                                alignItems: 'center',
+                                                                minHeight: 100,
+                                                                shadowColor: isSelected ? '#0469ff' : '#000',
+                                                                shadowOpacity: isSelected ? 0.3 : 0.08,
+                                                                shadowRadius: isSelected ? 12 : 4,
+                                                                shadowOffset: { width: 0, height: isSelected ? 6 : 2 },
+                                                                elevation: isSelected ? 8 : 2,
+                                                            }}
+                                                        >
+                                                            {isSelected && (
+                                                                <>
+                                                                    <Text style={{ position: 'absolute', top: 8, right: 45, fontSize: 14, color: 'rgba(255,255,255,0.15)', fontWeight: '300' }}>+</Text>
+                                                                    <Text style={{ position: 'absolute', top: 35, right: 20, fontSize: 10, color: 'rgba(255,255,255,0.12)', fontWeight: '300' }}>×</Text>
+                                                                    <Text style={{ position: 'absolute', bottom: 12, right: 70, fontSize: 16, color: 'rgba(255,255,255,0.1)', fontWeight: '300' }}>÷</Text>
+                                                                    <View style={{ position: 'absolute', top: -15, right: -15, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.05)' }} />
+                                                                </>
+                                                            )}
+
+                                                            <Image
+                                                                source={
+                                                                    child?.avatar && !child.avatar.includes('default.png')
+                                                                        ? { uri: child.avatar }
+                                                                        : icon
+                                                                }
+                                                                style={styles.childAvatar}
+                                                            />
+                                                            <View style={styles.childInfo}>
+                                                                <Text style={[styles.childName, isSelected && styles.selectedText]} numberOfLines={1}>
+                                                                    {child.name}
+                                                                </Text>
+                                                                <Text style={[styles.childClass, isSelected && styles.selectedSubText]}>
+                                                                    Class {child.class} - {child.section}
+                                                                </Text>
+                                                                <View style={styles.childMeta}>
+                                                                    <View style={[styles.metaBadge, isSelected && styles.selectedBadge]}>
+                                                                        <Text style={[styles.metaText, isSelected && styles.selectedText]}>
+                                                                            Roll: {child.rollNo}
+                                                                        </Text>
+                                                                    </View>
+                                                                    <View style={[styles.metaBadge, isSelected && styles.selectedBadge]}>
+                                                                        <Text style={[styles.metaText, isSelected && styles.selectedText]}>
+                                                                            {child.admissionNo || 'N/A'}
+                                                                        </Text>
+                                                                    </View>
+                                                                </View>
+                                                            </View>
+
+                                                            {isSelected && (
+                                                                <View style={styles.selectedIndicator}>
+                                                                    <Text style={styles.checkmark}>✓</Text>
+                                                                </View>
+                                                            )}
+                                                        </LinearGradient>
+                                                    </HapticTouchable>
+                                                </Animated.View>
+                                            );
+                                        }}
+                                    />
+                                );
+                            })()
+                        )}
+                    </View>
+                </Animated.View>
+
+                {/* Updates & Alerts Widget */}
+                {(pendingHomework > 0 || newExamResults > 0 || recentNotice || nextEvent) && (
+                    <Animated.View entering={FadeInDown.delay(250).duration(500)} style={styles.updatesWidget}>
+                        {pendingHomework > 0 && (
+                            <HapticTouchable
+                                style={styles.updateItem}
+                                onPress={() => navigateOnce({ pathname: '/my-child/parent-homework', params: { childData: JSON.stringify(selectedChild) } })}
+                            >
+                                <View style={[styles.updateIconBg, { backgroundColor: '#E3F2FD' }]}>
+                                    <BookOpen size={14} color="#3B82F6" />
+                                </View>
+                                <Text style={styles.updateText} numberOfLines={1}>
+                                    {pendingHomework} new homework
+                                </Text>
+                                <ArrowRight size={14} color="#999" />
+                            </HapticTouchable>
+                        )}
+                        {newExamResults > 0 && (
+                            <HapticTouchable
+                                style={styles.updateItem}
+                                onPress={() => navigateOnce({ pathname: '/my-child/parent-exams', params: { childData: JSON.stringify(selectedChild) } })}
+                            >
+                                <View style={[styles.updateIconBg, { backgroundColor: '#FEF3C7' }]}>
+                                    <Award size={14} color="#F59E0B" />
+                                </View>
+                                <Text style={styles.updateText} numberOfLines={1}>
+                                    {newExamResults} new exam result{newExamResults > 1 ? 's' : ''}
+                                </Text>
+                                <ArrowRight size={14} color="#999" />
+                            </HapticTouchable>
+                        )}
+                        {recentNotice && (
+                            <HapticTouchable
+                                style={styles.updateItem}
+                                onPress={() => navigateOnce('/(tabs)/noticeboard')}
+                            >
+                                <View style={[styles.updateIconBg, { backgroundColor: '#FFEBEE' }]}>
+                                    <Bell size={14} color="#EF4444" />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.updateText} numberOfLines={1}>
+                                        🔴 {recentNotice.title}
+                                    </Text>
+                                    <Text style={styles.updateTime}>{recentNotice.time}</Text>
+                                </View>
+                                <ArrowRight size={14} color="#999" />
+                            </HapticTouchable>
+                        )}
+                        {nextEvent && (
+                            <HapticTouchable
+                                style={styles.updateItem}
+                                onPress={() => navigateOnce('/(screens)/calendarscreen')}
+                            >
+                                <View style={[styles.updateIconBg, { backgroundColor: '#E8F5E9' }]}>
+                                    <Calendar size={14} color="#4CAF50" />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.updateText} numberOfLines={1}>
+                                        📅 {nextEvent.title || nextEvent.name}
+                                    </Text>
+                                    <Text style={styles.updateTime}>
+                                        {nextEvent.date ? new Date(nextEvent.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : ''}
+                                    </Text>
+                                </View>
+                                <ArrowRight size={14} color="#999" />
+                            </HapticTouchable>
+                        )}
+                    </Animated.View>
+                )}
+
+                {/* Quick Stats for Selected Child */}
+                <Animated.View entering={FadeInDown.delay(300).duration(600)} style={styles.section}>
+                    {isStatsLoading ? (
+                        <View style={styles.statsLoadingContainer}>
+                            <ActivityIndicator size="small" color="#0469ff" />
+                            <Text style={styles.statsLoadingText}>Updating stats...</Text>
+                        </View>
+                    ) : (
+                        <View style={styles.statsGrid}>
+                            <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce({ pathname: '/my-child/attendance', params: { childData: JSON.stringify(selectedChild) } })}>
+                                <LinearGradient
+                                    colors={['#4ECDC4', '#26A69A']}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 1 }}
+                                    style={[styles.statCard, { shadowColor: '#4ECDC4', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                                >
+                                    {/* Decorative Elements */}
+                                    <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                                    <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+
+                                    <View style={styles.statIcon}>
+                                        <CheckCircle2 size={22} color="#fff" />
+                                    </View>
+                                    <View>
+                                        <Text
+                                            style={[styles.statValue, { fontSize: PARENT_QUICK_STAT_VALUE_FONT_SIZE }]}
+                                            numberOfLines={1}
+                                            adjustsFontSizeToFit
+                                            minimumFontScale={0.7}
+                                        >
+                                            {childAttendance === 0 ? '0%' : `${Math.round(childAttendance)}%`}
+                                        </Text>
+                                        <Text style={[styles.statLabel, { fontSize: PARENT_QUICK_STAT_LABEL_FONT_SIZE }]}>Attendance</Text>
+                                    </View>
+                                </LinearGradient>
+                            </HapticTouchable>
+
+                            <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce({ pathname: '/my-child/parent-exams', params: { childData: JSON.stringify(selectedChild) } })}>
+                                <LinearGradient
+                                    colors={['#FF9F43', '#F59E0B']}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 1 }}
+                                    style={[styles.statCard, { shadowColor: '#FF9F43', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                                >
+                                    {/* Decorative Elements */}
+                                    <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                                    <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+
+                                    <View style={styles.statIcon}>
+                                        <TrendingUp size={22} color="#fff" />
+                                    </View>
+                                    <View>
+                                        <Text
+                                            style={[styles.statValue, { fontSize: PARENT_QUICK_STAT_VALUE_FONT_SIZE }]}
+                                            numberOfLines={1}
+                                            ellipsizeMode="tail"
+                                        >
+                                            {childPerformance}
+                                        </Text>
+                                        <Text style={[styles.statLabel, { fontSize: PARENT_QUICK_STAT_LABEL_FONT_SIZE }]}>Performance</Text>
+                                    </View>
+                                </LinearGradient>
+                            </HapticTouchable>
+
+                            <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce({ pathname: '/(screens)/payfees', params: { childData: JSON.stringify(selectedChild) } })}>
+                                <LinearGradient
+                                    colors={pendingFee > 0 ? ['#FF6B6B', '#EE5A5A'] : ['#10B981', '#059669']}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 1 }}
+                                    style={[styles.statCard, { shadowColor: pendingFee > 0 ? '#FF6B6B' : '#10B981', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                                >
+                                    {/* Decorative Elements */}
+                                    <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
+                                    <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
+
+                                    <View style={styles.statIcon}>
+                                        <DollarSign size={22} color="#fff" />
+                                    </View>
+                                    <View>
+                                        <Text
+                                            style={[styles.statValue, { fontSize: PARENT_QUICK_STAT_VALUE_FONT_SIZE }]}
+                                            numberOfLines={1}
+                                            adjustsFontSizeToFit
+                                            minimumFontScale={0.7}
+                                        >
+                                            {feeStatusDisplay}
+                                        </Text>
+                                        <Text style={[styles.statLabel, { fontSize: PARENT_QUICK_STAT_LABEL_FONT_SIZE }]}>Fee Status</Text>
+                                    </View>
+                                </LinearGradient>
+                            </HapticTouchable>
+                        </View>
+                    )}
+                </Animated.View>
+                {/* Quick Actions */}
+                {
+                    actionGroups && actionGroups.map((group, groupIndex) => (
+                        <Animated.View
+                            key={group.title}
+                            entering={FadeInDown.delay(400 + groupIndex * 100).duration(600)}
+                            style={styles.section}
+                        >
+                            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                                <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>{group.title}</Text>
+                                {groupIndex === 0 && (
+                                    <HapticTouchable onPress={() => setShowSearchModal(true)}>
+                                        <View style={{ padding: 8, backgroundColor: 'rgba(4, 105, 255, 0.1)', borderRadius: 12 }}>
+                                            <Search size={20} color="#0469ff" />
+                                        </View>
+                                    </HapticTouchable>
+                                )}
+                            </View>
+                            <View style={styles.actionsGrid}>
+                                {group.actions.map((action, index) => {
+                                    const totalItems = group.actions.length;
+                                    // Tablet: 3 columns, Mobile: 2 columns
+                                    const columns = isTablet ? 3 : 2;
+                                    // Full width only for single item
+                                    const isFullWidth = totalItems === 1;
+                                    // Calculate width based on columns
+                                    const itemWidth = isTablet ? '31.5%' : '48%';
+
+                                    return (
+                                        <Animated.View
+                                            key={action.label}
+                                            entering={FadeInDown.delay(500 + index * 50).duration(400)}
+                                            style={{ width: isFullWidth ? '100%' : itemWidth }}
+                                        >
+                                            <HapticTouchable
+                                                onPress={() => {
+                                                    if (action.params) {
+                                                        navigateOnce(action.href, action.params);
+                                                    } else {
+                                                        navigateOnce(action.href || '');
+                                                    }
+                                                }}
+                                            >
+                                                <View style={[
+                                                    styles.actionButton,
+                                                    { backgroundColor: action.bgColor, width: '100%' }
+                                                ]}>
+                                                    {/* Decorative Graphics */}
+                                                    <View style={{ position: 'absolute', top: -15, right: -15, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.2)' }} />
+                                                    <View style={{ position: 'absolute', bottom: -20, left: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.15)' }} />
+                                                    <View style={[styles.actionIcon, { backgroundColor: action.color + '20' }]}>
+                                                        <action.icon size={22} color={action.color} />
+                                                        {action.badge && (
+                                                            <View style={styles.badgeContainer}>
+                                                                <Text style={styles.badgeText}>{action.badge > 99 ? '99+' : action.badge}</Text>
+                                                            </View>
+                                                        )}
+                                                    </View>
+                                                    <Text style={styles.actionLabel} numberOfLines={1}>
+                                                        {action.label}
+                                                    </Text>
+                                                </View>
+                                            </HapticTouchable>
+                                        </Animated.View>
+                                    );
+                                })}
+                            </View>
+                        </Animated.View>
+                    ))
+                }
+                {/* Upcoming Events */}
+                <Animated.View entering={FadeInDown.delay(600).duration(600)} style={styles.section}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Upcoming Events</Text>
+                        <HapticTouchable onPress={() => navigateOnce('/(screens)/calendarscreen')}>
+                            <Text style={styles.seeAll}>See All</Text>
+                        </HapticTouchable>
+                    </View>
+                    <View style={styles.eventsContainer}>
+                        {upcomingEvents && upcomingEvents.length > 0 ? (
+                            upcomingEvents.map((event, index) => (
+                                <Animated.View key={event.id} entering={FadeInRight.delay(700 + index * 100).duration(500)}>
+                                    <HapticTouchable onPress={() => navigateOnce({ pathname: '/(screens)/calendarscreen', params: { eventid: event.id } })}>
+                                        <View style={styles.eventCard}>
+                                            <View style={[styles.eventIcon, { backgroundColor: event.color + '20' }]}>
+                                                <Text style={styles.eventEmoji}>{event.icon}</Text>
+                                            </View>
+                                            <View style={styles.eventInfo}>
+                                                <Text style={styles.eventTitle}>{event.title}</Text>
+                                                <View style={styles.eventDate}>
+                                                    <Calendar size={14} color="#666" />
+                                                    <Text style={styles.eventDateText}>{event.date}</Text>
+                                                </View>
+                                            </View>
+                                            <ChevronRight size={20} color="#999" />
+                                        </View>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))
+                        ) : (
+                            <View style={styles.emptyStateCard}>
+                                <View style={styles.emptyStateIconContainer}>
+                                    <Calendar size={28} color="#10b981" />
+                                </View>
+                                <Text style={styles.emptyStateTitle}>You're all caught up!</Text>
+                                <Text style={styles.emptyStateSubtitle}>No upcoming events scheduled</Text>
+                                <HapticTouchable
+                                    onPress={() => navigateOnce('/(screens)/calendarscreen')}
+                                    style={styles.emptyStateButton}
+                                >
+                                    <Text style={styles.emptyStateButtonText}>View Calendar</Text>
+                                    <ChevronRight size={16} color="#0469ff" />
+                                </HapticTouchable>
+                            </View>
+                        )}
+                    </View>
+                </Animated.View>
+                {/* Recent Notices */}
+                <Animated.View entering={FadeInDown.delay(800).duration(600)} style={[styles.section, { marginBottom: 30 }]}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Recent Notices</Text>
+                        <HapticTouchable onPress={() => navigateOnce('/(tabs)/noticeboard')}>
+                            <Text style={styles.seeAll}>View All</Text>
+                        </HapticTouchable>
+                    </View>
+                    <View style={styles.noticesContainer}>
+                        {notices && notices.length > 0 ? (
+                            notices.map((notice, index) => (
+                                <Animated.View
+                                    key={notice.id}
+                                    entering={FadeInRight.delay(900 + index * 100).duration(500)}
+                                >
+                                    <HapticTouchable onPress={() => navigateOnce('/(tabs)/noticeboard')}>
+                                        <View style={styles.noticeCard}>
+                                            <View style={styles.noticeLeft}>
+                                                <View style={[styles.noticeIcon, notice.unread && styles.unreadIcon]}>
+                                                    <Bell size={16} color={notice.unread ? '#0469ff' : '#999'} />
+                                                </View>
+                                                <View style={styles.noticeInfo}>
+                                                    <Text style={[styles.noticeTitle, notice.unread && styles.unreadTitle]}>
+                                                        {notice.title}
+                                                    </Text>
+
+                                                    <Text style={styles.noticeTime}>{notice.time}</Text>
+                                                </View>
+                                            </View>
+                                            {notice.unread && <View style={styles.unreadDot} />}
+                                        </View>
+                                    </HapticTouchable>
+                                </Animated.View>
+                            ))
+                        ) : (
+                            <View style={styles.emptyStateCard}>
+                                <View style={[styles.emptyStateIconContainer, { backgroundColor: '#FEF3C7' }]}>
+                                    <Bell size={28} color="#F59E0B" />
+                                </View>
+                                <Text style={styles.emptyStateTitle}>No new notices</Text>
+                                <Text style={styles.emptyStateSubtitle}>You're up to date with all announcements</Text>
+                                <HapticTouchable
+                                    onPress={() => navigateOnce('/(tabs)/noticeboard')}
+                                    style={styles.emptyStateButton}
+                                >
+                                    <Text style={styles.emptyStateButtonText}>View Noticeboard</Text>
+                                    <ChevronRight size={16} color="#0469ff" />
+                                </HapticTouchable>
+                            </View>
+                        )}
+                    </View>
+                </Animated.View>
+
+                {/* Bottom Spacer */}
+                <View style={{ height: 100 }} />
+
+                {/* Add Child Modal */}
+                <AddChildModal
+                    visible={showAddChildModal}
+                    onClose={() => setShowAddChildModal(false)}
+                    parentId={parentId}
+                    schoolId={schoolId}
+                    onSuccess={handleAddChildSuccess}
+                />
+
+                <ActionSearchModal
+                    visible={showSearchModal}
+                    onClose={() => setShowSearchModal(false)}
+                    actionGroups={actionGroups}
+                    searchQuery={searchQuery}
+                    setSearchQuery={setSearchQuery}
+                    onNavigate={(action) => {
+                        if (action.params) {
+                            navigateOnce(action.href, action.params);
+                        } else {
+                            navigateOnce(action.href || '');
+                        }
+                    }}
+                />
+            </Animated.ScrollView >
+        );
+    };
+
+
     // === DRIVER VIEW ===
 
     // === DIRECTOR VIEW ===
-    const DirectorView = ({ refreshing, onRefresh, schoolId, userId, paddingTop, refreshOffset, navigateOnce }) => {
+    const DirectorView = ({ refreshing, onRefresh, schoolId, userId, paddingTop, header, refreshOffset, navigateOnce }) => {
         // Fetch academic years first (like admin web dashboard)
         const { data: academicYears, isLoading: isLoadingYears } = useQuery({
-            queryKey: homeQueryKeys.academicYears(schoolId),
+            queryKey: ['academic-years', schoolId],
             queryFn: async () => {
                 const res = await api.get(`/schools/academic-years?schoolId=${schoolId}`);
                 return Array.isArray(res.data) ? res.data : (res.data?.academicYears || []);
             },
             enabled: !!schoolId,
-            ...HOME_CACHE_CONFIG.STATIC,
+            ...CACHE_CONFIG.STATIC,
         });
 
         // Get active academic year from fetched data
@@ -1364,7 +2742,7 @@ export default function HomeScreen() {
 
         // Fetch dashboard stats with TanStack Query
         const { data: apiStats, isLoading, error } = useQuery({
-            queryKey: homeQueryKeys.dashboardOverview(schoolId, academicYearId),
+            queryKey: QUERY_KEYS.dashboardOverview(schoolId, academicYearId),
             queryFn: async () => {
                 console.log('📡 Fetching dashboard data with academicYearId:', academicYearId);
                 const res = await api.get(
@@ -1385,7 +2763,7 @@ export default function HomeScreen() {
         });
         // Fetch detailed fee dashboard data
         const { data: feeStats } = useQuery({
-            queryKey: homeQueryKeys.feeDashboard(schoolId, academicYearId),
+            queryKey: ['fee-dashboard', schoolId, academicYearId],
             queryFn: async () => {
                 const res = await api.get('/schools/fee/admin/dashboard', {
                     params: { schoolId, academicYearId }
@@ -1417,14 +2795,14 @@ export default function HomeScreen() {
 
         // Fetch notices for director
         const { data: recentNotices } = useQuery({
-            queryKey: homeQueryKeys.directorNotices(schoolId, userId),
+            queryKey: ['director-notices', schoolId, userId],
             queryFn: async () => {
                 if (!schoolId || !userId) return { notices: [] };
                 const res = await api.get(`/notices/${schoolId}?userId=${userId}&limit=4&page=1`);
                 return res.data;
             },
             enabled: !!schoolId && !!userId,
-            ...HOME_CACHE_CONFIG.MODERATE,
+            ...CACHE_CONFIG.MODERATE,
         });
 
         const notices = recentNotices?.notices?.map((n) => ({
@@ -1721,16 +3099,16 @@ export default function HomeScreen() {
 
 
     // === PRINCIPAL VIEW ===
-    const PrincipalView = ({ refreshing, onRefresh, paddingTop, schoolId, userId, refreshOffset, navigateOnce }) => {
+    const PrincipalView = ({ refreshing, onRefresh, paddingTop, schoolId, userId, header, refreshOffset, navigateOnce }) => {
         // Fetch academic years first (like admin web dashboard)
         const { data: academicYears, isLoading: isLoadingYears } = useQuery({
-            queryKey: homeQueryKeys.academicYears(schoolId),
+            queryKey: ['academic-years', schoolId],
             queryFn: async () => {
                 const res = await api.get(`/schools/academic-years?schoolId=${schoolId}`);
                 return Array.isArray(res.data) ? res.data : (res.data?.academicYears || []);
             },
             enabled: !!schoolId,
-            ...HOME_CACHE_CONFIG.STATIC,
+            ...CACHE_CONFIG.STATIC,
         });
 
         // Get active academic year from fetched data
@@ -1738,7 +3116,7 @@ export default function HomeScreen() {
 
         // Fetch dashboard stats with TanStack Query
         const { data: apiStats, isLoading, error } = useQuery({
-            queryKey: homeQueryKeys.dashboardOverview(schoolId, academicYearId),
+            queryKey: QUERY_KEYS.dashboardOverview(schoolId, academicYearId),
             queryFn: async () => {
                 const res = await api.get(
                     `/schools/${schoolId}/dashboard/overview`,
@@ -1767,14 +3145,14 @@ export default function HomeScreen() {
 
         // Fetch notices for principal
         const { data: recentNotices } = useQuery({
-            queryKey: homeQueryKeys.principalNotices(schoolId, userId),
+            queryKey: ['principal-notices', schoolId, userId],
             queryFn: async () => {
                 if (!schoolId || !userId) return { notices: [] };
                 const res = await api.get(`/notices/${schoolId}?userId=${userId}&limit=4&page=1`);
                 return res.data;
             },
             enabled: !!schoolId && !!userId,
-            ...HOME_CACHE_CONFIG.MODERATE,
+            ...CACHE_CONFIG.MODERATE,
         });
 
         const notices = recentNotices?.notices?.map((n) => ({
@@ -2045,14 +3423,14 @@ export default function HomeScreen() {
     // ==================== ACCOUNTANT VIEW ====================
     const AccountantView = ({ refreshing, onRefresh, schoolId, userId, paddingTop, refreshOffset, banner, navigateOnce }) => {
         const { data: dashboardData, isLoading, refetch } = useQuery({
-            queryKey: homeQueryKeys.accountantDashboard(schoolId, userId),
+            queryKey: ['accountant-dashboard', schoolId, userId],
             queryFn: async () => {
                 if (!schoolId || !userId) return null;
                 const res = await api.get(`/mobile/dashboard/accountant?schoolId=${schoolId}&userId=${userId}`);
                 return res.data?.data || res.data;
             },
             enabled: !!schoolId && !!userId,
-            ...HOME_CACHE_CONFIG.MODERATE,
+            ...CACHE_CONFIG.MODERATE,
         });
 
         const fees = dashboardData?.fees;
@@ -2451,25 +3829,80 @@ export default function HomeScreen() {
     return (
         <View style={styles.container} edges={['top']}>
             <StatusBar style="light" />
-            <HomeHeader
-                user={user_acc}
-                uiData={uiData}
-                styles={styles}
-                iconMap={IconMap}
-                unreadCount={unreadCount}
-                isSmallDevice={isSmallDevice}
-                navigateOnce={navigateOnce}
-                onRefresh={onRefresh}
-                replaceDynamic={replaceDynamic}
-                getGreeting={getGreeting}
-                getInitials={getInitials}
-                headerAnimatedStyle={headerAnimatedStyle}
-                headerContentOpacity={headerContentOpacity}
-                headerNameStyle={headerNameStyle}
-                headerIconsTranslate={headerIconsTranslate}
-                avatarAnimatedStyle={avatarAnimatedStyle}
-                headerMaxHeight={HEADER_MAX_HEIGHT}
-            />
+            <Animated.View style={[{ zIndex: 100, position: 'absolute', top: 0, left: 0, right: 0, height: HEADER_MAX_HEIGHT }, headerAnimatedStyle]}>
+                {/* Dynamically render header content with animations */}
+                {(() => {
+                    const roleKey = user_acc?.role?.name?.toLowerCase() ?? '';
+                    const config = uiData.header[roleKey] || uiData.header.student;
+                    const title = replaceDynamic(config.title, roleKey);
+                    const subtitle = config.subtitle.map((item, i) => replaceDynamic(item.text, roleKey)).join(' • '); // Simplification for demo
+
+                    const icons = config.icons.map((key, i) => {
+                        const Icon = IconMap[key];
+                        if (!Icon) return null;
+                        const isBell = key === 'bell';
+                        const isRefresh = key === 'refresh';
+                        return (
+                            <HapticTouchable key={i} onPress={isBell ? () => navigateOnce('(screens)/notification') : isRefresh ? onRefresh : undefined}>
+                                <View style={[styles.iconButton, { backgroundColor: '#fff', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 4, elevation: 3 }]}>
+                                    <Icon size={isSmallDevice ? 18 : 20} color="#0469ff" />
+                                    {isBell && unreadCount > 0 && (
+                                        <View style={[styles.badge, { backgroundColor: '#FF6B6B' }]}>
+                                            <Text style={[styles.badgeText, { color: '#fff', fontSize: 10 }]}>{unreadCount > 99 ? '99+' : unreadCount}</Text>
+                                        </View>
+                                    )}
+                                </View>
+                            </HapticTouchable>
+                        );
+                    });
+
+                    return (
+                        <LinearGradient colors={['#0469ff', '#0256d0']} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={[styles.header, { width: '100%', borderBottomLeftRadius: 30, borderBottomRightRadius: 30, paddingTop: isSmallDevice ? 30 : 40, paddingBottom: 0, height: '100%' }]}>
+                            {/* Background Pattern */}
+                            <Text style={{ position: 'absolute', top: -10, right: 80, fontSize: 40, color: 'rgba(255,255,255,0.1)', fontWeight: 'bold' }}>+</Text>
+                            <Text style={{ position: 'absolute', top: 50, right: 30, fontSize: 24, color: 'rgba(255,255,255,0.08)', fontWeight: 'bold' }}>×</Text>
+                            <View style={{ position: 'absolute', top: -50, right: -50, width: 220, height: 220, borderRadius: 110, backgroundColor: 'rgba(255,255,255,0.05)' }} />
+
+                            <View style={[styles.headerLeft, { flexDirection: 'row', alignItems: 'center', width: '100%', paddingHorizontal: 20 }]}>
+                                <HapticTouchable onPress={() => navigateOnce('(tabs)/profile')}>
+                                    <Animated.View style={[avatarAnimatedStyle, {
+                                        backgroundColor: '#f0f0f0',
+                                        borderWidth: 2.5,
+                                        borderColor: '#fff',
+                                        justifyContent: 'center',
+                                        alignItems: 'center',
+                                        overflow: 'hidden',
+                                    }]}>
+                                        {user_acc?.profilePicture && user_acc.profilePicture !== 'default.png' ? (
+                                            <Image source={{ uri: user_acc.profilePicture }} style={{ width: '100%', height: '100%' }} contentFit="cover" />
+                                        ) : (
+                                            <Text style={{ color: '#0469ff', fontSize: 22, fontWeight: '700' }}>
+                                                {getInitials(user_acc?.parentData?.name || user_acc?.name || 'User') || 'U'}
+                                            </Text>
+                                        )}
+                                    </Animated.View>
+                                </HapticTouchable>
+
+                                <View style={[styles.headerInfo, { marginLeft: 12, flex: 1, justifyContent: 'center' }]}>
+                                    <Animated.View style={headerContentOpacity}>
+                                        <Text style={[styles.welcomeText, { color: 'rgba(255,255,255,0.9)', fontSize: 13, fontWeight: '500' }]}>{getGreeting()},</Text>
+                                    </Animated.View>
+                                    <Animated.View style={headerNameStyle}>
+                                        <Text style={[styles.name, { color: '#fff', fontSize: 18, marginTop: 2 }]} numberOfLines={1}>{title}</Text>
+                                        <Text style={[styles.parentEmail, { marginTop: 4, color: 'rgba(255,255,255,0.7)', fontSize: 12 }]} numberOfLines={1}>
+                                            {subtitle}
+                                        </Text>
+                                    </Animated.View>
+                                </View>
+
+                                <Animated.View style={[{ flexDirection: 'row', gap: 10 }, headerIconsTranslate]}>
+                                    {icons}
+                                </Animated.View>
+                            </View>
+                        </LinearGradient>
+                    );
+                })()}
+            </Animated.View>
 
             {/* Today's Events (if any) */}
             {renderContent()}
@@ -2491,8 +3924,43 @@ export default function HomeScreen() {
 }
 
 
+// Self-managing modal wrapper — re-renders independently from HomeScreen
+const StatusModals = ({ selectedStatusGroupRef, showStatusUploadRef, setSelectedStatusGroup, setShowStatusUpload, schoolId, userId, queryClient, modalUpdateRef }) => {
+    const [, forceUpdate] = useReducer(x => x + 1, 0);
+
+    // Register the forceUpdate callback so HomeScreen can trigger re-renders
+    useEffect(() => {
+        modalUpdateRef.current = forceUpdate;
+        return () => { modalUpdateRef.current = null; };
+    }, [modalUpdateRef]);
+
+    const selectedStatusGroup = selectedStatusGroupRef.current;
+    const showStatusUpload = showStatusUploadRef.current;
+
+    return (
+        <>
+            <StatusViewer
+                visible={!!selectedStatusGroup}
+                statusGroup={selectedStatusGroup}
+                schoolId={schoolId}
+                viewerId={userId}
+                onClose={() => {
+                    setSelectedStatusGroup(null);
+                    queryClient.refetchQueries({ queryKey: ['statusFeed'], type: 'active' });
+                }}
+            />
+            <StatusUpload
+                visible={showStatusUpload}
+                onClose={() => setShowStatusUpload(false)}
+                schoolId={schoolId}
+                userId={userId}
+            />
+        </>
+    );
+};
+
 // === STYLES ===
-export const styles = StyleSheet.create({
+const styles = StyleSheet.create({
     activeTripFloatingBanner: {
         position: 'absolute',
         bottom: 90, // Above bottom tabs
@@ -3660,14 +5128,14 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
 
     // --- CONSOLIDATED DASHBOARD API FOR TEACHER ---
     const { data: dashboardData, isLoading: isDashboardLoading, refetch: refetchDashboard } = useQuery({
-        queryKey: homeQueryKeys.teacherDashboard(schoolId, userId),
+        queryKey: ['teacher-dashboard', schoolId, userId],
         queryFn: async () => {
             if (!schoolId || !userId) return null;
             const res = await api.get(`/mobile/dashboard/teacher?schoolId=${schoolId}&userId=${userId}`);
             return res.data?.data || res.data;
         },
         enabled: !!schoolId && !!userId,
-        ...HOME_CACHE_CONFIG.MODERATE,
+        ...CACHE_CONFIG.MODERATE,
     });
 
     // Extract data from consolidated response - memoize to prevent infinite renders
@@ -4532,14 +6000,14 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
 
     // Fetch notices for driver
     const { data: recentNotices } = useQuery({
-        queryKey: homeQueryKeys.driverNotices(schoolId, userId),
+        queryKey: ['driver-notices', schoolId, userId],
         queryFn: async () => {
             if (!schoolId || !userId) return { notices: [] };
             const res = await api.get(`/notices/${schoolId}?userId=${userId}&limit=4&page=1`);
             return res.data;
         },
         enabled: !!schoolId && !!userId,
-        ...HOME_CACHE_CONFIG.MODERATE,
+        ...CACHE_CONFIG.MODERATE,
     });
 
     const notices = recentNotices?.notices?.map((n) => ({
@@ -5332,14 +6800,14 @@ const ConductorView = ({ refreshing, onRefresh, onScroll, paddingTop, refreshOff
 
     // Fetch notices for conductor
     const { data: recentNotices } = useQuery({
-        queryKey: homeQueryKeys.conductorNotices(schoolId, userId),
+        queryKey: ['conductor-notices', schoolId, userId],
         queryFn: async () => {
             if (!schoolId || !userId) return { notices: [] };
             const res = await api.get(`/notices/${schoolId}?userId=${userId}&limit=4&page=1`);
             return res.data;
         },
         enabled: !!schoolId && !!userId,
-        ...HOME_CACHE_CONFIG.MODERATE,
+        ...CACHE_CONFIG.MODERATE,
     });
 
     const notices = recentNotices?.notices?.map((n) => ({

@@ -556,9 +556,21 @@ export default function LoginScreen() {
             }
 
             router.replace('/(screens)/greeting');
+
         } catch (err) {
-            console.error('Login error:', err);
-            setErrors({ general: 'An unexpected error occurred. Please try again.' });
+            console.error(err);
+
+            let message = 'Something went wrong. Please try again.';
+
+            if (err.response?.status === 404) {
+                message = 'This account is not linked to any school account.';
+            } else if (err.response?.status === 401) {
+                message = 'Session expired. Please login again.';
+            } else if (!err.response) {
+                message = 'Network error. Please check your connection.';
+            }
+
+            setErrors({ message });
         } finally {
             setLoading(false);
         }
@@ -630,13 +642,20 @@ export default function LoginScreen() {
 
             console.log('✅ Google OAuth session established for:', sessionData.user.email);
 
-            // Fetch user from backend (same as email/password login)
-            const user = await fetchUser(sessionData.user.id, access_token);
+            // Verify OAuth user against our database (backend handles orphan cleanup)
+            const verifyRes = await api.post('/auth/verify-oauth', {
+                accessToken: access_token,
+                provider: 'google',
+            });
+            const user = verifyRes.data;
 
-            if (!user) {
-                // User authenticated with Google but doesn't exist in our backend
+            // User not in our DB — orphan Supabase user was auto-deleted by backend
+            if (!user || user.linked === false) {
                 await supabase.auth.signOut();
-                setErrors({ general: 'No account found for this Google email. Please contact your school admin to create your account.' });
+                setErrors({
+                    general: user?.message ||
+                        'No account found for this Google email. Please contact your school admin to create your account.',
+                });
                 return;
             }
 
@@ -645,7 +664,7 @@ export default function LoginScreen() {
                 await supabase.auth.signOut();
                 Alert.alert(
                     'Web Only',
-                    `${user.role?.name === 'ADMIN' ? 'Admin' : user.role?.name === 'LIBRARIAN' ? 'Librarian' : 'Super Admin'} accounts can only access the web dashboard at atlas.edubreezy.com.`,
+                    `${user.role?.name === 'ADMIN' ? 'Admin' : user.role?.name === 'LIBRARIAN' ? 'Librarian' : 'Super Admin'} accounts can only access the web dashboard wwww.edubreezy.com.`,
                     [{ text: 'OK' }]
                 );
                 setGoogleLoading(false);
@@ -723,8 +742,19 @@ export default function LoginScreen() {
 
             router.replace('/(screens)/greeting');
         } catch (err) {
-            console.error('Google login error:', err);
-            setErrors({ general: err.message || 'Google sign-in failed. Please try again.' });
+            console.error(err);
+
+            let message = 'Something went wrong. Please try again.';
+
+            if (err.response?.status === 404) {
+                message = 'This account is not linked to any school account.';
+            } else if (err.response?.status === 401) {
+                message = 'Session expired. Please login again.';
+            } else if (!err.response) {
+                message = 'Network error. Please check your connection.';
+            }
+
+            setErrors({ general: message });
         } finally {
             setGoogleLoading(false);
         }
@@ -792,12 +822,20 @@ export default function LoginScreen() {
 
             console.log('✅ Apple OAuth session established for:', sessionData.user.email);
 
-            // Fetch user from backend (same as Google login)
-            const user = await fetchUser(sessionData.user.id, access_token);
+            // Verify OAuth user against our database (backend handles orphan cleanup)
+            const verifyRes = await api.post('/auth/verify-oauth', {
+                accessToken: access_token,
+                provider: 'apple',
+            });
+            const user = verifyRes.data;
 
-            if (!user) {
+            // User not in our DB — orphan Supabase user was auto-deleted by backend
+            if (!user || user.linked === false) {
                 await cleanupAppleIdentity();
-                setErrors({ general: 'No account found for this Apple ID. Please contact your school admin to create your account.' });
+                setErrors({
+                    general: user?.message ||
+                        'No account found for this Apple ID. Please contact your school admin to create your account.',
+                });
                 return;
             }
 
@@ -884,8 +922,19 @@ export default function LoginScreen() {
 
             router.replace('/(screens)/greeting');
         } catch (err) {
-            console.error('Apple login error:', err);
-            setErrors({ general: err.message || 'Apple sign-in failed. Please try again.' });
+            console.error(err);
+
+            let message = 'Something went wrong. Please try again.';
+
+            if (err.response?.status === 404) {
+                message = 'This account is not linked to any school account.';
+            } else if (err.response?.status === 401) {
+                message = 'Session expired. Please login again.';
+            } else if (!err.response) {
+                message = 'Network error. Please check your connection.';
+            }
+
+            setErrors({ general: message || 'Apple Sign In Failed' });
         } finally {
             setAppleLoading(false);
         }
@@ -1542,7 +1591,7 @@ const styles = StyleSheet.create({
     },
     loginButtonDisabled: {
         backgroundColor: '#93c5fd',
-        shadowOpacity: 0.15,
+        // shadowOpacity: 0.15,
     },
     loadingContainer: {
         flexDirection: 'row',

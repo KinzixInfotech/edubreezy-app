@@ -10,10 +10,11 @@ import {
     RefreshControl,
     Platform,
     Dimensions,
+    Alert,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useFocusEffect } from 'expo-router';
-import { ArrowLeft, CheckCheck, X, Bell, BellOff, AlertCircle, Megaphone, CreditCard, GraduationCap } from 'lucide-react-native';
+import { ArrowLeft, CheckCheck, Trash2, X, Bell, BellOff, AlertCircle, Megaphone, CreditCard, GraduationCap } from 'lucide-react-native';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as SecureStore from 'expo-secure-store';
 import api from '../../lib/api';
@@ -32,6 +33,7 @@ const VIEWABILITY_CONFIG = {
     minimumViewTime: 120,
 };
 const READ_SYNC_DEBOUNCE_MS = 350;
+const DELETED_NOTIFICATIONS_KEY_PREFIX = 'deleted_notifications';
 
 const getNotificationImageUrl = (item) => {
     if (!item) return null;
@@ -121,7 +123,16 @@ const updatePagedNotifications = (oldData, updater) => {
 
     return {
         ...oldData,
-        pages: oldData.pages.map((page) => page.map((notification) => updater(notification))),
+        pages: oldData.pages.map((page) => {
+            if (Array.isArray(page)) {
+                return page.map((notification) => updater(notification));
+            }
+
+            return {
+                ...page,
+                items: (page.items || []).map((notification) => updater(notification)),
+            };
+        }),
     };
 };
 
@@ -134,6 +145,46 @@ const updateSummaryNotifications = (oldData, updater) => {
             today: (oldData.notifications.today || []).map(updater),
             yesterday: (oldData.notifications.yesterday || []).map(updater),
             earlier: (oldData.notifications.earlier || []).map(updater),
+        },
+    };
+};
+
+const removeNotificationsById = (notifications = [], idsToRemove) => {
+    if (!idsToRemove?.size) return notifications;
+    return notifications.filter((notification) => !idsToRemove.has(notification.id));
+};
+
+const removePagedNotifications = (oldData, ids) => {
+    if (!oldData?.pages?.length || !ids?.length) return oldData;
+    const idSet = new Set(ids);
+
+    return {
+        ...oldData,
+        pages: oldData.pages
+            .map((page) => {
+                if (Array.isArray(page)) {
+                    return removeNotificationsById(page, idSet);
+                }
+
+                return {
+                    ...page,
+                    items: removeNotificationsById(page.items || [], idSet),
+                };
+            })
+            .filter((page) => Array.isArray(page) ? page.length > 0 : (page.items || []).length > 0),
+    };
+};
+
+const removeSummaryNotifications = (oldData, ids) => {
+    if (!oldData?.notifications || !ids?.length) return oldData;
+    const idSet = new Set(ids);
+
+    return {
+        ...oldData,
+        notifications: {
+            today: removeNotificationsById(oldData.notifications.today || [], idSet),
+            yesterday: removeNotificationsById(oldData.notifications.yesterday || [], idSet),
+            earlier: removeNotificationsById(oldData.notifications.earlier || [], idSet),
         },
     };
 };
@@ -190,6 +241,46 @@ const NotificationItem = ({ item, onPress, isLast }) => {
     );
 };
 
+const extractNotificationsPageMeta = (payload, fallbackOffset = 0) => {
+    const items = flattenNotificationGroups(payload?.notifications);
+    const totalCount =
+        payload?.totalCount ??
+        payload?.total ??
+        payload?.count ??
+        payload?.pagination?.totalCount ??
+        payload?.pagination?.total ??
+        payload?.meta?.totalCount ??
+        payload?.meta?.total ??
+        null;
+    const nextOffset =
+        payload?.nextOffset ??
+        payload?.pagination?.nextOffset ??
+        payload?.meta?.nextOffset ??
+        null;
+    const hasMore =
+        payload?.hasMore ??
+        payload?.pagination?.hasMore ??
+        payload?.meta?.hasMore ??
+        null;
+
+    return {
+        items,
+        offset: fallbackOffset,
+        totalCount: typeof totalCount === 'number' ? totalCount : null,
+        nextOffset: typeof nextOffset === 'number' ? nextOffset : null,
+        hasMore: typeof hasMore === 'boolean' ? hasMore : null,
+    };
+};
+
+const filterDeletedNotificationsFromPage = (page, deletedIds) => {
+    if (!page || !deletedIds?.size) return page;
+
+    return {
+        ...page,
+        items: removeNotificationsById(page.items || [], deletedIds),
+    };
+};
+
 export default function NotificationScreen() {
     const [selectedNotification, setSelectedNotification] = useState(null);
     const [modalVisible, setModalVisible] = useState(false);
@@ -198,6 +289,11 @@ export default function NotificationScreen() {
     const queryClient = useQueryClient();
     const pendingReadIdsRef = useRef(new Set());
     const readFlushTimerRef = useRef(null);
+    const paginationThrottleRef = useRef(0);
+    const paginationRequestInFlightRef = useRef(false);
+    const endReachedEnabledRef = useRef(false);
+    const deletedNotificationIdsRef = useRef(new Set());
+    const [deletedNotificationVersion, setDeletedNotificationVersion] = useState(0);
 
     const syncStoredUser = useCallback(async () => {
         try {
@@ -231,6 +327,56 @@ export default function NotificationScreen() {
     const schoolId = currentUser?.schoolId || currentUser?.school?.id;
     const notificationsQueryKey = homeQueryKeys.notificationsFeed(userId, schoolId);
     const notificationsSummaryQueryKey = homeQueryKeys.notificationsSummary(userId, schoolId);
+    const deletedNotificationsStorageKey = userId ? `${DELETED_NOTIFICATIONS_KEY_PREFIX}_${userId}` : null;
+
+    const persistDeletedNotificationIds = useCallback(async (idsSet) => {
+        if (!deletedNotificationsStorageKey) return;
+
+        try {
+            if (!idsSet?.size) {
+                await SecureStore.deleteItemAsync(deletedNotificationsStorageKey);
+                return;
+            }
+
+            await SecureStore.setItemAsync(
+                deletedNotificationsStorageKey,
+                JSON.stringify(Array.from(idsSet))
+            );
+        } catch (error) {
+            console.error('Failed to persist deleted notifications:', error);
+        }
+    }, [deletedNotificationsStorageKey]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadDeletedNotificationIds = async () => {
+            if (!deletedNotificationsStorageKey) {
+                deletedNotificationIdsRef.current = new Set();
+                setDeletedNotificationVersion((value) => value + 1);
+                return;
+            }
+
+            try {
+                const raw = await SecureStore.getItemAsync(deletedNotificationsStorageKey);
+                if (cancelled) return;
+
+                const parsed = raw ? JSON.parse(raw) : [];
+                deletedNotificationIdsRef.current = new Set(Array.isArray(parsed) ? parsed : []);
+                setDeletedNotificationVersion((value) => value + 1);
+            } catch (error) {
+                console.error('Failed to load deleted notifications:', error);
+                deletedNotificationIdsRef.current = new Set();
+                setDeletedNotificationVersion((value) => value + 1);
+            }
+        };
+
+        loadDeletedNotificationIds();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [deletedNotificationsStorageKey]);
 
     const setNotificationsCache = useCallback((updater) => {
         queryClient.setQueryData(notificationsQueryKey, updater);
@@ -296,18 +442,40 @@ export default function NotificationScreen() {
     } = useInfiniteQuery({
         queryKey: notificationsQueryKey,
         queryFn: async ({ pageParam = 0 }) => {
-            if (!userId || !schoolId) return [];
+            if (!userId || !schoolId) {
+                return {
+                    items: [],
+                    offset: pageParam,
+                    totalCount: 0,
+                    nextOffset: null,
+                    hasMore: false,
+                };
+            }
             const res = await api.get(
                 `/notifications?userId=${userId}&schoolId=${schoolId}&limit=${PAGE_SIZE}&offset=${pageParam}`
             );
-            return flattenNotificationGroups(res.data?.notifications);
+            const page = extractNotificationsPageMeta(res.data, pageParam);
+            return filterDeletedNotificationsFromPage(page, deletedNotificationIdsRef.current);
         },
         enabled: !!userId && !!schoolId,
         initialPageParam: 0,
         getNextPageParam: (lastPage, allPages) => {
-            if (!lastPage?.length || lastPage.length < PAGE_SIZE) return undefined;
-            const loadedCount = allPages.reduce((total, page) => total + page.length, 0);
-            return loadedCount;
+            const lastItems = lastPage?.items || [];
+            if (!lastItems.length) return undefined;
+            if (lastPage?.hasMore === false) return undefined;
+            if (typeof lastPage?.nextOffset === 'number') return lastPage.nextOffset;
+
+            const allItems = mergeUniqueNotifications(allPages.map((page) => page.items || []));
+            const previousItems = mergeUniqueNotifications(allPages.slice(0, -1).map((page) => page.items || []));
+            const newlyAddedCount = allItems.length - previousItems.length;
+
+            if (newlyAddedCount <= 0) return undefined;
+            if (typeof lastPage?.totalCount === 'number' && allItems.length >= lastPage.totalCount) {
+                return undefined;
+            }
+            if (lastItems.length < PAGE_SIZE) return undefined;
+
+            return lastPage.offset + lastItems.length;
         },
         staleTime: 1000 * 60 * 2, // 2 min stale time - prevents refetch on remount
         gcTime: 1000 * 60 * 30, // 30 min garbage collection
@@ -376,9 +544,13 @@ export default function NotificationScreen() {
     };
 
     const groupedNotifications = useMemo(() => {
-        const mergedNotifications = mergeUniqueNotifications(data?.pages || []);
+        const mergedNotifications = mergeUniqueNotifications(
+            (data?.pages || []).map((page) =>
+                removeNotificationsById(page.items || [], deletedNotificationIdsRef.current)
+            )
+        );
         return groupNotifications(mergedNotifications);
-    }, [data]);
+    }, [data, deletedNotificationVersion]);
 
     const todayFiltered = filterSentByMe(groupedNotifications.today);
     const yesterdayFiltered = filterSentByMe(groupedNotifications.yesterday);
@@ -397,6 +569,7 @@ export default function NotificationScreen() {
     const filteredUnreadCount = filteredUnreadIds.length;
 
     const selectedNotificationImage = getNotificationImageUrl(selectedNotification);
+    const visibleNotificationIds = useMemo(() => visibleNotifications.map((notification) => notification.id), [visibleNotifications]);
 
     const onViewableItemsChanged = useCallback(({ viewableItems }) => {
         const idsToMark = viewableItems
@@ -411,9 +584,24 @@ export default function NotificationScreen() {
     }, [markNotificationsReadOptimistically, queueReadSync]);
 
     const handleEndReached = useCallback(() => {
-        if (!hasNextPage || isFetchingNextPage) return;
-        fetchNextPage();
-    }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
+        if (!hasNextPage || isFetchingNextPage || isLoading) return;
+        if (!endReachedEnabledRef.current || paginationRequestInFlightRef.current) return;
+
+        const now = Date.now();
+        if (now - paginationThrottleRef.current < 900) return;
+
+        paginationThrottleRef.current = now;
+        paginationRequestInFlightRef.current = true;
+        endReachedEnabledRef.current = false;
+
+        Promise.resolve(fetchNextPage()).finally(() => {
+            paginationRequestInFlightRef.current = false;
+        });
+    }, [fetchNextPage, hasNextPage, isFetchingNextPage, isLoading]);
+
+    const enableEndReached = useCallback(() => {
+        endReachedEnabledRef.current = true;
+    }, []);
 
     const handleMarkAllRead = useCallback(() => {
         if (!filteredUnreadIds.length || markAllReadMutation.isPending) return;
@@ -422,6 +610,58 @@ export default function NotificationScreen() {
         markNotificationsReadOptimistically(filteredUnreadIds);
         markAllReadMutation.mutate(filteredUnreadIds);
     }, [filteredUnreadIds, flushPendingReads, markAllReadMutation, markNotificationsReadOptimistically]);
+
+    const deleteAllMutation = useMutation({
+        mutationFn: () => api.delete('/notifications', {
+            data: {
+                userId,
+                schoolId,
+                clearAll: true,
+            },
+        }),
+        onError: (error) => {
+            console.error('Failed to delete notifications:', error?.response?.data || error?.message || error);
+            Alert.alert('Delete failed', 'Could not clear notifications right now. Please try again.');
+        },
+        onSettled: () => {
+            queryClient.invalidateQueries({ queryKey: notificationsSummaryQueryKey, refetchType: 'inactive' });
+        },
+    });
+
+    const handleClearAll = useCallback(() => {
+        if (!visibleNotificationIds.length || deleteAllMutation.isPending) return;
+
+        Alert.alert(
+            'Clear all notifications?',
+            'This will delete the loaded notifications for this account.',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: () => {
+                        flushPendingReads();
+                        const updatedDeletedIds = new Set(deletedNotificationIdsRef.current);
+                        visibleNotificationIds.forEach((id) => updatedDeletedIds.add(id));
+                        deletedNotificationIdsRef.current = updatedDeletedIds;
+                        setDeletedNotificationVersion((value) => value + 1);
+                        persistDeletedNotificationIds(updatedDeletedIds);
+                        setNotificationsCache((old) => removePagedNotifications(old, visibleNotificationIds));
+                        queryClient.setQueryData(notificationsSummaryQueryKey, (old) => removeSummaryNotifications(old, visibleNotificationIds));
+                        deleteAllMutation.mutate();
+                    },
+                },
+            ]
+        );
+    }, [
+        deleteAllMutation,
+        flushPendingReads,
+        notificationsSummaryQueryKey,
+        persistDeletedNotificationIds,
+        queryClient,
+        setNotificationsCache,
+        visibleNotificationIds,
+    ]);
 
     // Flatten data for FlatList
     const flatData = [
@@ -450,13 +690,28 @@ export default function NotificationScreen() {
 
                 <Text style={styles.headerTitle}>Notifications</Text>
 
-                <TouchableOpacity
-                    onPress={handleMarkAllRead}
-                    disabled={!filteredUnreadCount || markAllReadMutation.isPending}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                    <CheckCheck size={24} color={filteredUnreadCount ? "#000" : "#C7C7CC"} />
-                </TouchableOpacity>
+                <View style={styles.headerActions}>
+                    <TouchableOpacity
+                        onPress={handleMarkAllRead}
+                        disabled={!filteredUnreadCount || markAllReadMutation.isPending}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        style={styles.headerIconButton}
+                    >
+                        <CheckCheck size={24} color={filteredUnreadCount ? "#000" : "#C7C7CC"} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        onPress={handleClearAll}
+                        disabled={!visibleNotificationIds.length || deleteAllMutation.isPending}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        style={styles.headerIconButton}
+                    >
+                        {deleteAllMutation.isPending ? (
+                            <ActivityIndicator size="small" color="#000" />
+                        ) : (
+                            <Trash2 size={22} color={visibleNotificationIds.length ? "#000" : "#C7C7CC"} />
+                        )}
+                    </TouchableOpacity>
+                </View>
             </View>
 
             {/* List */}
@@ -466,6 +721,8 @@ export default function NotificationScreen() {
                 contentContainerStyle={styles.listContent}
                 onViewableItemsChanged={onViewableItemsChanged}
                 viewabilityConfig={VIEWABILITY_CONFIG}
+                onScrollBeginDrag={enableEndReached}
+                onMomentumScrollBegin={enableEndReached}
                 onEndReached={handleEndReached}
                 onEndReachedThreshold={0.35}
                 refreshControl={
@@ -640,6 +897,16 @@ const styles = StyleSheet.create({
         backgroundColor: '#fff',
         borderBottomWidth: 0.5,
         borderBottomColor: '#E5E5EA',
+    },
+    headerActions: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 16,
+    },
+    headerIconButton: {
+        minWidth: 24,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     backButton: {
         padding: 4,

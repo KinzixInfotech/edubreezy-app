@@ -22,6 +22,9 @@ import api, { API_BASE_URL } from '../../../lib/api';
 import { getSchoolLocation, isNearSchool, getDistanceMeters, formatDistance } from '../../../lib/geofence-service';
 import { useAttendanceReminder, REMINDER_TYPES } from '../../../contexts/AttendanceReminderContext';
 import { StatusBar } from 'expo-status-bar';
+import NetInfo from '@react-native-community/netinfo';
+import { getDeviceInfo as getUnifiedDeviceInfo } from '../../../lib/deviceInfo';
+import { enqueueAttendanceAction, getAttendanceQueue, syncAttendanceQueue } from '../../../lib/attendanceQueue';
 
 // Configure notification handler
 Notifications.setNotificationHandler({
@@ -36,6 +39,7 @@ Notifications.setNotificationHandler({
 const STORAGE_KEYS = {
     CHECK_IN_TIME: 'attendance_check_in_time',
     NOTIFICATION_IDS: 'attendance_notification_ids',
+    LAST_LOCATION_SAMPLE: 'attendance_last_location_sample',
 };
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -73,6 +77,8 @@ export default function SelfAttendance() {
     const [schoolLocation, setSchoolLocation] = useState(null);
     const [distanceToSchool, setDistanceToSchool] = useState(null);
     const [isWithinRadius, setIsWithinRadius] = useState(false);
+    const [securitySignals, setSecuritySignals] = useState([]);
+    const [queuedActionsCount, setQueuedActionsCount] = useState(0);
     const [liveHours, setLiveHours] = useState(0);
     const pulseAnim = useSharedValue(1);
     const intervalRef = useRef(null);
@@ -101,9 +107,34 @@ export default function SelfAttendance() {
         reason: ''
     });
 
+    const refreshQueuedActionsCount = useCallback(async () => {
+        try {
+            const queue = await getAttendanceQueue();
+            setQueuedActionsCount(queue.length);
+        } catch (error) {
+            console.error('Failed to load queued attendance actions:', error);
+        }
+    }, []);
+
+    const syncQueuedAttendance = useCallback(async () => {
+        try {
+            const result = await syncAttendanceQueue();
+            await refreshQueuedActionsCount();
+            if (result.synced > 0) {
+                queryClient.invalidateQueries({ queryKey: ['self-attendance-status'] });
+            }
+            return result;
+        } catch (error) {
+            console.error('Failed to sync queued attendance:', error);
+            return { synced: 0, failed: 0, skipped: 0 };
+        }
+    }, [queryClient, refreshQueuedActionsCount]);
+
     useEffect(() => {
         loadUser();
-    }, []);
+        refreshQueuedActionsCount();
+        syncQueuedAttendance();
+    }, [refreshQueuedActionsCount, syncQueuedAttendance]);
 
     useEffect(() => {
         const subscription = AppState.addEventListener('change', handleAppStateChange);
@@ -113,6 +144,8 @@ export default function SelfAttendance() {
     const handleAppStateChange = (nextState) => {
         if (appState.current.match(/inactive|background/) && nextState === 'active') {
             queryClient.invalidateQueries({ queryKey: ['self-attendance-status'] });
+            syncQueuedAttendance();
+            refreshQueuedActionsCount();
         }
         appState.current = nextState;
     };
@@ -161,29 +194,62 @@ export default function SelfAttendance() {
                     timeout: 15000
                 });
 
-                setLocation({
+                const mocked = Boolean(loc?.mocked ?? loc?.coords?.mocked);
+                const accuracy = loc?.coords?.accuracy ?? null;
+                const capturedAt = new Date().toISOString();
+                const currentLocation = {
                     latitude: loc.coords.latitude,
                     longitude: loc.coords.longitude,
-                    accuracy: loc.coords.accuracy
-                });
+                    accuracy,
+                    mocked,
+                    capturedAt,
+                };
+
+                const currentSignals = [];
+                if (mocked) currentSignals.push('MOCK_LOCATION');
+                if (typeof accuracy === 'number' && accuracy < 5) currentSignals.push('ACCURACY_TOO_PERFECT');
+
+                try {
+                    const previousRaw = await SecureStore.getItemAsync(STORAGE_KEYS.LAST_LOCATION_SAMPLE);
+                    if (previousRaw) {
+                        const previous = JSON.parse(previousRaw);
+                        const elapsedSeconds = Math.max(1, (new Date(capturedAt) - new Date(previous.capturedAt)) / 1000);
+                        const movedMeters = getDistanceMeters(
+                            previous.latitude,
+                            previous.longitude,
+                            currentLocation.latitude,
+                            currentLocation.longitude
+                        );
+                        const speedMps = movedMeters / elapsedSeconds;
+                        if (speedMps > 120) {
+                            currentSignals.push('UNREALISTIC_MOVEMENT');
+                        }
+                    }
+                    await SecureStore.setItemAsync(STORAGE_KEYS.LAST_LOCATION_SAMPLE, JSON.stringify(currentLocation));
+                } catch (signalError) {
+                    console.error('Failed to compute movement signals:', signalError);
+                }
+
+                setLocation(currentLocation);
+                setSecuritySignals(currentSignals);
 
                 // Calculate distance if school location is available and geofencing is enabled
                 if (schoolLocation?.enableGeoFencing && schoolLocation?.latitude && schoolLocation?.longitude) {
                     const dist = getDistanceMeters(
-                        loc.coords.latitude,
-                        loc.coords.longitude,
+                        currentLocation.latitude,
+                        currentLocation.longitude,
                         schoolLocation.latitude,
                         schoolLocation.longitude
                     );
                     setDistanceToSchool(Math.round(dist));
 
-                    const radius = schoolLocation.attendanceRadius || 500;
-                    setIsWithinRadius(dist <= radius);
+                    const radius = schoolLocation.attendanceRadius ?? schoolLocation.radiusMeters ?? null;
+                    setIsWithinRadius(radius == null ? true : dist <= radius);
                 } else if (schoolLocation?.latitude && schoolLocation?.longitude) {
                     // School location exists but geofencing is disabled - calculate distance for display only
                     const dist = getDistanceMeters(
-                        loc.coords.latitude,
-                        loc.coords.longitude,
+                        currentLocation.latitude,
+                        currentLocation.longitude,
                         schoolLocation.latitude,
                         schoolLocation.longitude
                     );
@@ -197,11 +263,13 @@ export default function SelfAttendance() {
                 setLocationError(err.message || 'Failed to get location');
             }
 
+            const unifiedDeviceInfo = await getUnifiedDeviceInfo();
             setDeviceInfo({
                 deviceId: Device.modelName,
                 platform: Platform.OS,
                 osVersion: Platform.Version,
-                appVersion: '1.0.0'
+                appVersion: '1.0.0',
+                ...unifiedDeviceInfo,
             });
         })();
     }, [userId, schoolId, schoolLocation]);
@@ -415,6 +483,60 @@ export default function SelfAttendance() {
         }
     };
 
+    const buildAttendancePayload = useCallback((type) => ({
+        userId,
+        type,
+        location,
+        deviceInfo,
+        capturedAt: location?.capturedAt ?? new Date().toISOString(),
+    }), [deviceInfo, location, userId]);
+
+    const queueAttendanceAction = useCallback(async (type) => {
+        const payload = buildAttendancePayload(type);
+
+        await enqueueAttendanceAction({
+            schoolId,
+            ...payload,
+        });
+
+        if (type === 'CHECK_IN') {
+            await saveCheckInState(new Date(payload.capturedAt));
+        }
+
+        Alert.alert(
+            'Queued Offline',
+            `${type === 'CHECK_IN' ? 'Check-in' : 'Check-out'} was saved on this device and will sync automatically when the internet returns.`
+        );
+        await refreshQueuedActionsCount();
+    }, [buildAttendancePayload, refreshQueuedActionsCount, schoolId]);
+
+    const validateAttendanceAttempt = useCallback((type) => {
+        if (!location) {
+            throw new Error('Location not available');
+        }
+
+        if (securitySignals.includes('MOCK_LOCATION')) {
+            throw new Error('Mock location detected. Please disable fake GPS apps and try again.');
+        }
+
+        if (config?.enableGeoFencing && schoolLocation?.enableGeoFencing && isWithinRadius === false) {
+            const radius = config?.allowedRadius ?? config?.allowedRadiusMeters ?? schoolLocation.attendanceRadius ?? schoolLocation.radiusMeters;
+            throw new Error(`You are too far from school. Please ensure you are within ${radius}m.`);
+        }
+
+        if (type === 'CHECK_IN' && attendance?.checkInTime) {
+            throw new Error('You have already checked in for today.');
+        }
+
+        if (type === 'CHECK_OUT' && !attendance?.checkInTime) {
+            throw new Error('Please check in before checking out.');
+        }
+
+        if (type === 'CHECK_OUT' && attendance?.checkOutTime) {
+            throw new Error('You have already checked out for today.');
+        }
+    }, [attendance?.checkInTime, attendance?.checkOutTime, config?.allowedRadius, config?.allowedRadiusMeters, config?.enableGeoFencing, isWithinRadius, location, schoolLocation?.attendanceRadius, schoolLocation?.enableGeoFencing, schoolLocation?.radiusMeters, securitySignals]);
+
     // ========== UX MESSAGE HELPERS ==========
 
     // Get contextual message for check-in window status
@@ -466,8 +588,8 @@ export default function SelfAttendance() {
     const getWorkProgressMessage = () => {
         if (!attendance?.checkInTime || attendance?.checkOutTime) return '';
 
-        const minHours = config?.halfDayHours || 4;
-        const fullHours = config?.fullDayHours || 8;
+        const minHours = config?.minHalfDayHours ?? config?.halfDayHours ?? 0;
+        const fullHours = config?.minFullDayHours ?? config?.fullDayHours ?? 0;
 
         if (liveHours >= fullHours) {
             return `✨ Full day completed! You can check out now.`;
@@ -482,23 +604,26 @@ export default function SelfAttendance() {
     // Check-in mutation
     const checkInMutation = useMutation({
         mutationFn: async () => {
-            if (!location) throw new Error('Location not available');
+            validateAttendanceAttempt('CHECK_IN');
 
-            // Proximity Check - only enforce if geofencing is enabled
-            if (config?.enableGeoFencing && schoolLocation?.enableGeoFencing && isWithinRadius === false) {
-                const radius = config?.allowedRadius || schoolLocation.attendanceRadius || 500;
-                throw new Error(`You are too far from school. Please ensure you are within ${radius}m.`);
+            const netState = await NetInfo.fetch();
+            if (!netState.isConnected || !netState.isInternetReachable) {
+                await queueAttendanceAction('CHECK_IN');
+                return {
+                    data: {
+                        success: true,
+                        queuedOffline: true,
+                    }
+                };
             }
 
-            return await api.post(`/schools/${schoolId}/attendance/mark`, {
-                userId,
-                type: 'CHECK_IN',
-                location,
-                deviceInfo
-            });
+            return await api.post(`/schools/${schoolId}/attendance/mark`, buildAttendancePayload('CHECK_IN'));
         },
         onSuccess: async (res) => {
             queryClient.invalidateQueries({ queryKey: ['self-attendance-status'] });
+            if (res?.data?.queuedOffline) {
+                return;
+            }
             if (!res.data.success) {
                 Alert.alert('Cannot Check In', res.data.message);
                 return;
@@ -527,23 +652,26 @@ export default function SelfAttendance() {
     // Check-out mutation
     const checkOutMutation = useMutation({
         mutationFn: async () => {
-            if (!location) throw new Error('Location not available');
+            validateAttendanceAttempt('CHECK_OUT');
 
-            // Proximity Check - only enforce if geofencing is enabled
-            if (config?.enableGeoFencing && schoolLocation?.enableGeoFencing && isWithinRadius === false) {
-                const radius = config?.allowedRadius || schoolLocation.attendanceRadius || 500;
-                throw new Error(`You are too far from school. Please ensure you are within ${radius}m.`);
+            const netState = await NetInfo.fetch();
+            if (!netState.isConnected || !netState.isInternetReachable) {
+                await queueAttendanceAction('CHECK_OUT');
+                return {
+                    data: {
+                        success: true,
+                        queuedOffline: true,
+                    }
+                };
             }
 
-            return await api.post(`/schools/${schoolId}/attendance/mark`, {
-                userId,
-                type: 'CHECK_OUT',
-                location,
-                deviceInfo
-            });
+            return await api.post(`/schools/${schoolId}/attendance/mark`, buildAttendancePayload('CHECK_OUT'));
         },
         onSuccess: async (res) => {
             queryClient.invalidateQueries({ queryKey: ['self-attendance-status'] });
+            if (res?.data?.queuedOffline) {
+                return;
+            }
             if (!res.data.success) {
                 Alert.alert('Cannot Check Out', res.data.message);
                 return;
@@ -668,6 +796,7 @@ export default function SelfAttendance() {
     const onRefresh = async () => {
         setRefreshing(true);
         await Promise.all([
+            syncQueuedAttendance(),
             queryClient.invalidateQueries({ queryKey: ['self-attendance-status'] }),
             queryClient.invalidateQueries({ queryKey: ['leave-requests'] }),
             queryClient.invalidateQueries({ queryKey: ['regularization-requests'] })
@@ -809,6 +938,32 @@ export default function SelfAttendance() {
                     </Animated.View>
                 )}
 
+                {securitySignals.length > 0 && (
+                    <Animated.View entering={FadeInDown.delay(120)} style={styles.alertCard}>
+                        <AlertTriangle size={24} color="#F59E0B" />
+                        <View style={styles.alertContent}>
+                            <Text style={styles.alertTitle}>Security checks active</Text>
+                            <Text style={styles.alertMessage}>
+                                {securitySignals.includes('MOCK_LOCATION')
+                                    ? 'Mock location was detected on this device. Attendance is blocked until fake GPS is disabled.'
+                                    : `Suspicious signals found: ${securitySignals.join(', ')}. Attendance may need approval.`}
+                            </Text>
+                        </View>
+                    </Animated.View>
+                )}
+
+                {queuedActionsCount > 0 && (
+                    <Animated.View entering={FadeInDown.delay(140)} style={styles.alertCard}>
+                        <Clock4 size={24} color="#0469ff" />
+                        <View style={styles.alertContent}>
+                            <Text style={styles.alertTitle}>Offline attendance queued</Text>
+                            <Text style={styles.alertMessage}>
+                                {queuedActionsCount} pending attendance action{queuedActionsCount > 1 ? 's are' : ' is'} waiting to sync.
+                            </Text>
+                        </View>
+                    </Animated.View>
+                )}
+
                 {/* On Leave Alert */}
                 {onLeave && leaveDetails && (
                     <Animated.View entering={FadeInDown.delay(200)} style={styles.leaveCard}>
@@ -887,7 +1042,7 @@ export default function SelfAttendance() {
                                         <AlertTriangle size={16} color="#DC2626" />
                                         <Text style={[styles.statusHintText, { color: '#991B1B' }]}>
                                             You are too far from school ({distanceToSchool ? formatDistance(distanceToSchool) : 'calculating...'}).
-                                            Radius: {config?.allowedRadius || schoolLocation.attendanceRadius || 500}m
+                                            Radius: {config?.allowedRadius ?? config?.allowedRadiusMeters ?? schoolLocation.attendanceRadius ?? schoolLocation.radiusMeters}m
                                         </Text>
                                     </View>
                                 )}
@@ -1079,7 +1234,7 @@ export default function SelfAttendance() {
                             <View style={styles.minTimeHint}>
                                 <Info size={14} color="#F59E0B" />
                                 <Text style={styles.minTimeText}>
-                                    Minimum {config?.halfDayHours || 4}h required • Available after{' '}
+                                    Minimum {config?.minHalfDayHours ?? config?.halfDayHours ?? 0}h required • Available after{' '}
                                     {new Date(windows.checkOut.minTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                                 </Text>
                             </View>
@@ -1112,7 +1267,7 @@ export default function SelfAttendance() {
                         <Clock size={20} color="#0469ff" />
                         <Text style={styles.infoLabel}>Office Hours</Text>
                         <Text style={styles.infoValue}>
-                            {config ? `${config.startTime} – ${config.endTime}` : '—'}
+                            {config ? `${config.defaultStartTime ?? config.startTime} – ${config.defaultEndTime ?? config.endTime}` : '—'}
                         </Text>
                     </Animated.View>
 

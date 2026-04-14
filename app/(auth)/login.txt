@@ -43,22 +43,27 @@ import api from '../../lib/api';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getDeviceInfo } from '../../lib/deviceInfo';
 import * as AppleAuthentication from 'expo-apple-authentication';
-import YoutubePlayer from 'react-native-youtube-iframe';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('screen');
 export const PRIMARY_COLOR = '#0b5cde';
 
 // Responsive scaling utilities
-const guidelineBaseWidth = 375;
-const guidelineBaseHeight = 812;
+const guidelineBaseWidth = 375; // iPhone 11 width
+const guidelineBaseHeight = 812; // iPhone 11 height
 
+// Scale based on screen width
 const scale = (size) => (SCREEN_WIDTH / guidelineBaseWidth) * size;
+// Scale based on screen height
 const verticalScale = (size) => (SCREEN_HEIGHT / guidelineBaseHeight) * size;
+// Moderate scale - for fonts and elements that shouldn't scale too much
 const moderateScale = (size, factor = 0.5) => size + (scale(size) - size) * factor;
 
+// Check if device is a tablet
 const isTablet = SCREEN_WIDTH >= 768;
+// Check if device is a small phone
 const isSmallPhone = SCREEN_WIDTH < 375;
 
+// Get responsive value based on device type
 const responsive = (small, normal, tablet) => {
     if (isTablet) return tablet;
     if (isSmallPhone) return small;
@@ -118,9 +123,13 @@ const AnimatedBackground = () => {
 
     return (
         <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            {/* Orb 1 - Top left, blue */}
             <Animated.View style={[styles.bgOrb, styles.bgOrb1, orb1Style]} />
+            {/* Orb 2 - Top right, indigo */}
             <Animated.View style={[styles.bgOrb, styles.bgOrb2, orb2Style]} />
+            {/* Orb 3 - Bottom left, purple */}
             <Animated.View style={[styles.bgOrb, styles.bgOrb3, orb3Style]} />
+            {/* Orb 4 - Center, sky */}
             <Animated.View style={[styles.bgOrb, styles.bgOrb4, orb4Style]} />
         </View>
     );
@@ -138,98 +147,121 @@ const LoginSchema = z.object({
         .max(50, 'Password is too long'),
 });
 
-// --- SCHOOL HERO CARD ---
-// Shows: cover image (if any) + YouTube embed (if any), then school identity below.
-// If neither cover nor video → no media block shown.
-const SchoolHeroCard = ({ schoolData, onSwitchSchool }) => {
+// School info card component - Compact: logo, name, code, switch
+const SchoolInfoCard = ({ schoolData, onSwitchSchool }) => {
     if (!schoolData) return null;
-
-    const {
-        name,
-        profilePicture,
-        schoolCode,
-        city,
-        state,
-        publicProfile,
-    } = schoolData;
-
-    const tagline = publicProfile?.tagline || null;
-    // Location string
-    const locationParts = [city, state].filter(Boolean);
-    const locationStr = locationParts.length > 0 ? locationParts.join(', ') : null;
 
     return (
         <Animated.View
-            entering={FadeInDown.delay(150).duration(600).springify()}
-            style={styles.heroCard}
+            entering={FadeInDown.delay(200).duration(600).springify()}
+            style={styles.schoolCardCompact}
         >
-            {/* Media Section: cover image backdrop + optional YouTube embed */}
-
-
-            {/* Identity Row */}
-            <View style={styles.heroIdentityRow}>
-                {/* Logo */}
-                <View style={styles.heroLogoWrapper}>
-                    {profilePicture ? (
+            <View style={styles.schoolCardCompactRow}>
+                <View style={styles.compactLogoContainer}>
+                    {schoolData.profilePicture ? (
                         <Image
-                            source={{ uri: profilePicture }}
-                            style={styles.heroLogo}
+                            source={{ uri: schoolData.profilePicture }}
+                            style={styles.compactLogo}
                             resizeMode="cover"
                         />
                     ) : (
-                        <View style={styles.heroLogoFallback}>
-                            <Text style={styles.heroLogoFallbackText}>
-                                {name?.charAt(0)?.toUpperCase() || 'S'}
+                        <View style={styles.compactLogoPlaceholder}>
+                            <Text style={styles.compactLogoText}>
+                                {schoolData.name?.charAt(0)?.toUpperCase() || 'S'}
                             </Text>
                         </View>
                     )}
                 </View>
-
-                {/* Name + tagline + meta */}
-                <View style={styles.heroTextBlock}>
-                    <Text style={styles.heroSchoolName} numberOfLines={2}>
-                        {name || 'School'}
+                <View style={styles.compactInfo}>
+                    <Text style={styles.compactName} numberOfLines={1}>
+                        {schoolData.name}
                     </Text>
-
-                    {tagline && (
-                        <Text style={styles.heroTagline} numberOfLines={2}>
-                            {tagline}
-                        </Text>
-                    )}
-
-                    <View style={styles.heroMetaRow}>
-                        {locationStr && (
-                            <View style={styles.heroMetaChip}>
-                                <Ionicons name="location-outline" size={11} color="#64748B" />
-                                <Text style={styles.heroMetaChipText}>{locationStr}</Text>
-                            </View>
-                        )}
-                        {/* Show code chip only if no media (already shown as badge) */}
-                        {/* {schoolCode && !hasMedia && (
-                            <View style={[styles.heroMetaChip, styles.heroCodeChip]}>
-                                <Ionicons name="school-outline" size={11} color={PRIMARY_COLOR} />
-                                <Text style={[styles.heroMetaChipText, { color: PRIMARY_COLOR }]}>{schoolCode}</Text>
-                            </View>
-                        )} */}
-                    </View>
+                    <Text style={styles.compactCode}>{schoolData.schoolCode}</Text>
                 </View>
-
-                {/* Switch button */}
                 <TouchableOpacity
                     onPress={onSwitchSchool}
-                    style={styles.heroSwitchBtn}
+                    style={styles.compactSwitchButton}
                     activeOpacity={0.7}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
-                    <Ionicons name="swap-horizontal-outline" size={16} color={PRIMARY_COLOR} />
-                    <Text style={styles.heroSwitchText}>Switch</Text>
+                    <Ionicons name="swap-horizontal" size={18} color={PRIMARY_COLOR} />
                 </TouchableOpacity>
             </View>
         </Animated.View>
     );
 };
 
-// Roles that are blocked from the mobile app
+
+
+// Theme Pattern Background Component — Premium Design
+const ThemePatternBackground = () => {
+    return (
+        <View style={styles.patternContainer}>
+            {/* Rich multi-stop gradient */}
+            <LinearGradient
+                colors={['#1a6fff', '#0b5cde', '#0847b3', '#042e7a']}
+                locations={[0, 0.3, 0.65, 1]}
+                start={{ x: 0.2, y: 0 }}
+                end={{ x: 0.8, y: 1 }}
+                style={styles.gradientBackground}
+            />
+
+            {/* Luminous orbs with glow */}
+            <View style={[styles.floatingCircle, styles.circle1]} />
+            <View style={[styles.floatingCircle, styles.circle2]} />
+            <View style={[styles.floatingCircle, styles.circle3]} />
+            <View style={[styles.floatingCircle, styles.circle4]} />
+
+            {/* Glow rings around orbs */}
+            <View style={styles.glowRing1} />
+            <View style={styles.glowRing2} />
+
+            {/* Soft mesh lines */}
+            <View style={styles.gridOverlay}>
+                {[...Array(6)].map((_, i) => (
+                    <View
+                        key={`h-${i}`}
+                        style={[styles.gridLine, { top: i * responsive(35, 45, 55) }]}
+                    />
+                ))}
+                {[...Array(5)].map((_, i) => (
+                    <View
+                        key={`v-${i}`}
+                        style={[styles.gridLineVertical, { left: i * responsive(75, 85, 100) }]}
+                    />
+                ))}
+            </View>
+
+            {/* Sparkle dots */}
+            <View style={[styles.sparkleDot, { top: '15%', left: '20%', width: 4, height: 4, opacity: 0.6 }]} />
+            <View style={[styles.sparkleDot, { top: '35%', right: '15%', width: 3, height: 3, opacity: 0.4 }]} />
+            <View style={[styles.sparkleDot, { top: '55%', left: '65%', width: 5, height: 5, opacity: 0.5 }]} />
+            <View style={[styles.sparkleDot, { top: '25%', left: '80%', width: 3, height: 3, opacity: 0.35 }]} />
+            <View style={[styles.sparkleDot, { top: '70%', left: '30%', width: 4, height: 4, opacity: 0.45 }]} />
+
+            {/* Bottom curve transition */}
+            <LinearGradient
+                colors={['transparent', 'rgba(4, 46, 122, 0.4)', 'rgba(4, 46, 122, 0.8)']}
+                locations={[0, 0.6, 1]}
+                style={styles.bottomFade}
+            />
+        </View>
+    );
+};
+
+// Feature item component
+const FeatureItem = ({ icon, text, delay }) => (
+    <Animated.View
+        entering={FadeInUp.delay(delay).duration(400)}
+        style={styles.featureItem}
+    >
+        <View style={styles.featureIconContainer}>
+            <Ionicons name={icon} size={16} color={PRIMARY_COLOR} />
+        </View>
+        <Text style={styles.featureText}>{text}</Text>
+    </Animated.View>
+);
+
+// Roles that are blocked from the mobile app — these are web-only
 const BLOCKED_MOBILE_ROLES = ['ADMIN', 'LIBRARIAN', 'SUPER_ADMIN'];
 
 export default function LoginScreen() {
@@ -250,12 +282,14 @@ export default function LoginScreen() {
 
     const buttonScale = useSharedValue(1);
 
+    // Keyboard visibility listener
     useEffect(() => {
         const showSub = Keyboard.addListener(
             Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
             (e) => {
                 setKeyboardVisible(true);
                 setKeyboardHeight(e.endCoordinates.height);
+                // Auto-scroll down on Android so fields stay visible
                 if (Platform.OS === 'android') {
                     setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
                 }
@@ -286,23 +320,35 @@ export default function LoginScreen() {
     }, [schoolConfigParam]);
 
     const handleForgotPassword = async () => {
+        // Open forgot password in web browser with app redirect
         const forgotPasswordUrl = `https://www.edubreezy.com/forgot-password?redirectTo=edubreezy`;
         await WebBrowser.openBrowserAsync(forgotPasswordUrl);
     };
 
     const handleSwitchSchool = async () => {
         try {
+            // Clear all auth and profile data when switching schools
             console.log('🔄 Switching schools - clearing all data...');
+
+            // Sign out from Supabase
             await supabase.auth.signOut();
+
+            // Clear all SecureStore data
             await SecureStore.deleteItemAsync('user');
             await SecureStore.deleteItemAsync('userRole');
             await SecureStore.deleteItemAsync('token');
             await SecureStore.deleteItemAsync('lastSchoolCode');
+
+            // Clear current school data
             await clearCurrentSchool();
+
             console.log('✅ All data cleared - navigating to school code');
+
+            // Navigate to school code page - use replace to not keep login in stack
             router.replace('/(auth)/schoolcode');
         } catch (error) {
             console.error('Error switching schools:', error);
+            // Still navigate even if clearing fails
             router.replace('/(auth)/schoolcode');
         }
     };
@@ -313,13 +359,14 @@ export default function LoginScreen() {
     };
 
     const validatePhone = (phoneValue) => {
-        const phoneRegex = /^[6-9]\d{9}$/;
+        const phoneRegex = /^[6-9]\d{9}$/; // Basic India mobile validation
         return phoneRegex.test(phoneValue);
     };
 
     const handleLogin = async () => {
         setErrors({});
 
+        // Custom validation for better UX
         const newErrors = {};
         const isEmail = validateEmail(credential.trim());
         const isPhone = /^\d+$/.test(credential.trim());
@@ -353,8 +400,11 @@ export default function LoginScreen() {
 
         try {
             setLoading(true);
+
+            // Clear any old tokens to prevent mismatch
             await SecureStore.deleteItemAsync('token');
 
+            // Button press animation
             buttonScale.value = withSequence(
                 withTiming(0.95, { duration: 100 }),
                 withTiming(1, { duration: 100 })
@@ -362,25 +412,35 @@ export default function LoginScreen() {
 
             let loginEmail = credential.trim();
 
+            // If phone number, lookup email first via backend API
             if (isPhone) {
                 console.log('📱 Phone number detected, looking up email for:', loginEmail);
+
                 try {
                     const schoolId = schoolConfig?.id;
                     if (!schoolId) {
+                        console.error('❌ No school ID available for phone lookup');
                         setErrors({ general: 'School not configured. Please try email login.' });
                         setLoading(false);
                         return;
                     }
+
+                    // Use backend API for phone-to-email lookup
                     const response = await api.post(`/schools/${schoolId}/lookup-phone`, {
                         phoneNumber: loginEmail,
                     });
+
                     if (!response.data?.email) {
+                        console.log('❌ Phone number not found');
                         setErrors({ general: 'Phone number not registered with this school.' });
                         setLoading(false);
                         return;
                     }
+
+                    console.log('✅ Email found for phone:', response.data.email);
                     loginEmail = response.data.email;
                 } catch (lookupError) {
+                    console.error('Error looking up phone:', lookupError?.response?.data || lookupError);
                     const errorMsg = lookupError?.response?.data?.error || 'Phone number not found. Please try email.';
                     setErrors({ general: errorMsg });
                     setLoading(false);
@@ -395,7 +455,7 @@ export default function LoginScreen() {
 
             if (error || !data.user) {
                 if (error?.message?.includes('Invalid login credentials')) {
-                    setErrors({ general: 'Invalid credentials. Please check your password.' });
+                    setErrors({ general: 'Invalid credentials. Please checking your password.' });
                 } else {
                     setErrors({ general: error?.message || 'Authorization Failed' });
                 }
@@ -410,17 +470,18 @@ export default function LoginScreen() {
                 return;
             }
 
+            // Block ADMIN, LIBRARIAN, SUPER_ADMIN roles from mobile app
             if (BLOCKED_MOBILE_ROLES.includes(user.role?.name)) {
                 await supabase.auth.signOut();
                 Alert.alert(
                     'Web Only',
-                    `${user.role?.name === 'ADMIN' ? 'Admin' : user.role?.name === 'LIBRARIAN' ? 'Librarian' : 'Super Admin'} accounts can only access the web dashboard at atlas.edubreezy.com.`,
+                    `${user.role?.name === 'ADMIN' ? 'Admin' : user.role?.name === 'LIBRARIAN' ? 'Librarian' : 'Super Admin'} accounts can only access the web dashboard at atlas.edubreezy.com. Please use the web version.`,
                     [{ text: 'OK' }]
                 );
                 setLoading(false);
                 return;
             }
-
+            // Store minimal user data in SecureStore (2048 byte limit)
             const minimalUser = {
                 id: user.id,
                 email: user.email,
@@ -462,16 +523,23 @@ export default function LoginScreen() {
             await SecureStore.setItemAsync('userRole', user?.role?.name || '');
             await SecureStore.setItemAsync('token', data.session.access_token);
 
+            // Save profile for this school code WITH session tokens (full user for profile manager)
             const schoolCode = schoolConfig?.schoolcode || schoolConfig?.schoolCode;
+            console.log('Saving profile for school code:', schoolCode);
+
             if (schoolCode) {
                 try {
                     await saveProfile(schoolCode, user, data.session);
+                    console.log('✅ Profile saved successfully with session for', schoolCode);
                     await saveCurrentSchool(schoolCode, { school: schoolConfig });
                 } catch (saveError) {
                     console.error('❌ Failed to save profile:', saveError);
                 }
+            } else {
+                console.warn('⚠️ No school code found, profile not saved');
             }
 
+            // Create session for device tracking
             try {
                 const deviceInfo = await getDeviceInfo();
                 const sessionRes = await api.post('/auth/sessions', {
@@ -481,6 +549,7 @@ export default function LoginScreen() {
                 });
                 if (sessionRes.data?.session?.id) {
                     await SecureStore.setItemAsync('currentSessionId', sessionRes.data.session.id);
+                    console.log('✅ Session created:', sessionRes.data.session.id);
                 }
             } catch (sessionErr) {
                 console.warn('Could not create session:', sessionErr.message);
@@ -490,7 +559,9 @@ export default function LoginScreen() {
 
         } catch (err) {
             console.error(err);
+
             let message = 'Something went wrong. Please try again.';
+
             if (err.response?.status === 404) {
                 message = 'This account is not linked to any school account.';
             } else if (err.response?.status === 401) {
@@ -498,6 +569,7 @@ export default function LoginScreen() {
             } else if (!err.response) {
                 message = 'Network error. Please check your connection.';
             }
+
             setErrors({ message });
         } finally {
             setLoading(false);
@@ -512,6 +584,8 @@ export default function LoginScreen() {
         try {
             setGoogleLoading(true);
             setErrors({});
+
+            // Clear any old tokens
             await SecureStore.deleteItemAsync('token');
 
             const { data: oauthData, error: oauthError } = await supabase.auth.signInWithOAuth({
@@ -523,17 +597,23 @@ export default function LoginScreen() {
             });
 
             if (oauthError) throw oauthError;
+
             if (!oauthData?.url) {
                 setErrors({ general: 'Failed to initiate Google sign-in.' });
                 return;
             }
 
+            // Open browser for Google OAuth
             const result = await WebBrowser.openAuthSessionAsync(oauthData.url, 'edubreezy://(auth)/login');
+
             if (result.type !== 'success' || !result.url) {
+                // User cancelled or browser closed
                 setGoogleLoading(false);
                 return;
             }
 
+            // Extract tokens from redirect URL
+            // URL format: edubreezy://#access_token=...&refresh_token=...&...
             const urlFragment = result.url.split('#')[1];
             if (!urlFragment) {
                 setErrors({ general: 'Authentication failed. Please try again.' });
@@ -549,6 +629,7 @@ export default function LoginScreen() {
                 return;
             }
 
+            // Set the session in Supabase client
             const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
                 access_token,
                 refresh_token,
@@ -559,28 +640,38 @@ export default function LoginScreen() {
                 return;
             }
 
+            console.log('✅ Google OAuth session established for:', sessionData.user.email);
+
+            // Verify OAuth user against our database (backend handles orphan cleanup)
             const verifyRes = await api.post('/auth/verify-oauth', {
                 accessToken: access_token,
                 provider: 'google',
             });
             const user = verifyRes.data;
 
+            // User not in our DB — orphan Supabase user was auto-deleted by backend
             if (!user || user.linked === false) {
                 await supabase.auth.signOut();
                 setErrors({
                     general: user?.message ||
-                        'No account found for this Google email. Please contact your school admin.',
+                        'No account found for this Google email. Please contact your school admin to create your account.',
                 });
                 return;
             }
 
+            // Block ADMIN, LIBRARIAN, SUPER_ADMIN roles from mobile app
             if (BLOCKED_MOBILE_ROLES.includes(user.role?.name)) {
                 await supabase.auth.signOut();
-                Alert.alert('Web Only', `This account can only access the web dashboard.`, [{ text: 'OK' }]);
+                Alert.alert(
+                    'Web Only',
+                    `${user.role?.name === 'ADMIN' ? 'Admin' : user.role?.name === 'LIBRARIAN' ? 'Librarian' : 'Super Admin'} accounts can only access the web dashboard wwww.edubreezy.com.`,
+                    [{ text: 'OK' }]
+                );
                 setGoogleLoading(false);
                 return;
             }
 
+            // Store user data (same logic as handleLogin)
             const minimalUser = {
                 id: user.id,
                 email: user.email,
@@ -598,29 +689,43 @@ export default function LoginScreen() {
                     },
                 }),
                 ...(user.parentData && {
-                    parentData: { id: user.parentData.id, name: user.parentData.name, email: user.parentData.email },
+                    parentData: {
+                        id: user.parentData.id,
+                        name: user.parentData.name,
+                        email: user.parentData.email,
+                    },
                 }),
                 ...(user.teacherData && {
-                    teacherData: { name: user.teacherData.name, email: user.teacherData.email },
+                    teacherData: {
+                        name: user.teacherData.name,
+                        email: user.teacherData.email,
+                    },
                 }),
                 ...(user.school && {
-                    school: { id: user.school.id, name: user.school.name, schoolCode: user.school.schoolCode },
+                    school: {
+                        id: user.school.id,
+                        name: user.school.name,
+                        schoolCode: user.school.schoolCode,
+                    },
                 }),
             };
             await SecureStore.setItemAsync('user', JSON.stringify(minimalUser));
             await SecureStore.setItemAsync('userRole', user?.role?.name || '');
             await SecureStore.setItemAsync('token', access_token);
 
+            // Save profile for this school code
             const schoolCode = schoolConfig?.schoolcode || schoolConfig?.schoolCode;
             if (schoolCode) {
                 try {
                     await saveProfile(schoolCode, user, sessionData.session);
+                    console.log('✅ Profile saved for', schoolCode);
                     await saveCurrentSchool(schoolCode, { school: schoolConfig });
                 } catch (saveError) {
                     console.error('❌ Failed to save profile:', saveError);
                 }
             }
 
+            // Create session for device tracking
             try {
                 const deviceInfo = await getDeviceInfo();
                 const sessionRes = await api.post('/auth/sessions', {
@@ -638,10 +743,17 @@ export default function LoginScreen() {
             router.replace('/(screens)/greeting');
         } catch (err) {
             console.error(err);
+
             let message = 'Something went wrong. Please try again.';
-            if (err.response?.status === 404) message = 'This account is not linked to any school account.';
-            else if (err.response?.status === 401) message = 'Session expired. Please login again.';
-            else if (!err.response) message = 'Network error. Please check your connection.';
+
+            if (err.response?.status === 404) {
+                message = 'This account is not linked to any school account.';
+            } else if (err.response?.status === 401) {
+                message = 'Session expired. Please login again.';
+            } else if (!err.response) {
+                message = 'Network error. Please check your connection.';
+            }
+
             setErrors({ general: message });
         } finally {
             setGoogleLoading(false);
@@ -653,13 +765,14 @@ export default function LoginScreen() {
             try {
                 const { data, error } = await supabase.auth.getUserIdentities();
                 if (error) throw error;
+
                 const appleIdentity = data?.identities?.find((identity) => identity.provider === 'apple');
                 if (appleIdentity) {
                     const { error: unlinkError } = await supabase.auth.unlinkIdentity(appleIdentity);
                     if (unlinkError) throw unlinkError;
                 }
             } catch (cleanupError) {
-                console.warn('Failed to unlink Apple identity:', cleanupError?.message || cleanupError);
+                console.warn('Failed to unlink Apple identity during login cleanup:', cleanupError?.message || cleanupError);
             } finally {
                 await supabase.auth.signOut();
             }
@@ -668,6 +781,8 @@ export default function LoginScreen() {
         try {
             setAppleLoading(true);
             setErrors({});
+
+            // Clear any old tokens
             await SecureStore.deleteItemAsync('token');
 
             const appleAvailable = await AppleAuthentication.isAvailableAsync();
@@ -705,28 +820,38 @@ export default function LoginScreen() {
                 return;
             }
 
+            console.log('✅ Apple OAuth session established for:', sessionData.user.email);
+
+            // Verify OAuth user against our database (backend handles orphan cleanup)
             const verifyRes = await api.post('/auth/verify-oauth', {
                 accessToken: access_token,
                 provider: 'apple',
             });
             const user = verifyRes.data;
 
+            // User not in our DB — orphan Supabase user was auto-deleted by backend
             if (!user || user.linked === false) {
                 await cleanupAppleIdentity();
                 setErrors({
                     general: user?.message ||
-                        'No account found for this Apple ID. Please contact your school admin.',
+                        'No account found for this Apple ID. Please contact your school admin to create your account.',
                 });
                 return;
             }
 
+            // Block ADMIN, LIBRARIAN, SUPER_ADMIN roles from mobile app
             if (BLOCKED_MOBILE_ROLES.includes(user.role?.name)) {
                 await cleanupAppleIdentity();
-                Alert.alert('Web Only', `This account can only access the web dashboard.`, [{ text: 'OK' }]);
+                Alert.alert(
+                    'Web Only',
+                    `${user.role?.name === 'ADMIN' ? 'Admin' : user.role?.name === 'LIBRARIAN' ? 'Librarian' : 'Super Admin'} accounts can only access the web dashboard at atlas.edubreezy.com.`,
+                    [{ text: 'OK' }]
+                );
                 setAppleLoading(false);
                 return;
             }
 
+            // Store user data (same logic as handleGoogleLogin)
             const minimalUser = {
                 id: user.id,
                 email: user.email,
@@ -744,29 +869,43 @@ export default function LoginScreen() {
                     },
                 }),
                 ...(user.parentData && {
-                    parentData: { id: user.parentData.id, name: user.parentData.name, email: user.parentData.email },
+                    parentData: {
+                        id: user.parentData.id,
+                        name: user.parentData.name,
+                        email: user.parentData.email,
+                    },
                 }),
                 ...(user.teacherData && {
-                    teacherData: { name: user.teacherData.name, email: user.teacherData.email },
+                    teacherData: {
+                        name: user.teacherData.name,
+                        email: user.teacherData.email,
+                    },
                 }),
                 ...(user.school && {
-                    school: { id: user.school.id, name: user.school.name, schoolCode: user.school.schoolCode },
+                    school: {
+                        id: user.school.id,
+                        name: user.school.name,
+                        schoolCode: user.school.schoolCode,
+                    },
                 }),
             };
             await SecureStore.setItemAsync('user', JSON.stringify(minimalUser));
             await SecureStore.setItemAsync('userRole', user?.role?.name || '');
             await SecureStore.setItemAsync('token', access_token);
 
+            // Save profile for this school code
             const schoolCode = schoolConfig?.schoolcode || schoolConfig?.schoolCode;
             if (schoolCode) {
                 try {
                     await saveProfile(schoolCode, user, sessionData.session);
+                    console.log('✅ Profile saved for', schoolCode);
                     await saveCurrentSchool(schoolCode, { school: schoolConfig });
                 } catch (saveError) {
                     console.error('❌ Failed to save profile:', saveError);
                 }
             }
 
+            // Create session for device tracking
             try {
                 const deviceInfo = await getDeviceInfo();
                 const sessionRes = await api.post('/auth/sessions', {
@@ -784,10 +923,17 @@ export default function LoginScreen() {
             router.replace('/(screens)/greeting');
         } catch (err) {
             console.error(err);
+
             let message = 'Something went wrong. Please try again.';
-            if (err.response?.status === 404) message = 'This account is not linked to any school account.';
-            else if (err.response?.status === 401) message = 'Session expired. Please login again.';
-            else if (!err.response) message = 'Network error. Please check your connection.';
+
+            if (err.response?.status === 404) {
+                message = 'This account is not linked to any school account.';
+            } else if (err.response?.status === 401) {
+                message = 'Session expired. Please login again.';
+            } else if (!err.response) {
+                message = 'Network error. Please check your connection.';
+            }
+
             setErrors({ general: message || 'Apple Sign In Failed' });
         } finally {
             setAppleLoading(false);
@@ -805,7 +951,9 @@ export default function LoginScreen() {
 
             <ScrollView
                 ref={scrollViewRef}
-                contentContainerStyle={{ flexGrow: 1 }}
+                contentContainerStyle={{
+                    flexGrow: 1,
+                }}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
                 keyboardDismissMode="interactive"
@@ -815,27 +963,27 @@ export default function LoginScreen() {
             >
                 <View style={[styles.loginScreenWrapper, { paddingTop: insets.top + verticalScale(20), paddingBottom: Math.max(insets.bottom, 20) }]}>
 
+                    {/* Header Section */}
+                    <Animated.View
+                        entering={FadeInDown.delay(100).duration(500)}
+                        style={styles.loginHeader}
+                    >
+                        <Text style={styles.signInTitle}>Sign In</Text>
+                        <Text style={styles.signInSubtitle}>Enter your credentials to continue</Text>
+                    </Animated.View>
 
                     {/* Form Section */}
                     <Animated.View
                         entering={FadeInDown.delay(200).duration(500)}
                         style={styles.loginFormSection}
                     >
-                        {/* School Hero Card — replaces old compact card */}
+                        {/* School Info Card */}
                         {schoolConfig && (
-                            <SchoolHeroCard
+                            <SchoolInfoCard
                                 schoolData={schoolConfig}
                                 onSwitchSchool={handleSwitchSchool}
                             />
                         )}
-                        {/* Header */}
-                        <Animated.View
-                            entering={FadeInDown.delay(100).duration(500)}
-                            style={styles.loginHeader}
-                        >
-                            <Text style={styles.signInTitle}>Login to Continue</Text>
-                            {/* <Text style={styles.signInSubtitle}>Enter your credentials to continue</Text> */}
-                        </Animated.View>
 
                         {/* General Error */}
                         {errors.general && (
@@ -886,7 +1034,10 @@ export default function LoginScreen() {
                                 )}
                             </View>
                             {(errors.credential || errors.email) && (
-                                <Animated.Text entering={FadeIn.duration(200)} style={styles.errorText}>
+                                <Animated.Text
+                                    entering={FadeIn.duration(200)}
+                                    style={styles.errorText}
+                                >
                                     {errors.credential || errors.email}
                                 </Animated.Text>
                             )}
@@ -938,7 +1089,10 @@ export default function LoginScreen() {
                                 </TouchableOpacity>
                             </View>
                             {errors.password && (
-                                <Animated.Text entering={FadeIn.duration(200)} style={styles.errorText}>
+                                <Animated.Text
+                                    entering={FadeIn.duration(200)}
+                                    style={styles.errorText}
+                                >
                                     {errors.password}
                                 </Animated.Text>
                             )}
@@ -985,7 +1139,7 @@ export default function LoginScreen() {
                             <View style={styles.orDividerLine} />
                         </Animated.View>
 
-                        {/* Google Sign-In */}
+                        {/* Google Sign-In Button */}
                         <Animated.View entering={FadeInDown.delay(400).duration(500)}>
                             <TouchableOpacity
                                 style={[styles.googleButton, googleLoading && styles.googleButtonDisabled]}
@@ -1004,13 +1158,14 @@ export default function LoginScreen() {
                                             source={require('../../assets/google.png')}
                                             style={{ width: 20, height: 20 }}
                                         />
+
                                         <Text style={styles.googleButtonText}>Continue with Google</Text>
                                     </View>
                                 )}
                             </TouchableOpacity>
                         </Animated.View>
 
-                        {/* Apple Sign-In — iOS only */}
+                        {/* Apple Sign-In Button — iOS only */}
                         {Platform.OS === 'ios' && (
                             <Animated.View entering={FadeInDown.delay(450).duration(500)} style={{ marginTop: verticalScale(10) }}>
                                 <TouchableOpacity
@@ -1045,8 +1200,6 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: '#FFFFFF',
     },
-
-    // --- Animated background orbs (unchanged) ---
     bgOrb: {
         position: 'absolute',
         borderRadius: 999,
@@ -1079,16 +1232,14 @@ const styles = StyleSheet.create({
         bottom: SCREEN_HEIGHT * 0.3,
         right: SCREEN_WIDTH * 0.05,
     },
-
-    // --- Layout ---
     loginScreenWrapper: {
         flexGrow: 1,
         justifyContent: 'center',
         paddingHorizontal: moderateScale(24),
     },
     loginHeader: {
-        // alignItems: 'center',
-        marginBottom: verticalScale(20),
+        alignItems: 'center',
+        marginBottom: verticalScale(24),
     },
     signInTitle: {
         fontSize: moderateScale(32, 0.4),
@@ -1108,156 +1259,250 @@ const styles = StyleSheet.create({
         maxWidth: isTablet ? 460 : '100%',
         alignSelf: 'center',
     },
-
-    // --- School Hero Card ---
-    heroCard: {
-        backgroundColor: '#FFFFFF',
-        borderRadius: moderateScale(16),
-        marginBottom: verticalScale(18),
-        borderWidth: 1,
-        borderColor: '#E2E8F0',
-        overflow: 'hidden',
-        // subtle shadow
-        shadowColor: '#0b5cde',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.07,
-        shadowRadius: 8,
-        elevation: 3,
-    },
-
-    // Media block (cover image + optional YouTube)
-    heroMediaContainer: {
-        width: '100%',
-        height: verticalScale(120),
-        backgroundColor: '#EFF6FF',
-        overflow: 'hidden',
-        position: 'relative',
-    },
-    heroCoverImage: {
-        width: '100%',
-        height: '100%',
-        position: 'absolute',
-    },
-    youtubeThumbnailContainer: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: '#000',
-        overflow: 'hidden',
-    },
-    mediaCodeBadge: {
-        position: 'absolute',
-        top: 10,
-        right: 10,
-        backgroundColor: 'rgba(255,255,255,0.92)',
-        borderRadius: 20,
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderWidth: 1,
-        borderColor: 'rgba(11,92,222,0.15)',
-    },
-    mediaCodeBadgeText: {
-        fontSize: moderateScale(11, 0.3),
-        fontWeight: '700',
-        color: PRIMARY_COLOR,
-        letterSpacing: 0.3,
-    },
-
-    // Identity row (logo + text + switch)
-    heroIdentityRow: {
+    loginButtonContent: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: moderateScale(14),
-        paddingVertical: moderateScale(12),
-        gap: moderateScale(10),
+        justifyContent: 'center',
+        gap: 8,
     },
-    heroLogoWrapper: {
-        width: responsive(46, 52, 60),
-        height: responsive(46, 52, 60),
-        borderRadius: moderateScale(12),
+    headerBackground: {
+        backgroundColor: PRIMARY_COLOR,
+        paddingBottom: verticalScale(40),
+        paddingHorizontal: moderateScale(24),
+        alignItems: 'center',
         overflow: 'hidden',
-        borderWidth: 1.5,
-        borderColor: '#E2E8F0',
-        backgroundColor: '#F1F5F9',
-        flexShrink: 0,
     },
-    heroLogo: {
+    patternContainer: {
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 0,
+        overflow: 'hidden',
+    },
+    gradientBackground: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    floatingCircle: {
+        position: 'absolute',
+        borderRadius: 1000,
+        backgroundColor: 'rgba(255, 255, 255, 0.06)',
+    },
+    circle1: {
+        width: responsive(180, 220, 280),
+        height: responsive(180, 220, 280),
+        top: -responsive(60, 80, 100),
+        right: -responsive(40, 60, 80),
+    },
+    circle2: {
+        width: responsive(120, 150, 180),
+        height: responsive(120, 150, 180),
+        bottom: responsive(20, 30, 40),
+        left: -responsive(50, 70, 90),
+    },
+    circle3: {
+        width: responsive(80, 100, 120),
+        height: responsive(80, 100, 120),
+        top: responsive(60, 80, 100),
+        left: responsive(40, 60, 80),
+        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    },
+    circle4: {
+        width: responsive(60, 80, 100),
+        height: responsive(60, 80, 100),
+        bottom: responsive(60, 80, 100),
+        right: responsive(30, 50, 70),
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    },
+    decorativeDot: {
+        position: 'absolute',
+        borderRadius: 50,
+        backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    },
+    dot1: {
+        width: 8,
+        height: 8,
+        top: responsive(40, 50, 60),
+        right: responsive(60, 80, 100),
+    },
+    dot2: {
+        width: 6,
+        height: 6,
+        top: responsive(90, 110, 130),
+        left: responsive(80, 100, 120),
+    },
+    dot3: {
+        width: 10,
+        height: 10,
+        bottom: responsive(80, 100, 120),
+        right: responsive(100, 130, 160),
+    },
+    dot4: {
+        width: 5,
+        height: 5,
+        bottom: responsive(50, 60, 70),
+        left: responsive(120, 150, 180),
+    },
+    dot5: {
+        width: 7,
+        height: 7,
+        top: responsive(130, 160, 190),
+        right: responsive(40, 50, 60),
+    },
+    wavePattern: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: responsive(60, 80, 100),
+        overflow: 'hidden',
+    },
+    wave1: {
+        position: 'absolute',
+        bottom: responsive(15, 20, 25),
+        left: -20,
+        right: -20,
+        height: responsive(40, 50, 60),
+        borderTopLeftRadius: responsive(200, 300, 400),
+        borderTopRightRadius: responsive(200, 300, 400),
+        backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    },
+    wave2: {
+        position: 'absolute',
+        bottom: 0,
+        left: -10,
+        right: -10,
+        height: responsive(30, 40, 50),
+        borderTopLeftRadius: responsive(150, 200, 250),
+        borderTopRightRadius: responsive(150, 200, 250),
+        backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    },
+    gridOverlay: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    gridLine: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        height: 1,
+        backgroundColor: 'rgba(255, 255, 255, 0.04)',
+    },
+    bottomFade: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: verticalScale(60),
+    },
+    shieldContainer: {
+        marginBottom: verticalScale(16),
+        zIndex: 1,
+    },
+    shieldIcon: {
+        width: responsive(56, 64, 80),
+        height: responsive(56, 64, 80),
+        borderRadius: responsive(28, 32, 40),
+        backgroundColor: '#FFFFFF',
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 6 },
+        shadowOpacity: 0.2,
+        shadowRadius: 12,
+        elevation: 8,
+    },
+    headerTextContainer: {
+        alignItems: 'center',
+        zIndex: 1,
+        maxWidth: isTablet ? 500 : '100%',
+    },
+    headerTitle: {
+        fontSize: moderateScale(26, 0.4),
+        fontWeight: '800',
+        color: '#FFFFFF',
+        textAlign: 'center',
+        letterSpacing: -0.5,
+    },
+    headerSubtitle: {
+        fontSize: moderateScale(14, 0.3),
+        color: 'rgba(255, 255, 255, 0.85)',
+        marginTop: verticalScale(10),
+        textAlign: 'center',
+        fontWeight: '500',
+    },
+    contentWrapper: {
+        flex: 1,
+        backgroundColor: '#FFFFFF',
+        borderTopLeftRadius: responsive(24, 32, 40),
+        borderTopRightRadius: responsive(24, 32, 40),
+        marginTop: -verticalScale(20),
+        overflow: 'hidden',
+    },
+    keyboardAvoidingView: {
+        flex: 1,
+    },
+    scrollContent: {
+        flexGrow: 1,
+    },
+
+    schoolCardCompact: {
+        backgroundColor: '#FFFFFF',
+        borderRadius: moderateScale(14),
+        marginBottom: verticalScale(16),
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+        padding: moderateScale(12),
+    },
+    schoolCardCompactRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    compactLogoContainer: {
+        width: responsive(42, 46, 52),
+        height: responsive(42, 46, 52),
+        borderRadius: moderateScale(11),
+        overflow: 'hidden',
+        backgroundColor: '#F1F5F9',
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+    },
+    compactLogo: {
         width: '100%',
         height: '100%',
     },
-    heroLogoFallback: {
+    compactLogoPlaceholder: {
         width: '100%',
         height: '100%',
         backgroundColor: PRIMARY_COLOR,
         alignItems: 'center',
         justifyContent: 'center',
     },
-    heroLogoFallbackText: {
-        fontSize: moderateScale(20, 0.3),
-        fontWeight: '800',
+    compactLogoText: {
+        fontSize: moderateScale(18, 0.3),
+        fontWeight: '700',
         color: '#FFFFFF',
     },
-    heroTextBlock: {
+    compactInfo: {
         flex: 1,
-        gap: 2,
+        marginLeft: moderateScale(12),
     },
-    heroSchoolName: {
+    compactName: {
         fontSize: moderateScale(14, 0.3),
-        fontWeight: '800',
-        color: '#1E293B',
-        letterSpacing: -0.2,
-        lineHeight: moderateScale(18, 0.3),
-    },
-    heroTagline: {
-        fontSize: moderateScale(11, 0.3),
-        fontWeight: '500',
-        color: '#64748B',
-        lineHeight: moderateScale(15, 0.3),
-        marginTop: 1,
-    },
-    heroMetaRow: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 6,
-        marginTop: 5,
-    },
-    heroMetaChip: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 3,
-        backgroundColor: '#F8FAFC',
-        borderRadius: 20,
-        paddingHorizontal: 7,
-        paddingVertical: 3,
-        borderWidth: 1,
-        borderColor: '#E2E8F0',
-    },
-    heroCodeChip: {
-        backgroundColor: '#EFF6FF',
-        borderColor: 'rgba(11,92,222,0.15)',
-    },
-    heroMetaChipText: {
-        fontSize: moderateScale(10, 0.3),
-        fontWeight: '600',
-        color: '#64748B',
-    },
-    heroSwitchBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        backgroundColor: '#EFF6FF',
-        borderRadius: 20,
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderWidth: 1,
-        borderColor: 'rgba(11,92,222,0.15)',
-        flexShrink: 0,
-    },
-    heroSwitchText: {
-        fontSize: moderateScale(11, 0.3),
         fontWeight: '700',
-        color: PRIMARY_COLOR,
+        color: '#1E293B',
     },
-
-    // --- Form elements (unchanged from original) ---
+    compactCode: {
+        fontSize: moderateScale(11, 0.3),
+        fontWeight: '600',
+        color: PRIMARY_COLOR,
+        marginTop: 2,
+    },
+    compactSwitchButton: {
+        width: responsive(36, 40, 44),
+        height: responsive(36, 40, 44),
+        borderRadius: responsive(18, 20, 22),
+        backgroundColor: '#EFF6FF',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginLeft: moderateScale(8),
+    },
     generalError: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -1320,6 +1565,13 @@ const styles = StyleSheet.create({
         marginLeft: 4,
         fontWeight: '600',
     },
+    optionsRow: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        alignItems: 'center',
+        marginBottom: verticalScale(16),
+        marginTop: verticalScale(2),
+    },
     forgotPassword: {
         alignSelf: 'flex-end',
         paddingVertical: 6,
@@ -1339,17 +1591,12 @@ const styles = StyleSheet.create({
     },
     loginButtonDisabled: {
         backgroundColor: '#93c5fd',
+        // shadowOpacity: 0.15,
     },
     loadingContainer: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 10,
-    },
-    loginButtonContent: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
     },
     loginButtonText: {
         fontSize: moderateScale(16, 0.3),
@@ -1393,6 +1640,10 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         gap: 10,
     },
+    googleIcon: {
+        width: 20,
+        height: 20,
+    },
     googleButtonText: {
         fontSize: moderateScale(15, 0.3),
         fontWeight: '700',
@@ -1414,5 +1665,98 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         color: '#FFFFFF',
         letterSpacing: 0.2,
+    },
+    footer: {
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginTop: verticalScale(20),
+    },
+    footerText: {
+        fontSize: moderateScale(13, 0.3),
+        color: '#6B7280',
+        fontWeight: '500',
+    },
+    footerLink: {
+        fontSize: moderateScale(13, 0.3),
+        color: PRIMARY_COLOR,
+        fontWeight: '700',
+    },
+    featuresContainer: {
+        marginTop: verticalScale(24),
+        paddingTop: verticalScale(8),
+    },
+    divider: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: verticalScale(16),
+    },
+    dividerLine: {
+        flex: 1,
+        height: 1,
+        backgroundColor: '#E5E7EB',
+    },
+    dividerText: {
+        marginHorizontal: moderateScale(12),
+        fontSize: moderateScale(11, 0.3),
+        fontWeight: '600',
+        color: '#9CA3AF',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    featuresGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'space-between',
+    },
+    featureItem: {
+        width: isTablet ? '23%' : '48%',
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: moderateScale(10),
+        paddingHorizontal: moderateScale(10),
+        backgroundColor: '#F8FAFC',
+        borderRadius: moderateScale(10),
+        marginBottom: verticalScale(8),
+        borderWidth: 1,
+        borderColor: '#EFF6FF',
+    },
+    featureIconContainer: {
+        width: responsive(26, 32, 36),
+        height: responsive(26, 32, 36),
+        borderRadius: responsive(13, 16, 18),
+        backgroundColor: '#EFF6FF',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: moderateScale(8),
+    },
+    featureText: {
+        flex: 1,
+        fontSize: moderateScale(11, 0.3),
+        fontWeight: '600',
+        color: '#475569',
+    },
+    branding: {
+        alignItems: 'center',
+        marginTop: verticalScale(24),
+        paddingTop: verticalScale(16),
+        borderTopWidth: 1,
+        borderTopColor: '#F3F4F6',
+    },
+    brandingContent: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    brandingText: {
+        fontSize: moderateScale(14, 0.3),
+        fontWeight: '800',
+        color: '#9CA3AF',
+    },
+    brandingSubtext: {
+        fontSize: moderateScale(11, 0.3),
+        color: '#D1D5DB',
+        marginTop: 4,
+        fontWeight: '500',
     },
 });

@@ -25,6 +25,7 @@ import VideoSplash from './components/VideoSplash';
 import MaintenanceScreen from './components/MaintenanceScreen';
 import ChangelogModal from './components/ChangelogModal';
 import { checkForUpdates, setupUpdateListener } from '../services/updateChecker';
+import { syncAttendanceQueue } from '../lib/attendanceQueue';
 
 const BADGE_KEY = 'noticeBadgeCount';
 
@@ -479,8 +480,16 @@ function RootLayoutContent() {
             const connected = state.isConnected && state.isInternetReachable !== false;
             console.log('🌐 Network state changed:', connected ? 'Online' : 'Offline');
 
+            if (connected && wasOfflineRef.current) {
+                syncAttendanceQueue().catch(error => {
+                    console.error('Attendance queue sync failed:', error);
+                });
+            }
+
             if (!connected) {
                 wasOfflineRef.current = true;
+            } else {
+                wasOfflineRef.current = false;
             }
 
             setIsConnected(connected);

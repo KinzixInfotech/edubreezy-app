@@ -254,7 +254,7 @@ export function AttendanceReminderProvider({ children }) {
         const checkOutStart = windows.checkOut ? new Date(windows.checkOut.start) : null;
         const checkOutEnd = windows.checkOut ? new Date(windows.checkOut.end) : null;
 
-        const gracePeriodMs = (config?.gracePeriod || 15) * 60 * 1000;
+        const gracePeriodMs = (config?.lateGraceMinutes ?? config?.gracePeriod ?? 0) * 60 * 1000;
         const graceEnd = new Date(checkInStart.getTime() + gracePeriodMs);
 
         const isCheckedIn = !!attendance?.checkInTime;

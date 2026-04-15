@@ -206,9 +206,6 @@ const SkeletonSchoolItem = ({ index = 0 }) => {
 export default function SchoolCodePage() {
 
   const router = useRouter();
-  useEffect(() => {
-    router.push('/(auth)/forgot-password-sent')
-  }, [])
 
   const insets = useSafeAreaInsets();
   const [prefix, setPrefix] = useState('EB');

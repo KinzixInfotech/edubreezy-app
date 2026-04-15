@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
     View, Text, StyleSheet, Pressable, ScrollView, RefreshControl,
     Alert, ActivityIndicator, AppState, Platform, Modal, TextInput,
-    KeyboardAvoidingView
+    KeyboardAvoidingView, Image
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as Location from 'expo-location';
@@ -160,7 +160,7 @@ export default function SelfAttendance() {
                 // Fetch school location settings
                 if (userData.schoolId) {
                     try {
-                        const sLoc = await getSchoolLocation(userData.schoolId, API_BASE_URL);
+                        const sLoc = await getSchoolLocation(userData.schoolId, API_BASE_URL, { forceRefresh: true });
                         setSchoolLocation(sLoc);
                         console.log('School location loaded for attendance:', sLoc);
                     } catch (e) {
@@ -176,6 +176,24 @@ export default function SelfAttendance() {
     const userId = user?.id;
     const schoolId = user?.schoolId;
     const isTeacher = user?.role?.name === 'TEACHING_STAFF';
+    const teacherName =
+        user?.name ||
+        [user?.firstName, user?.lastName].filter(Boolean).join(' ') ||
+        user?.fullName ||
+        'Teacher';
+    const teacherDesignation =
+        user?.designation ||
+        user?.jobTitle ||
+        user?.employeeDesignation ||
+        user?.role?.label ||
+        user?.role?.name?.replaceAll('_', ' ') ||
+        'Teaching Staff';
+    const teacherProfilePicture =
+        user?.profilePicture ||
+        user?.avatar ||
+        user?.photo ||
+        user?.image ||
+        null;
 
     // Get location & device info
     useEffect(() => {
@@ -244,6 +262,9 @@ export default function SelfAttendance() {
                     setDistanceToSchool(Math.round(dist));
 
                     const radius = schoolLocation.attendanceRadius ?? schoolLocation.radiusMeters ?? null;
+                    // alert(radius);
+                    // alert(dist);
+
                     setIsWithinRadius(radius == null ? true : dist <= radius);
                 } else if (schoolLocation?.latitude && schoolLocation?.longitude) {
                     // School location exists but geofencing is disabled - calculate distance for display only
@@ -283,6 +304,8 @@ export default function SelfAttendance() {
             return res.data;
         },
         enabled: !!userId && !!schoolId,
+        staleTime: 0,
+        refetchOnMount: 'always',
         refetchInterval: 30000,
         retry: 2,
     });
@@ -804,8 +827,21 @@ export default function SelfAttendance() {
         setRefreshing(false);
     };
 
+    const geofenceEnabled = Boolean(
+        config?.enableGeoFencing
+        && (config?.schoolLatitude ?? schoolLocation?.latitude)
+        && (config?.schoolLongitude ?? schoolLocation?.longitude)
+    );
+    const geofenceBlocking = geofenceEnabled && isWithinRadius === false;
+    const attendanceRadius =
+        config?.allowedRadius ??
+        config?.allowedRadiusMeters ??
+        schoolLocation?.attendanceRadius ??
+        schoolLocation?.radiusMeters;
     const canCheckIn = isWorkingDay && !onLeave && windows?.checkIn?.isOpen && !attendance?.checkInTime;
     const canCheckOut = isWorkingDay && !onLeave && windows?.checkOut?.isOpen && attendance?.checkInTime && !attendance?.checkOutTime;
+    const canAttemptCheckIn = canCheckIn && !!location && !geofenceBlocking;
+    const canAttemptCheckOut = canCheckOut && !!location && !geofenceBlocking;
 
     const getStatusColor = (status) => {
         switch (status) {
@@ -901,34 +937,37 @@ export default function SelfAttendance() {
                     </Text>
                 </View>
 
-                {/* DEBUG: Test Reminder Buttons - Remove in production */}
-                {__DEV__ && (
-                    <View style={{ padding: 16, backgroundColor: '#FEF3C7', margin: 16, borderRadius: 12, borderWidth: 1, borderColor: '#F59E0B' }}>
-                        <Text style={{ fontWeight: '700', fontSize: 14, color: '#92400E', marginBottom: 8 }}>🧪 DEV: Test Reminders</Text>
-                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                            <Pressable
-                                onPress={() => triggerTestReminder(REMINDER_TYPES.CHECK_IN_OPEN)}
-                                style={{ backgroundColor: '#10B981', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
-                                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 12 }}>Check-In</Text>
-                            </Pressable>
-                            <Pressable
-                                onPress={() => triggerTestReminder(REMINDER_TYPES.LATE_WARNING)}
-                                style={{ backgroundColor: '#F59E0B', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
-                                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 12 }}>Late Warning</Text>
-                            </Pressable>
-                            <Pressable
-                                onPress={() => triggerTestReminder(REMINDER_TYPES.CHECK_OUT_OPEN)}
-                                style={{ backgroundColor: '#3B82F6', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
-                                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 12 }}>Check-Out</Text>
-                            </Pressable>
-                            <Pressable
-                                onPress={() => triggerTestReminder(REMINDER_TYPES.CHECK_OUT_WARNING)}
-                                style={{ backgroundColor: '#EF4444', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
-                                <Text style={{ color: '#fff', fontWeight: '600', fontSize: 12 }}>Checkout Warn</Text>
-                            </Pressable>
+                <Animated.View entering={FadeInDown.delay(80)} style={styles.teacherCard}>
+                    <View style={styles.teacherCardLeft}>
+                        {teacherProfilePicture ? (
+                            <Image source={{ uri: teacherProfilePicture }} style={styles.teacherAvatar} />
+                        ) : (
+                            <View style={styles.teacherAvatarFallback}>
+                                <Text style={styles.teacherAvatarFallbackText}>
+                                    {teacherName?.trim()?.charAt(0)?.toUpperCase() || 'T'}
+                                </Text>
+                            </View>
+                        )}
+                        <View style={styles.teacherMeta}>
+                            <Text style={styles.teacherName} numberOfLines={1}>{teacherName}</Text>
+                            <Text style={styles.teacherDesignation} numberOfLines={1}>{teacherDesignation}</Text>
+                            {geofenceEnabled && (
+                                <View style={[styles.zoneBadge, geofenceBlocking ? styles.zoneBadgeOutside : styles.zoneBadgeInside]}>
+                                    {geofenceBlocking ? (
+                                        <AlertTriangle size={14} color="#B91C1C" />
+                                    ) : (
+                                        <CheckCircle size={14} color="#166534" />
+                                    )}
+                                    <Text style={[styles.zoneBadgeText, geofenceBlocking ? styles.zoneBadgeTextOutside : styles.zoneBadgeTextInside]}>
+                                        {geofenceBlocking ? 'Outside school zone' : 'Inside school zone'}
+                                    </Text>
+                                </View>
+                            )}
                         </View>
                     </View>
-                )}
+
+                </Animated.View>
+
 
                 {/* Location Error */}
                 {locationError && (
@@ -1025,7 +1064,7 @@ export default function SelfAttendance() {
                                         ? `Window open until ${new Date(windows.checkIn.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
                                         : getCheckInStatusMessage() || 'Check-in window not available'}
                                 </Text>
-                                {canCheckIn && location && (
+                                {canAttemptCheckIn && (
                                     <View style={styles.statusHintBox}>
                                         <CheckCircle size={16} color="#10B981" />
                                         <Text style={styles.statusHintText}>Ready to check in! Tap the button below.</Text>
@@ -1037,12 +1076,12 @@ export default function SelfAttendance() {
                                         <Text style={[styles.statusHintText, { color: '#991B1B' }]}>Enable location to check in</Text>
                                     </View>
                                 )}
-                                {config?.enableGeoFencing && location && !isWithinRadius && schoolLocation && (
+                                {geofenceEnabled && location && geofenceBlocking && (
                                     <View style={[styles.statusHintBox, { backgroundColor: '#FEF2F2' }]}>
                                         <AlertTriangle size={16} color="#DC2626" />
                                         <Text style={[styles.statusHintText, { color: '#991B1B' }]}>
-                                            You are too far from school ({distanceToSchool ? formatDistance(distanceToSchool) : 'calculating...'}).
-                                            Radius: {config?.allowedRadius ?? config?.allowedRadiusMeters ?? schoolLocation.attendanceRadius ?? schoolLocation.radiusMeters}m
+                                            You are not in the school zone right now. Current distance: {distanceToSchool ? formatDistance(distanceToSchool) : 'calculating...'}.
+                                            Allowed radius: {attendanceRadius ?? 'configured'}m
                                         </Text>
                                     </View>
                                 )}
@@ -1136,16 +1175,22 @@ export default function SelfAttendance() {
                         {canCheckIn && (
                             <AnimatedPressable
                                 entering={FadeInUp.delay(100)}
-                                style={[styles.actionButton, styles.checkInButton]}
+                                style={[
+                                    styles.actionButton,
+                                    styles.checkInButton,
+                                    !canAttemptCheckIn && styles.actionButtonDisabled
+                                ]}
                                 onPress={() => checkInMutation.mutate()}
-                                disabled={checkInMutation.isPending || !location}
+                                disabled={checkInMutation.isPending || !canAttemptCheckIn}
                             >
                                 {checkInMutation.isPending ? (
                                     <ActivityIndicator color="#fff" />
                                 ) : (
                                     <>
                                         <CheckCircle size={24} color="#fff" />
-                                        <Text style={styles.actionButtonText}>Check In Now</Text>
+                                        <Text style={styles.actionButtonText}>
+                                            {geofenceBlocking ? 'Outside School Zone' : 'Check In Now'}
+                                        </Text>
                                     </>
                                 )}
                             </AnimatedPressable>
@@ -1154,9 +1199,13 @@ export default function SelfAttendance() {
                         {canCheckOut && (
                             <AnimatedPressable
                                 entering={FadeInUp.delay(200)}
-                                style={[styles.actionButton, styles.checkOutButton]}
+                                style={[
+                                    styles.actionButton,
+                                    styles.checkOutButton,
+                                    !canAttemptCheckOut && styles.actionButtonDisabled
+                                ]}
                                 onPress={() => checkOutMutation.mutate()}
-                                disabled={checkOutMutation.isPending}
+                                disabled={checkOutMutation.isPending || !canAttemptCheckOut}
                             >
                                 {checkOutMutation.isPending ? (
                                     <ActivityIndicator color="#fff" />
@@ -1637,6 +1686,49 @@ const styles = StyleSheet.create({
     locationText: { fontSize: 11, fontWeight: '600', color: '#10B981' },
     locationBadgeError: { backgroundColor: '#FEE2E2' },
     locationTextError: { color: '#EF4444' },
+    teacherCard: {
+        marginHorizontal: 20,
+        marginTop: 16,
+        padding: 16,
+        backgroundColor: '#fff',
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+    },
+    teacherCardLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+    teacherAvatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#E2E8F0', borderWidth: 1, borderColor: '#E2E8F0' },
+    teacherAvatarFallback: {
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        backgroundColor: '#DBEAFE',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    teacherAvatarFallbackText: { fontSize: 22, fontWeight: '800', color: '#1D4ED8' },
+    teacherMeta: { flex: 1, gap: 2 },
+    teacherName: { fontSize: 17, fontWeight: '700', color: '#111827' },
+    teacherDesignation: { fontSize: 13, color: '#6B7280', fontWeight: '500' },
+    zoneBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: 10,
+        marginTop: 5,
+        marginBottom: 10,
+        paddingVertical: 7,
+        borderRadius: 999,
+        alignSelf: 'flex-start',
+    },
+    zoneBadgeInside: { backgroundColor: '#DCFCE7' },
+    zoneBadgeOutside: { backgroundColor: '#FEE2E2' },
+    zoneBadgeText: { fontSize: 12, fontWeight: '600' },
+    zoneBadgeTextInside: { color: '#166534' },
+    zoneBadgeTextOutside: { color: '#B91C1C' },
 
     errorCard: { flexDirection: 'row', alignItems: 'center', gap: 8, margin: 20, padding: 12, backgroundColor: '#FEE2E2', borderRadius: 12 },
     errorCardText: { flex: 1, fontSize: 14, color: '#991B1B' },
@@ -1676,6 +1768,7 @@ const styles = StyleSheet.create({
     actionButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, paddingVertical: 18, borderRadius: 16 },
     checkInButton: { backgroundColor: '#0469ff' },
     checkOutButton: { backgroundColor: '#10B981' },
+    actionButtonDisabled: { opacity: 0.55 },
     actionButtonText: { fontSize: 18, fontWeight: '700', color: '#fff' },
 
     secondaryActions: { flexDirection: 'row', paddingHorizontal: 20, gap: 12, marginTop: 12 },

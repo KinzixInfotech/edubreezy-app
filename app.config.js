@@ -6,7 +6,7 @@ export default {
         name: "EduBreezy",
         slug: "EduBreezy",
         scheme: "edubreezy",
-        version: "1.0.5",
+        version: "1.0.6",
         icon: "./assets/icon.png",
         userInterfaceStyle: "light",
         newArchEnabled: true,

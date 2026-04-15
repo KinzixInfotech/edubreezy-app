@@ -42,6 +42,7 @@ import { Ionicons } from '@expo/vector-icons';
 import api from '../../lib/api';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getDeviceInfo } from '../../lib/deviceInfo';
+import { queueReviewPromptAfterLogin } from '../../lib/reviewPrompt';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import YoutubePlayer from 'react-native-youtube-iframe';
 
@@ -492,6 +493,8 @@ export default function LoginScreen() {
                 console.warn('Could not create session:', sessionErr.message);
             }
 
+            await queueReviewPromptAfterLogin();
+
             router.replace('/(screens)/greeting');
 
         } catch (err) {
@@ -641,6 +644,8 @@ export default function LoginScreen() {
                 console.warn('Could not create session:', sessionErr.message);
             }
 
+            await queueReviewPromptAfterLogin();
+
             router.replace('/(screens)/greeting');
         } catch (err) {
             console.error(err);
@@ -786,6 +791,8 @@ export default function LoginScreen() {
             } catch (sessionErr) {
                 console.warn('Could not create session:', sessionErr.message);
             }
+
+            await queueReviewPromptAfterLogin();
 
             router.replace('/(screens)/greeting');
         } catch (err) {

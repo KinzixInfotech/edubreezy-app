@@ -10,6 +10,18 @@ import { supabase } from '../lib/supabase';
 const userCache = new Map();
 const USER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
+const generateClientUuid = () => {
+    if (globalThis.crypto?.randomUUID) {
+        return globalThis.crypto.randomUUID();
+    }
+
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+        const rand = Math.floor(Math.random() * 16);
+        const value = char === 'x' ? rand : ((rand & 0x3) | 0x8);
+        return value.toString(16);
+    });
+};
+
 export async function getCachedUser(userId) {
     const cached = userCache.get(userId);
     if (cached && Date.now() - cached.ts < USER_CACHE_TTL) return cached.data;
@@ -251,9 +263,151 @@ export const getConversations = async (schoolId, params = {}) => {
 /**
  * Get a single conversation detail.
  */
-export const getConversation = async (schoolId, conversationId) => {
-    const { data } = await api.get(`/schools/${schoolId}/chat/conversations/${conversationId}`);
-    return data;
+export const getConversation = async (schoolId, conversationId, params = {}) => {
+    const currentUserId = params.userId;
+
+    const { data: conversation, error: conversationError } = await supabase
+        .from('Conversation')
+        .select('id, schoolId, type, title, classId, sectionId, lastMessageAt, lastMessageText, createdAt')
+        .eq('id', conversationId)
+        .eq('schoolId', schoolId)
+        .single();
+
+    if (conversationError) {
+        console.error('[chatService] getConversation error:', conversationError);
+        throw conversationError;
+    }
+
+    const { data: participants, error: participantError } = await supabase
+        .from('ConversationParticipant')
+        .select('id, conversationId, userId, mutedUntil, lastReadAt, lastReadMsgId, isActive')
+        .eq('conversationId', conversationId)
+        .eq('isActive', true);
+
+    if (participantError) {
+        console.error('[chatService] getConversation participants error:', participantError);
+        throw participantError;
+    }
+
+    const userIds = [...new Set((participants || []).map((participant) => participant.userId).filter(Boolean))];
+    const { data: users, error: usersError } = userIds.length
+        ? await supabase
+            .from('User')
+            .select('id, name, profilePicture, roleId, lastSeenAt')
+            .in('id', userIds)
+        : { data: [], error: null };
+
+    if (usersError) {
+        console.error('[chatService] getConversation users error:', usersError);
+        throw usersError;
+    }
+
+    const roleIds = [...new Set((users || []).map((user) => user.roleId).filter(Boolean))];
+    const { data: roles, error: rolesError } = roleIds.length
+        ? await supabase.from('Role').select('id, name').in('id', roleIds)
+        : { data: [], error: null };
+
+    if (rolesError) {
+        console.error('[chatService] getConversation roles error:', rolesError);
+        throw rolesError;
+    }
+
+    const roleMap = Object.fromEntries((roles || []).map((role) => [role.id, role.name]));
+    const userMap = Object.fromEntries((users || []).map((user) => {
+        const normalized = {
+            ...user,
+            roleName: roleMap[user.roleId] || null,
+        };
+        userCache.set(user.id, {
+            data: {
+                id: user.id,
+                name: user.name,
+                profilePicture: user.profilePicture,
+            },
+            ts: Date.now(),
+        });
+        return [user.id, normalized];
+    }));
+
+    const teachingStaffIds = (users || [])
+        .filter((user) => roleMap[user.roleId] === 'TEACHING_STAFF')
+        .map((user) => user.id);
+
+    let teacherClassMap = {};
+    if (teachingStaffIds.length) {
+        const { data: sections } = await supabase
+            .from('Section')
+            .select('teachingStaffUserId, name, classId')
+            .in('teachingStaffUserId', teachingStaffIds);
+
+        if (sections?.length) {
+            const classIds = [...new Set(sections.map((section) => section.classId).filter(Boolean))];
+            let classMap = {};
+
+            if (classIds.length) {
+                const { data: classes } = await supabase
+                    .from('Class')
+                    .select('id, className')
+                    .in('id', classIds);
+                classMap = Object.fromEntries((classes || []).map((klass) => [klass.id, klass.className]));
+            }
+
+            for (const section of sections) {
+                const className = classMap[section.classId] || '';
+                const label = className && section.name
+                    ? `Class ${className} - ${section.name}`
+                    : className
+                        ? `Class ${className}`
+                        : '';
+
+                if (!label || !section.teachingStaffUserId) continue;
+
+                if (teacherClassMap[section.teachingStaffUserId]) {
+                    if (!teacherClassMap[section.teachingStaffUserId].includes(label)) {
+                        teacherClassMap[section.teachingStaffUserId] += `, ${label}`;
+                    }
+                } else {
+                    teacherClassMap[section.teachingStaffUserId] = label;
+                }
+            }
+        }
+    }
+
+    const myParticipant = (participants || []).find((participant) => participant.userId === currentUserId) || null;
+    const otherParticipants = (participants || [])
+        .filter((participant) => participant.userId !== currentUserId)
+        .map((participant) => ({
+            id: participant.userId,
+            userId: participant.userId,
+            name: userMap[participant.userId]?.name,
+            profilePicture: userMap[participant.userId]?.profilePicture,
+            role: userMap[participant.userId]?.roleName,
+            classSection: teacherClassMap[participant.userId] || null,
+            lastSeenAt: userMap[participant.userId]?.lastSeenAt || null,
+        }));
+
+    const displayTitle = conversation.title || (
+        conversation.type === 'TEACHER_CLASS'
+            ? 'Class Chat'
+            : otherParticipants.map((participant) => participant.name || 'Unknown').join(', ') || 'Chat'
+    );
+
+    return {
+        success: true,
+        conversation: {
+            id: conversation.id,
+            type: conversation.type,
+            title: displayTitle,
+            classId: conversation.classId,
+            sectionId: conversation.sectionId,
+            lastMessageAt: conversation.lastMessageAt,
+            lastMessageText: conversation.lastMessageText,
+            createdAt: conversation.createdAt,
+            isMuted: myParticipant?.mutedUntil ? new Date(myParticipant.mutedUntil) > new Date() : false,
+            mutedUntil: myParticipant?.mutedUntil || null,
+            participants: otherParticipants,
+        },
+    };
 };
 
 /**
@@ -375,13 +529,17 @@ export const getMessages = async (schoolId, conversationId, params = {}) => {
 // ── Send Message (Direct Supabase + Fire-and-forget API) ──
 
 export const sendMessageDirect = async ({ conversationId, senderId, content, attachments, replyToId }) => {
+    const now = new Date().toISOString();
     const row = {
+        id: generateClientUuid(),
         conversationId,
         senderId,
-        content: content || null,
+        content: content || '',
         attachments: attachments?.length ? JSON.stringify(attachments) : null,
         replyToId: replyToId || null,
         status: 'SENT',
+        createdAt: now,
+        updatedAt: now,
     };
 
     const { data, error } = await supabase
@@ -390,7 +548,10 @@ export const sendMessageDirect = async ({ conversationId, senderId, content, att
         .select('id, conversationId, senderId, content, attachments, replyToId, status, createdAt, updatedAt')
         .single();
 
-    if (error) throw error;
+    if (error) {
+        console.error('[chatService] sendMessageDirect error:', error, 'row:', row);
+        throw error;
+    }
     return data;
 };
 

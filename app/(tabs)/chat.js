@@ -24,7 +24,6 @@ import { Swipeable } from 'react-native-gesture-handler';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import HapticTouchable from '../components/HapticTouch';
 import { useConversations, chatKeys } from '../../hooks/useChat';
-import { useChatFeedRealtime } from '../../hooks/useChatRealtime';
 import { usePresenceStatus } from '../../hooks/usePresenceStatus';
 import { useShimmer, Bone } from '../components/ScreenSkeleton';
 import { deleteConversation, markConversationsReadBulk } from '../../services/chatService';
@@ -37,6 +36,12 @@ const VIEWABILITY_CONFIG = {
     minimumViewTime: 120,
 };
 const READ_SYNC_DEBOUNCE_MS = 350;
+
+function parseChatDate(dateStr) {
+    if (!dateStr) return null;
+    if (typeof dateStr !== 'string') return new Date(dateStr);
+    return new Date(dateStr.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(dateStr) ? dateStr : `${dateStr}Z`);
+}
 
 // ── Skeleton ──
 function ChatListSkeleton() {
@@ -89,7 +94,8 @@ function ConversationRow({ item, currentUserId, onPress, isOnline }) {
 
     const timeStr = useMemo(() => {
         if (!item.lastMessageAt) return '';
-        const d = new Date(item.lastMessageAt);
+        const d = parseChatDate(item.lastMessageAt);
+        if (!d || Number.isNaN(d.getTime())) return '';
         const now = new Date();
         const diffDays = Math.floor((now - d) / (1000 * 60 * 60 * 24));
         if (diffDays === 0) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -228,8 +234,6 @@ export default function ChatScreen() {
         return merged;
     }, [data]);
 
-    useChatFeedRealtime(schoolId, userId, mergedConversations);
-    
     const { isUserOnline } = usePresenceStatus(schoolId, { id: userId });
 
     const markConversationsReadOptimistically = useCallback((conversationIds) => {

@@ -274,7 +274,7 @@ export default function SessionsScreen() {
                 {/* Invisible spacer to keep title centered */}
                 <View style={{ width: 36 }} />
             </Animated.View>
-            <View style={{ backgroundColor: '#F9FAFB' }}>
+            <View style={{ flex: 1, backgroundColor: '#F9FAFB' }}>
                 {isLoading ? (
                     <View style={styles.loadingWrap}>
                         <ActivityIndicator size="large" color="#0469ff" />

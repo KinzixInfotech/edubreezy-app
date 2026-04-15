@@ -9,7 +9,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import * as SecureStore from 'expo-secure-store';
 import * as Haptics from 'expo-haptics';
 import { supabase } from '../lib/supabase';
-import { chatKeys } from '../hooks/useChat';
+import { chatKeys, updateConversationPreviewCaches } from '../hooks/useChat';
 import { getCachedUser, sendHeartbeat } from '../services/chatService';
 import { useRouter, usePathname } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,6 +17,19 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 const ChatContext = createContext();
 
 const BADGE_KEY = 'chatBadgeCount';
+
+const normalizeAttachments = (attachments) => {
+    if (!attachments) return [];
+    if (Array.isArray(attachments)) return attachments;
+    if (typeof attachments === 'string') {
+        try {
+            return JSON.parse(attachments);
+        } catch {
+            return [];
+        }
+    }
+    return [];
+};
 
 // ── In-App Toast Component ──
 function InAppToast({ visible, senderName, senderAvatar, message, onPress, onHide }) {
@@ -202,28 +215,76 @@ export function ChatProvider({ children }) {
                         });
                     }
 
-                    // ── Optimistic update conversation list (no API call) ──
-                    qc.setQueriesData({ queryKey: chatKeys.conversations(schoolId) }, (old) => {
-                        if (!old?.conversations) return old;
-                        return {
-                            ...old,
-                            conversations: old.conversations.map(conv => {
-                                if (conv.id === newMsg.conversationId) {
-                                    return {
-                                        ...conv,
-                                        lastMessageText: newMsg.content || '📎 Attachment',
-                                        lastMessageAt: newMsg.createdAt,
-                                        unreadCount: isInThisConversation ? conv.unreadCount : (conv.unreadCount || 0) + 1,
-                                    };
-                                }
-                                return conv;
-                            }).sort((a, b) => {
-                                if (!a.lastMessageAt && !b.lastMessageAt) return 0;
-                                if (!a.lastMessageAt) return 1;
-                                if (!b.lastMessageAt) return -1;
-                                return new Date(b.lastMessageAt) - new Date(a.lastMessageAt);
-                            }),
+                    const formatted = {
+                        id: newMsg.id,
+                        conversationId: newMsg.conversationId,
+                        senderId: newMsg.senderId,
+                        sender,
+                        content: newMsg.deletedAt ? null : newMsg.content,
+                        attachments: newMsg.deletedAt ? null : newMsg.attachments,
+                        isDeleted: !!newMsg.deletedAt,
+                        status: newMsg.status || 'SENT',
+                        replyTo: null,
+                        createdAt: newMsg.createdAt,
+                        updatedAt: newMsg.updatedAt,
+                        _isRealtime: true,
+                    };
+
+                    updateConversationPreviewCaches(qc, schoolId, newMsg.conversationId, {
+                        ...formatted,
+                        attachments: normalizeAttachments(formatted.attachments),
+                    }, {
+                        currentUserId: userId,
+                    });
+
+                    if (isInThisConversation) {
+                        qc.setQueriesData({ queryKey: chatKeys.conversations(schoolId) }, (old) => {
+                            if (!old) return old;
+
+                            if (Array.isArray(old?.pages)) {
+                                return {
+                                    ...old,
+                                    pages: old.pages.map((page) => ({
+                                        ...page,
+                                        conversations: (page.conversations || []).map((conversation) => (
+                                            conversation.id === newMsg.conversationId
+                                                ? { ...conversation, unreadCount: 0 }
+                                                : conversation
+                                        )),
+                                    })),
+                                };
+                            }
+
+                            if (Array.isArray(old?.conversations)) {
+                                return {
+                                    ...old,
+                                    conversations: old.conversations.map((conversation) => (
+                                        conversation.id === newMsg.conversationId
+                                            ? { ...conversation, unreadCount: 0 }
+                                            : conversation
+                                    )),
+                                };
+                            }
+
+                            return old;
+                        });
+                    }
+
+                    qc.setQueryData(chatKeys.messages(schoolId, newMsg.conversationId), (old) => {
+                        if (!old?.pages?.length) return old;
+
+                        const exists = old.pages.some((page) =>
+                            page.messages?.some((message) => message.id === newMsg.id)
+                        );
+                        if (exists) return old;
+
+                        const newPages = [...old.pages];
+                        newPages[0] = {
+                            ...newPages[0],
+                            messages: [formatted, ...(newPages[0].messages || [])],
                         };
+
+                        return { ...old, pages: newPages };
                     });
                 }
             )

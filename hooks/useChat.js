@@ -2,6 +2,7 @@
 // CHAT HOOKS - React Query hooks for chat data
 // ============================================
 
+import { Alert } from 'react-native';
 import { useQuery, useMutation, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import * as chatService from '../services/chatService';
 
@@ -33,11 +34,11 @@ export const useConversations = (schoolId, params = {}) => {
     });
 };
 
-export const useConversation = (schoolId, conversationId) => {
+export const useConversation = (schoolId, conversationId, userId) => {
     return useQuery({
         queryKey: chatKeys.conversation(schoolId, conversationId),
-        queryFn: () => chatService.getConversation(schoolId, conversationId),
-        enabled: !!schoolId && !!conversationId,
+        queryFn: () => chatService.getConversation(schoolId, conversationId, { userId }),
+        enabled: !!schoolId && !!conversationId && !!userId,
     });
 };
 
@@ -126,9 +127,21 @@ const getConversationPreviewText = (message) => {
     return 'New message';
 };
 
-const updateConversationPreviewCaches = (qc, schoolId, conversationId, message) => {
+const normalizeSentMessage = (result) => {
+    if (!result) return null;
+    if (result.message) return result.message;
+    if (result.data?.message) return result.data.message;
+    if (result.data && result.data.id) return result.data;
+    if (result.id) return result;
+    return null;
+};
+
+export const updateConversationPreviewCaches = (qc, schoolId, conversationId, message, options = {}) => {
     const lastMessageAt = message?.createdAt || new Date().toISOString();
     const lastMessageText = getConversationPreviewText(message);
+    const currentUserId = options.currentUserId || null;
+    const senderId = message?.senderId || null;
+    const unreadIncrement = senderId && currentUserId && senderId !== currentUserId ? 1 : 0;
 
     qc.setQueriesData({ queryKey: chatKeys.conversations(schoolId) }, (old) => {
         return mapConversationCache(old, (conversations) =>
@@ -139,11 +152,26 @@ const updateConversationPreviewCaches = (qc, schoolId, conversationId, message) 
                             ...conversation,
                             lastMessageAt,
                             lastMessageText,
+                            unreadCount: unreadIncrement
+                                ? (conversation.unreadCount || 0) + unreadIncrement
+                                : conversation.unreadCount,
                         }
                         : conversation
                 )
             )
         );
+    });
+
+    qc.setQueryData(chatKeys.conversation(schoolId, conversationId), (old) => {
+        if (!old?.conversation) return old;
+        return {
+            ...old,
+            conversation: {
+                ...old.conversation,
+                lastMessageAt,
+                lastMessageText,
+            },
+        };
     });
 };
 
@@ -163,10 +191,24 @@ export const useSendMessage = () => {
                     replyToId: body.replyToId,
                 });
 
+                chatService.sendMessagePersist(schoolId, conversationId, {
+                    _directMessageId: message.id,
+                    content: body.content || '',
+                    attachments: body.attachments,
+                    replyToId: body.replyToId,
+                }).catch((persistError) => {
+                    console.error('[chat] direct send persisted side-effects failed:', persistError);
+                });
+
                 return { success: true, message };
-            } catch (supabaseErr) {
-                // Fallback: If direct insert fails, use API-only path
-                console.warn('Direct Supabase insert failed, falling back to API:', supabaseErr.message);
+            } catch (supabaseError) {
+                console.warn('[chat] direct Supabase send failed, falling back to API send:', supabaseError);
+                if (__DEV__) {
+                    Alert.alert(
+                        'Direct Supabase Send Failed',
+                        supabaseError?.message || 'Unknown error'
+                    );
+                }
                 return chatService.sendMessage(schoolId, conversationId, body);
             }
         },
@@ -222,14 +264,16 @@ export const useSendMessage = () => {
                 return { ...old, pages: newPages };
             });
 
-            updateConversationPreviewCaches(qc, schoolId, conversationId, optimisticMessage);
+            updateConversationPreviewCaches(qc, schoolId, conversationId, optimisticMessage, {
+                currentUserId: currentUser?.id,
+            });
 
             return { previous, previousConversationQueries, queryKey };
         },
 
         // Replace optimistic message with real message from Supabase
         onSuccess: (result, { schoolId, conversationId, tempId, currentUser }) => {
-            const realMsg = result?.message;
+            const realMsg = normalizeSentMessage(result);
             if (!realMsg || !tempId) return;
 
             const queryKey = chatKeys.messages(schoolId, conversationId);
@@ -261,10 +305,13 @@ export const useSendMessage = () => {
                 };
             });
 
-            updateConversationPreviewCaches(qc, schoolId, conversationId, realMsg);
+            updateConversationPreviewCaches(qc, schoolId, conversationId, realMsg, {
+                currentUserId: currentUser?.id,
+            });
         },
 
-        onError: (_err, _vars, context) => {
+        onError: (error, _vars, context) => {
+            console.error('[chat] send message failed:', error);
             if (context?.previous) {
                 qc.setQueryData(context.queryKey, context.previous);
             }

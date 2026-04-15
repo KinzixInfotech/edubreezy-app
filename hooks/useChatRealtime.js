@@ -6,8 +6,21 @@
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../lib/supabase';
-import { chatKeys } from './useChat';
+import { chatKeys, updateConversationPreviewCaches } from './useChat';
 import { getCachedUser } from '../services/chatService';
+
+const normalizeAttachments = (attachments) => {
+    if (!attachments) return [];
+    if (Array.isArray(attachments)) return attachments;
+    if (typeof attachments === 'string') {
+        try {
+            return JSON.parse(attachments);
+        } catch {
+            return [];
+        }
+    }
+    return [];
+};
 
 /**
  * Subscribe to real-time message changes for a specific conversation.
@@ -22,7 +35,7 @@ import { getCachedUser } from '../services/chatService';
  * @param {object} options
  * @param {boolean} options.enabled - Whether the subscription should be active
  */
-export function useChatRealtime(schoolId, conversationId, { enabled = true } = {}) {
+export function useChatRealtime(schoolId, conversationId, { enabled = true, currentUserId } = {}) {
     const qc = useQueryClient();
     const channelRef = useRef(null);
 
@@ -95,22 +108,23 @@ export function useChatRealtime(schoolId, conversationId, { enabled = true } = {
                         }
                     }
 
+                    const formatted = {
+                        id: newMessage.id,
+                        conversationId: newMessage.conversationId,
+                        senderId: newMessage.senderId,
+                        sender,
+                        content: newMessage.deletedAt ? null : newMessage.content,
+                        attachments: newMessage.deletedAt ? null : newMessage.attachments,
+                        isDeleted: !!newMessage.deletedAt,
+                        status: newMessage.status || 'SENT',
+                        replyTo,
+                        createdAt: newMessage.createdAt,
+                        updatedAt: newMessage.updatedAt,
+                        _isRealtime: true,
+                    };
+
                     // Prepend new message to the first page of the infinite query
                     qc.setQueryData(queryKey, (old) => {
-                        const formatted = {
-                            id: newMessage.id,
-                            conversationId: newMessage.conversationId,
-                            senderId: newMessage.senderId,
-                            sender,
-                            content: newMessage.deletedAt ? null : newMessage.content,
-                            attachments: newMessage.deletedAt ? null : newMessage.attachments,
-                            isDeleted: !!newMessage.deletedAt,
-                            status: newMessage.status || 'SENT',
-                            replyTo,
-                            createdAt: newMessage.createdAt,
-                            updatedAt: newMessage.updatedAt,
-                            _isRealtime: true,
-                        };
 
                         if (!old?.pages?.length) {
                             return {
@@ -192,8 +206,12 @@ export function useChatRealtime(schoolId, conversationId, { enabled = true } = {
                         return { ...old, pages: newPages };
                     });
 
-                    // Also invalidate conversations list to update last message preview
-                    qc.invalidateQueries({ queryKey: chatKeys.conversations(schoolId) });
+                    updateConversationPreviewCaches(qc, schoolId, conversationId, {
+                        ...formatted,
+                        attachments: normalizeAttachments(formatted.attachments),
+                    }, {
+                        currentUserId,
+                    });
                 }
             )
             .on(
@@ -267,7 +285,7 @@ export function useChatRealtime(schoolId, conversationId, { enabled = true } = {
                 channelRef.current = null;
             }
         };
-    }, [conversationId, schoolId, enabled, qc]);
+    }, [conversationId, schoolId, enabled, qc, currentUserId]);
 }
 
 /**
@@ -300,23 +318,19 @@ export function useChatFeedRealtime(schoolId, userId, conversations) {
                 async (payload) => {
                     const newMessage = payload.new;
 
-                    // Update the conversation feed
-                    qc.invalidateQueries({ queryKey: chatKeys.conversations(schoolId) });
-
                     const queryKey = chatKeys.messages(schoolId, c.id);
 
                     // Try to populate sender
-                    let senderName = 'Unknown';
+                    let sender = null;
                     try {
-                        const { data } = await supabase.from('User').select('id, name').eq('id', newMessage.senderId).single();
-                        if (data) senderName = typeof data.name === 'string' ? data.name : data.name?.name || 'Unknown';
+                        sender = await getCachedUser(newMessage.senderId);
                     } catch (e) {}
 
                     const formatted = {
                         id: newMessage.id,
                         conversationId: newMessage.conversationId,
                         senderId: newMessage.senderId,
-                        sender: { id: newMessage.senderId, name: senderName },
+                        sender: sender || { id: newMessage.senderId, name: 'Unknown' },
                         content: newMessage.deletedAt ? null : newMessage.content,
                         attachments: newMessage.deletedAt ? null : newMessage.attachments,
                         isDeleted: !!newMessage.deletedAt,
@@ -342,9 +356,13 @@ export function useChatFeedRealtime(schoolId, userId, conversations) {
                         };
                         return { ...old, pages: newPages };
                     });
-                    
-                    // Keep invalidating so a background fresh fetch happens when the user eventually opens it
-                    qc.invalidateQueries({ queryKey });
+
+                    updateConversationPreviewCaches(qc, schoolId, c.id, {
+                        ...formatted,
+                        attachments: normalizeAttachments(formatted.attachments),
+                    }, {
+                        currentUserId: userId,
+                    });
                 }
             );
         });

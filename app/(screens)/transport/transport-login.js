@@ -25,6 +25,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { API_BASE_URL } from '../../../lib/api';
+import { queueReviewPromptAfterLogin } from '../../../lib/reviewPrompt';
 
 const { width } = Dimensions.get('window');
 
@@ -99,6 +100,8 @@ export default function TransportLoginScreen() {
                 access_token: data.accessToken,
                 refresh_token: data.refreshToken,
             });
+
+            await queueReviewPromptAfterLogin();
 
             // Route based on role
             if (data.transportStaff.role === 'DRIVER') {

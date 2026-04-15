@@ -22,6 +22,7 @@ export default {
             },
             supportsTablet: true,
             bundleIdentifier: "com.kinzix.edubreezy",
+            appStoreUrl: process.env.EXPO_PUBLIC_IOS_APP_STORE_URL || "https://apps.apple.com/app/id6761730373",
             googleServicesFile: "./GoogleService-Info.plist" || process.env.GOOGLE_SERVICE_INFO_PLIST,
             config: {
                 googleMapsApiKey: process.env.GOOGLE_MAPS_API_KEY
@@ -57,6 +58,7 @@ export default {
                 backgroundColor: "#ffffff"
             },
             package: "com.kinzix.edubreezy",
+            playStoreUrl: process.env.EXPO_PUBLIC_ANDROID_PLAY_STORE_URL || "https://play.google.com/store/apps/details?id=com.kinzix.edubreezy",
             googleServicesFile: process.env.GOOGLE_SERVICES_JSON || "./google-services.json",
             edgeToEdgeEnabled: true,
             adaptiveIcon: {

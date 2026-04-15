@@ -18,7 +18,7 @@ import {
 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
-import { Video, ResizeMode } from 'expo-av';
+import { Audio, Video, ResizeMode } from 'expo-av';
 import HapticTouchable from '../../components/HapticTouch';
 import { pickMedia, getPresignedUrls, uploadToR2, detectMediaType } from '../../../lib/r2Upload';
 import { useQueryClient } from '@tanstack/react-query';
@@ -33,14 +33,22 @@ import { usePresenceStatus } from '../../../hooks/usePresenceStatus';
 import { useShimmer, Bone } from '../../components/ScreenSkeleton';
 import { StatusBar } from 'expo-status-bar';
 import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import Animated2, {
     useSharedValue, useAnimatedStyle, withTiming,
 } from 'react-native-reanimated';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+function parseChatDate(dateStr) {
+    if (!dateStr) return null;
+    if (typeof dateStr !== 'string') return new Date(dateStr);
+    return new Date(dateStr.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(dateStr) ? dateStr : `${dateStr}Z`);
+}
+
 function getDateLabel(dateStr) {
-    const d = new Date(dateStr);
+    const d = parseChatDate(dateStr);
+    if (!d || Number.isNaN(d.getTime())) return '';
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const msgDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -52,13 +60,15 @@ function getDateLabel(dateStr) {
 
 function formatTime(dateStr) {
     if (!dateStr) return '';
-    const d = new Date(dateStr.endsWith('Z') ? dateStr : dateStr + 'Z');
+    const d = parseChatDate(dateStr);
+    if (!d || Number.isNaN(d.getTime())) return '';
     return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 function formatLastSeen(dateStr) {
     if (!dateStr) return '';
-    const d = new Date(dateStr);
+    const d = parseChatDate(dateStr);
+    if (!d || Number.isNaN(d.getTime())) return '';
     const diffMins = Math.floor((Date.now() - d) / 60000);
     if (diffMins < 1) return 'Just now';
     if (diffMins < 60) return `${diffMins}m ago`;
@@ -124,6 +134,8 @@ const MessageStatusTicks = ({ status, isMine }) => {
     if (status === 'DELIVERED') return <CheckCheck size={12} color="rgba(255,255,255,0.7)" style={{ marginLeft: 4 }} />;
     return <Check size={12} color="rgba(255,255,255,0.7)" style={{ marginLeft: 4 }} />;
 };
+
+const HEADER_BAR_HEIGHT = 62;
 
 // ── Message Bubble ────────────────────────────────────────────────────────────
 
@@ -344,6 +356,8 @@ export default function ChatRoomScreen() {
         lastSeenAt: paramLastSeenAt,
     } = useLocalSearchParams();
     const flatListRef = useRef(null);
+    const sendBubbleSoundRef = useRef(null);
+    const headerHeight = insets.top + HEADER_BAR_HEIGHT;
 
     const [currentUser, setCurrentUser] = useState(null);
     const [schoolId, setSchoolId] = useState(paramSchoolId || null);
@@ -372,7 +386,50 @@ export default function ChatRoomScreen() {
         }).catch(console.error);
     }, []);
 
-    const { data: convData } = useConversation(schoolId, conversationId);
+    useEffect(() => {
+        let mounted = true;
+
+        const loadSendBubbleSound = async () => {
+            try {
+                const { sound } = await Audio.Sound.createAsync(
+                    require('../../../assets/chat/chat_append_bubble.mp3'),
+                    { shouldPlay: false }
+                );
+
+                if (!mounted) {
+                    await sound.unloadAsync();
+                    return;
+                }
+
+                sendBubbleSoundRef.current = sound;
+            } catch (error) {
+                console.warn('[chat] failed to load send bubble sound:', error);
+            }
+        };
+
+        loadSendBubbleSound();
+
+        return () => {
+            mounted = false;
+            const sound = sendBubbleSoundRef.current;
+            sendBubbleSoundRef.current = null;
+            if (sound) {
+                sound.unloadAsync().catch(() => null);
+            }
+        };
+    }, []);
+
+    const playSendBubbleSound = useCallback(async () => {
+        try {
+            const sound = sendBubbleSoundRef.current;
+            if (!sound) return;
+            await sound.replayAsync();
+        } catch (error) {
+            console.warn('[chat] failed to play send bubble sound:', error);
+        }
+    }, []);
+
+    const { data: convData } = useConversation(schoolId, conversationId, currentUser?.id);
     const conversation = convData?.conversation;
 
     const { data: messagesPages, isLoading: messagesLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useMessages(schoolId, conversationId);
@@ -385,7 +442,10 @@ export default function ChatRoomScreen() {
     const markAsDeliveredMutation = useMarkAsDelivered();
     const leaveMutation = useLeaveConversation();
 
-    useChatRealtime(schoolId, conversationId, { enabled: !!schoolId && !!conversationId });
+    useChatRealtime(schoolId, conversationId, {
+        enabled: !!schoolId && !!conversationId,
+        currentUserId: currentUser?.id,
+    });
     const { sendTyping, stopTyping, typingUsers } = useTypingIndicator(conversationId, currentUser, { enabled: !!conversationId && !!currentUser });
     const { isUserOnline, getLastSeen } = usePresenceStatus(schoolId, currentUser);
 
@@ -488,7 +548,7 @@ export default function ChatRoomScreen() {
 
     const handleSend = useCallback(() => {
         const text = inputText.trim();
-        if (!text) return;
+        if (!text || !schoolId || !conversationId || !currentUser?.id) return;
         const tempId = `temp-${Date.now()}`;
         setInputText('');
         stopTyping();
@@ -500,7 +560,8 @@ export default function ChatRoomScreen() {
             tempId, currentUser,
             replyToMessage: currentReplyTo || null,
         });
-    }, [inputText, schoolId, conversationId, replyTo, currentUser, sendMessageMutation]);
+        playSendBubbleSound();
+    }, [inputText, schoolId, conversationId, replyTo, currentUser, sendMessageMutation, stopTyping, playSendBubbleSound]);
 
     const [mediaPreview, setMediaPreview] = useState(null);
     const [isPreviewExpanded, setIsPreviewExpanded] = useState(false);
@@ -524,7 +585,7 @@ export default function ChatRoomScreen() {
     }, [isUploading, schoolId]);
 
     const handleSendMedia = useCallback(async () => {
-        if (!mediaPreview) return;
+        if (!mediaPreview || !schoolId || !conversationId || !currentUser?.id) return;
         const tempId = `temp-${Date.now()}`;
         const caption = inputText.trim();
         const preview = mediaPreview;
@@ -559,6 +620,7 @@ export default function ChatRoomScreen() {
             newPages[0] = { ...newPages[0], messages: [optimisticMsg, ...newPages[0].messages] };
             return { ...old, pages: newPages };
         });
+        playSendBubbleSound();
 
         try {
             const [presigned] = await getPresignedUrls(
@@ -594,7 +656,7 @@ export default function ChatRoomScreen() {
                 return { ...old, pages: newPages };
             });
         }
-    }, [mediaPreview, inputText, schoolId, conversationId, currentUser, sendMessageMutation, replyTo, queryClient]);
+    }, [mediaPreview, inputText, schoolId, conversationId, currentUser, sendMessageMutation, replyTo, queryClient, playSendBubbleSound]);
 
     const [selectedMessage, setSelectedMessage] = useState(null);
     const [viewingMedia, setViewingMedia] = useState(null);
@@ -758,12 +820,28 @@ export default function ChatRoomScreen() {
     // ── Render ────────────────────────────────────────────────────────────────
 
     return (
-        <View style={[styles.container, { paddingTop: insets.top }]}>
+        <View style={styles.container}>
             <StatusBar style="dark" backgroundColor="transparent" translucent />
+            <View pointerEvents="none" style={styles.headerBackdrop}>
+                <LinearGradient
+                    colors={['rgba(4,105,255,0.16)', 'rgba(4,105,255,0.06)', 'rgba(255,255,255,0)']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={StyleSheet.absoluteFill}
+                />
+                <View style={styles.headerBackdropBlobPrimary} />
+                <View style={styles.headerBackdropBlobSecondary} />
+            </View>
 
             {/* Header */}
-            <View style={styles.header}>
-                <BlurView intensity={60} tint="light" style={StyleSheet.absoluteFill} />
+            <View style={[styles.header, { paddingTop: insets.top + 8, minHeight: headerHeight }]}>
+                <BlurView
+                    intensity={85}
+                    tint="light"
+                    experimentalBlurMethod="dimezisBlurView"
+                    style={StyleSheet.absoluteFill}
+                />
+                <View style={styles.headerGlassOverlay} />
                 <HapticTouchable onPress={() => router.back()} style={styles.backBtn}>
                     <ArrowLeft size={22} color="#111" strokeWidth={2} />
                 </HapticTouchable>
@@ -787,7 +865,7 @@ export default function ChatRoomScreen() {
 
             {/* Messages */}
             <KeyboardAvoidingView
-                style={{ flex: 1, backgroundColor: '#f8f9fa' }}
+                style={{ flex: 1, backgroundColor: '#f8f9fa', paddingTop: headerHeight }}
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
             >
@@ -1058,17 +1136,52 @@ export default function ChatRoomScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#fff' },
+    headerBackdrop: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: 220,
+        overflow: 'hidden',
+    },
+    headerBackdropBlobPrimary: {
+        position: 'absolute',
+        top: -30,
+        right: -10,
+        width: 180,
+        height: 180,
+        borderRadius: 90,
+        backgroundColor: 'rgba(4,105,255,0.10)',
+    },
+    headerBackdropBlobSecondary: {
+        position: 'absolute',
+        top: 30,
+        left: -40,
+        width: 140,
+        height: 140,
+        borderRadius: 70,
+        backgroundColor: 'rgba(59,130,246,0.08)',
+    },
 
     header: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 20,
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 12,
-        paddingVertical: 10,
+        paddingBottom: 10,
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: 'rgba(0,0,0,0.08)',
+        borderBottomColor: 'rgba(0,0,0,0.05)',
         gap: 10,
         overflow: 'hidden',
-        backgroundColor: 'rgba(255,255,255,0.7)',
+        backgroundColor: 'transparent',
+    },
+    headerGlassOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(255,255,255,0.06)',
     },
     backBtn: { padding: 4 },
     headerAvatar: { width: 36, height: 36, borderRadius: 18 },

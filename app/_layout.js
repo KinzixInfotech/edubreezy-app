@@ -16,6 +16,7 @@ import { NotificationProvider, useNotification } from '../contexts/NotificationC
 import { ChatProvider } from '../contexts/ChatContext';
 import { AttendanceReminderProvider } from '../contexts/AttendanceReminderContext';
 import AttendanceReminderModal from './components/AttendanceReminderModal';
+import AppReviewPrompt from './components/AppReviewPrompt';
 import messaging from '@react-native-firebase/messaging';
 import { supabase } from '../lib/supabase';
 import NetInfo from '@react-native-community/netinfo';
@@ -28,17 +29,18 @@ import { checkForUpdates, setupUpdateListener } from '../services/updateChecker'
 import { syncAttendanceQueue } from '../lib/attendanceQueue';
 import * as Linking from 'expo-linking';
 import { hydrateRecoverySessionFromUrl } from '../lib/passwordRecovery';
+import { queueReviewPromptAfterLogin } from '../lib/reviewPrompt';
 
 const BADGE_KEY = 'noticeBadgeCount';
 
 // Configure expo-notifications to NOT show the OS-level banner when the app is in the foreground.
 // This prevents double-notifications since we use custom in-app components (like InAppToast).
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: false,
-    shouldPlaySound: false,
-    shouldSetBadge: false,
-  }),
+    handleNotification: async () => ({
+        shouldShowAlert: false,
+        shouldPlaySound: false,
+        shouldSetBadge: false,
+    }),
 });
 
 // Keep splash visible while fonts load
@@ -278,7 +280,7 @@ function RootLayoutContent() {
 
             if (isAppActiveRef.current) {
                 console.log('New notice from FCM:', remoteMessage.notification?.title);
-                
+
                 // Play haptic/vibration feedback for incoming foreground notification
                 if (Platform.OS === 'ios') {
                     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -304,6 +306,29 @@ function RootLayoutContent() {
     const [loggedInUserId, setLoggedInUserId] = useState(null);
     const previousUserIdRef = useRef(null);
     const tokenRefreshUnsubRef = useRef(null);
+
+    useEffect(() => {
+        if (!loggedInUserId) return;
+
+        const run = async () => {
+            try {
+                const raw = await SecureStore.getItemAsync('appReviewPromptState');
+                const state = raw ? JSON.parse(raw) : null;
+
+                // 🚀 THIS IS THE MISSING PART
+                if (!state?.completedAt && !state?.pending) {
+                    console.log('[Review] Queueing for existing user');
+                    if (!state?.completedAt && !state?.firstSeenAt) {
+                        await queueReviewPromptAfterLogin();
+                    }
+                }
+            } catch (e) {
+                console.error('[Review] error:', e);
+            }
+        };
+
+        run();
+    }, [loggedInUserId]);
 
     // Detect user login/logout by watching SecureStore + route changes
     useEffect(() => {
@@ -614,10 +639,16 @@ function RootLayoutContent() {
                     changelog={changelogData.changelog}
                     latestVersion={changelogData.latestVersion}
                 />
+                <AppReviewPrompt
+                    loggedInUserId={loggedInUserId}
+                    blocked={showVideoSplash || isMaintenanceMode || showChangelog}
+                />
             </View>
         </>
+
     );
 }
+
 
 export default function RootLayout() {
     return (

@@ -1,6 +1,6 @@
 // app/_layout.jsx
 import { QueryClientProvider } from '@tanstack/react-query';
-import { Stack, usePathname, useSegments } from 'expo-router';
+import { Stack, router, usePathname, useSegments } from 'expo-router';
 import { queryClient } from '../lib/queryClient';
 import * as SplashScreen from 'expo-splash-screen';
 import { useFonts, Roboto_400Regular, Roboto_500Medium, Roboto_700Bold } from '@expo-google-fonts/roboto';
@@ -26,6 +26,8 @@ import MaintenanceScreen from './components/MaintenanceScreen';
 import ChangelogModal from './components/ChangelogModal';
 import { checkForUpdates, setupUpdateListener } from '../services/updateChecker';
 import { syncAttendanceQueue } from '../lib/attendanceQueue';
+import * as Linking from 'expo-linking';
+import { hydrateRecoverySessionFromUrl } from '../lib/passwordRecovery';
 
 const BADGE_KEY = 'noticeBadgeCount';
 
@@ -94,6 +96,7 @@ function RootLayoutContent() {
     const [showChangelog, setShowChangelog] = useState(false);
     const [changelogData, setChangelogData] = useState({ changelog: [], latestVersion: '' });
     const wasOfflineRef = useRef(false);
+    const lastHandledRecoveryUrlRef = useRef(null);
 
     // Get current route info
     const pathname = usePathname();
@@ -115,6 +118,59 @@ function RootLayoutContent() {
     const fcmUnsubscribeRef = useRef(null);
 
     const { incrementNoticeBadge, setBadgeCount, isLoaded } = useNotification();
+
+    useEffect(() => {
+        const handleRecoveryUrl = async (url) => {
+            if (!url || lastHandledRecoveryUrlRef.current === url) {
+                return;
+            }
+
+            const result = await hydrateRecoverySessionFromUrl(url);
+
+            if (!result?.matched) {
+                return;
+            }
+
+            lastHandledRecoveryUrlRef.current = url;
+
+            const params = {};
+
+            if (result.status) {
+                params.status = result.status;
+            }
+
+            if (result.message) {
+                params.message = result.message;
+            }
+
+            if (result.email) {
+                params.email = result.email;
+            }
+
+            router.replace({
+                pathname: '/(auth)/reset-password',
+                params,
+            });
+        };
+
+        Linking.getInitialURL()
+            .then((url) => {
+                if (url) {
+                    handleRecoveryUrl(url);
+                }
+            })
+            .catch((error) => {
+                console.warn('Failed to read initial recovery URL:', error);
+            });
+
+        const subscription = Linking.addEventListener('url', ({ url }) => {
+            handleRecoveryUrl(url);
+        });
+
+        return () => {
+            subscription.remove();
+        };
+    }, []);
 
     // Keep ref in sync with state
     useEffect(() => {

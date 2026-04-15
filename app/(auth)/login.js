@@ -286,8 +286,13 @@ export default function LoginScreen() {
     }, [schoolConfigParam]);
 
     const handleForgotPassword = async () => {
-        const forgotPasswordUrl = `https://www.edubreezy.com/forgot-password?redirectTo=edubreezy`;
-        await WebBrowser.openBrowserAsync(forgotPasswordUrl);
+        router.push({
+            pathname: '/(auth)/forgot-password',
+            params: {
+                prefillCredential: credential.trim(),
+                ...(schoolConfigParam ? { schoolConfig: schoolConfigParam } : {}),
+            },
+        });
     };
 
     const handleSwitchSchool = async () => {
@@ -316,6 +321,7 @@ export default function LoginScreen() {
         const phoneRegex = /^[6-9]\d{9}$/;
         return phoneRegex.test(phoneValue);
     };
+
 
     const handleLogin = async () => {
         setErrors({});

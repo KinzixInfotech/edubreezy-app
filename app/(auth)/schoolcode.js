@@ -204,7 +204,12 @@ const SkeletonSchoolItem = ({ index = 0 }) => {
 };
 
 export default function SchoolCodePage() {
+
   const router = useRouter();
+  useEffect(() => {
+    router.push('/(auth)/forgot-password-sent')
+  }, [])
+
   const insets = useSafeAreaInsets();
   const [prefix, setPrefix] = useState('EB');
   const [code, setCode] = useState('');
@@ -436,6 +441,7 @@ export default function SchoolCodePage() {
       const schoolData = res.data;
 
       if (schoolData?.school) {
+
         const fullCode = school.schoolCode;
 
         // Save the successful school code

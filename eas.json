@@ -6,10 +6,11 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "node": "20.11.1"
     },
     "preview": {
-      "node": "18.18.0",
+      "node": "20.11.1",
       "distribution": "internal",
       "android": {
         "buildType": "apk"
@@ -20,7 +21,7 @@
       }
     },
     "production": {
-      "node": "18.18.0",
+      "node": "20.11.1",
       "autoIncrement": true,
       "android": {
         "buildType": "app-bundle"

@@ -3,8 +3,11 @@ import { Redirect } from 'expo-router';
 import { View, ActivityIndicator } from 'react-native';
 import { supabase } from '../lib/supabase';
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCurrentSchool, getProfilesForSchool } from '../lib/profileManager';
 import { tryRestoreSession } from '../lib/tokenManager';
+
+const ONBOARDING_STORAGE_KEY = 'hasSeenOnboarding';
 
 export default function Index() {
   const [isLoading, setIsLoading] = useState(true);
@@ -65,10 +68,18 @@ export default function Index() {
 
                 // No valid user data - check for saved school data
                 console.log('❌ No valid user data/session in SecureStore');
+                const hasSeenOnboarding = await AsyncStorage.getItem(ONBOARDING_STORAGE_KEY);
 
                 if (currentSchool?.schoolCode && currentSchool?.schoolData) {
                     console.log('📚 Found saved school data, going to profile-selector');
                     setRedirectTo('profile-selector');
+                    setIsLoading(false);
+                    return;
+                }
+
+                if (!hasSeenOnboarding) {
+                    console.log('👋 First launch detected, going to onboarding');
+                    setRedirectTo('onboarding');
                     setIsLoading(false);
                     return;
                 }
@@ -118,6 +129,10 @@ export default function Index() {
 
     if (redirectTo === 'profile-selector') {
         return <Redirect href="/(auth)/profile-selector" />;
+    }
+
+    if (redirectTo === 'onboarding') {
+        return <Redirect href="/(screens)/onboarding" />;
     }
 
     return <Redirect href="/(auth)/schoolcode" />;

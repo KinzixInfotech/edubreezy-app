@@ -80,6 +80,9 @@ export default function SelfAttendance() {
     const [securitySignals, setSecuritySignals] = useState([]);
     const [queuedActionsCount, setQueuedActionsCount] = useState(0);
     const [liveHours, setLiveHours] = useState(0);
+    const [showExtensionModal, setShowExtensionModal] = useState(false);
+    const [customExtensionDate, setCustomExtensionDate] = useState(new Date());
+    const [showCustomExtensionPicker, setShowCustomExtensionPicker] = useState(false);
     const pulseAnim = useSharedValue(1);
     const intervalRef = useRef(null);
     const appState = useRef(AppState.currentState);
@@ -506,16 +509,17 @@ export default function SelfAttendance() {
         }
     };
 
-    const buildAttendancePayload = useCallback((type) => ({
+    const buildAttendancePayload = useCallback((type, extra = {}) => ({
         userId,
         type,
-        location,
+        location: type === 'EXTEND' ? null : location,
         deviceInfo,
         capturedAt: location?.capturedAt ?? new Date().toISOString(),
+        ...extra,
     }), [deviceInfo, location, userId]);
 
-    const queueAttendanceAction = useCallback(async (type) => {
-        const payload = buildAttendancePayload(type);
+    const queueAttendanceAction = useCallback(async (type, extra = {}) => {
+        const payload = buildAttendancePayload(type, extra);
 
         await enqueueAttendanceAction({
             schoolId,
@@ -528,21 +532,21 @@ export default function SelfAttendance() {
 
         Alert.alert(
             'Queued Offline',
-            `${type === 'CHECK_IN' ? 'Check-in' : 'Check-out'} was saved on this device and will sync automatically when the internet returns.`
+            `${type === 'CHECK_IN' ? 'Check-in' : type === 'CHECK_OUT' ? 'Check-out' : 'Extension request'} was saved on this device and will sync automatically when the internet returns.`
         );
         await refreshQueuedActionsCount();
     }, [buildAttendancePayload, refreshQueuedActionsCount, schoolId]);
 
     const validateAttendanceAttempt = useCallback((type) => {
-        if (!location) {
+        if (type !== 'EXTEND' && !location) {
             throw new Error('Location not available');
         }
 
-        if (securitySignals.includes('MOCK_LOCATION')) {
+        if (type !== 'EXTEND' && securitySignals.includes('MOCK_LOCATION')) {
             throw new Error('Mock location detected. Please disable fake GPS apps and try again.');
         }
 
-        if (config?.enableGeoFencing && schoolLocation?.enableGeoFencing && isWithinRadius === false) {
+        if (type !== 'EXTEND' && config?.enableGeoFencing && schoolLocation?.enableGeoFencing && isWithinRadius === false) {
             const radius = config?.allowedRadius ?? config?.allowedRadiusMeters ?? schoolLocation.attendanceRadius ?? schoolLocation.radiusMeters;
             throw new Error(`You are too far from school. Please ensure you are within ${radius}m.`);
         }
@@ -558,7 +562,33 @@ export default function SelfAttendance() {
         if (type === 'CHECK_OUT' && attendance?.checkOutTime) {
             throw new Error('You have already checked out for today.');
         }
-    }, [attendance?.checkInTime, attendance?.checkOutTime, config?.allowedRadius, config?.allowedRadiusMeters, config?.enableGeoFencing, isWithinRadius, location, schoolLocation?.attendanceRadius, schoolLocation?.enableGeoFencing, schoolLocation?.radiusMeters, securitySignals]);
+
+        if (type === 'EXTEND') {
+            if (!attendance?.checkInTime) {
+                throw new Error('Please check in before requesting an extension.');
+            }
+            if (attendance?.checkOutTime) {
+                throw new Error('You have already checked out for today.');
+            }
+            if (attendance?.isExtended && attendance?.extendedTill) {
+                throw new Error('You have already used today’s extension.');
+            }
+            if (!windows?.checkOut?.deadline || new Date() < new Date(windows.checkOut.deadline)) {
+                throw new Error('Extension becomes available only after school end time.');
+            }
+            if (windows?.checkOut?.effectiveCutoff && new Date() >= new Date(windows.checkOut.effectiveCutoff)) {
+                throw new Error('The extension cutoff has already passed.');
+            }
+        }
+    }, [attendance?.checkInTime, attendance?.checkOutTime, attendance?.extendedTill, attendance?.isExtended, config?.allowedRadius, config?.allowedRadiusMeters, config?.enableGeoFencing, isWithinRadius, location, schoolLocation?.attendanceRadius, schoolLocation?.enableGeoFencing, schoolLocation?.radiusMeters, securitySignals, windows?.checkOut?.deadline, windows?.checkOut?.effectiveCutoff]);
+
+    const getExtendedTillIso = useCallback((hoursToAdd) => {
+        const deadline = windows?.checkOut?.deadline ? new Date(windows.checkOut.deadline) : null;
+        if (!deadline) return null;
+        const next = new Date(deadline);
+        next.setHours(next.getHours() + hoursToAdd);
+        return next.toISOString();
+    }, [windows?.checkOut?.deadline]);
 
     // ========== UX MESSAGE HELPERS ==========
 
@@ -595,7 +625,9 @@ export default function SelfAttendance() {
 
         if (windows.checkOut.isOpen) {
             const remaining = getTimeRemaining(windows.checkOut.end);
-            return `Ready to check out • ${remaining}`;
+            return isExtendedSession
+                ? `Extended session active • auto checkout at ${new Date(windows.checkOut.effectiveCutoff || windows.checkOut.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                : `Ready to check out • ${remaining}`;
         } else if (now < start) {
             const timeUntil = Math.round((start - now) / (1000 * 60));
             if (timeUntil > 60) {
@@ -656,8 +688,8 @@ export default function SelfAttendance() {
             await saveCheckInState(new Date());
 
             // Schedule check-out reminder notifications
-            if (windows?.checkOut) {
-                await scheduleCheckOutReminders(windows.checkOut.start, windows.checkOut.end);
+            if (res.data.checkOutWindow) {
+                await scheduleCheckOutReminders(res.data.checkOutWindow.start, res.data.checkOutWindow.end);
             }
 
             Alert.alert(
@@ -711,6 +743,49 @@ export default function SelfAttendance() {
         },
         onError: (err) => {
             Alert.alert('Check-Out Failed', err.response?.data?.error || err.message);
+        }
+    });
+
+    const extendMutation = useMutation({
+        mutationFn: async ({ extendedTill }) => {
+            validateAttendanceAttempt('EXTEND');
+
+            const netState = await NetInfo.fetch();
+            if (!netState.isConnected || !netState.isInternetReachable) {
+                await queueAttendanceAction('EXTEND', { extendedTill });
+                return {
+                    data: {
+                        success: true,
+                        queuedOffline: true,
+                    }
+                };
+            }
+
+            return await api.post(`/schools/${schoolId}/attendance/mark`, buildAttendancePayload('EXTEND', { extendedTill }));
+        },
+        onSuccess: async (res) => {
+            queryClient.invalidateQueries({ queryKey: ['self-attendance-status'] });
+            if (res?.data?.queuedOffline) {
+                setShowExtensionModal(false);
+                return;
+            }
+            if (!res.data.success) {
+                Alert.alert('Cannot Extend Workday', res.data.message);
+                return;
+            }
+
+            if (res.data.checkOutWindow?.deadline && res.data.checkOutWindow?.effectiveCutoff) {
+                await scheduleCheckOutReminders(
+                    res.data.checkOutWindow.deadline,
+                    res.data.checkOutWindow.effectiveCutoff
+                );
+            }
+
+            setShowExtensionModal(false);
+            Alert.alert('Extension Confirmed', res.data.message || 'Your workday has been extended.');
+        },
+        onError: (err) => {
+            Alert.alert('Extension Failed', err.response?.data?.error || err.response?.data?.message || err.message);
         }
     });
 
@@ -842,6 +917,19 @@ export default function SelfAttendance() {
     const canCheckOut = isWorkingDay && !onLeave && windows?.checkOut?.isOpen && attendance?.checkInTime && !attendance?.checkOutTime;
     const canAttemptCheckIn = canCheckIn && !!location && !geofenceBlocking;
     const canAttemptCheckOut = canCheckOut && !!location && !geofenceBlocking;
+    const hasShiftEnded = windows?.checkOut?.deadline ? new Date() >= new Date(windows.checkOut.deadline) : false;
+    const isExtendedSession = Boolean(attendance?.isExtended && !attendance?.checkOutTime);
+    const maxExtensionHours = Number(config?.maxExtensionHours ?? 0);
+    const canRequestExtension = Boolean(
+        isWorkingDay
+        && !onLeave
+        && attendance?.checkInTime
+        && !attendance?.checkOutTime
+        && hasShiftEnded
+        && !isExtendedSession
+        && windows?.checkOut?.effectiveCutoff
+        && new Date() < new Date(windows.checkOut.effectiveCutoff)
+    );
 
     const getStatusColor = (status) => {
         switch (status) {
@@ -872,6 +960,50 @@ export default function SelfAttendance() {
         const hours = Math.floor(diff / (1000 * 60 * 60));
         const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
         return `${hours}h ${mins}m left`;
+    };
+
+    const openExtensionModal = () => {
+        const deadline = windows?.checkOut?.deadline ? new Date(windows.checkOut.deadline) : new Date();
+        setCustomExtensionDate(deadline);
+        setShowExtensionModal(true);
+    };
+
+    const requestExtension = (hoursToAdd) => {
+        const extendedTill = getExtendedTillIso(hoursToAdd);
+        if (!extendedTill) {
+            Alert.alert('Extension Unavailable', 'Shift end time is not available right now.');
+            return;
+        }
+
+        const maxAllowed = windows?.checkOut?.maxExtendedEnd ? new Date(windows.checkOut.maxExtendedEnd) : null;
+        if (maxAllowed && new Date(extendedTill) > maxAllowed) {
+            Alert.alert('Extension Limit Reached', `You can extend only up to ${maxExtensionHours} hours after school end.`);
+            return;
+        }
+
+        extendMutation.mutate({ extendedTill });
+    };
+
+    const requestCustomExtension = () => {
+        const deadline = windows?.checkOut?.deadline ? new Date(windows.checkOut.deadline) : null;
+        const maxAllowed = windows?.checkOut?.maxExtendedEnd ? new Date(windows.checkOut.maxExtendedEnd) : null;
+
+        if (!deadline || !maxAllowed) {
+            Alert.alert('Extension Unavailable', 'Extension limits are not available right now.');
+            return;
+        }
+
+        if (customExtensionDate <= deadline) {
+            Alert.alert('Invalid Time', 'Pick a time after school end.');
+            return;
+        }
+
+        if (customExtensionDate > maxAllowed) {
+            Alert.alert('Extension Limit Reached', `Pick a time within ${maxExtensionHours} hours after school end.`);
+            return;
+        }
+
+        extendMutation.mutate({ extendedTill: customExtensionDate.toISOString() });
     };
 
     if (!userId || !schoolId || !isTeacher) {
@@ -1164,6 +1296,22 @@ export default function SelfAttendance() {
                                         </Text>
                                     </View>
                                 )}
+                                {canRequestExtension && (
+                                    <View style={[styles.statusHintBox, { backgroundColor: '#FEF3C7' }]}>
+                                        <AlertTriangle size={16} color="#D97706" />
+                                        <Text style={[styles.statusHintText, { color: '#92400E' }]}>
+                                            School time ended. You can check out now or extend once up to {maxExtensionHours} hours.
+                                        </Text>
+                                    </View>
+                                )}
+                                {isExtendedSession && (
+                                    <View style={[styles.statusHintBox, { backgroundColor: '#DCFCE7' }]}>
+                                        <CheckCircle size={16} color="#10B981" />
+                                        <Text style={[styles.statusHintText, { color: '#166534' }]}>
+                                            Extended until {new Date(attendance.extendedTill).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}. Auto checkout will happen then if you do nothing.
+                                        </Text>
+                                    </View>
+                                )}
                             </>
                         ) : null}
                     </Animated.View>
@@ -1197,25 +1345,48 @@ export default function SelfAttendance() {
                         )}
 
                         {canCheckOut && (
-                            <AnimatedPressable
-                                entering={FadeInUp.delay(200)}
-                                style={[
-                                    styles.actionButton,
-                                    styles.checkOutButton,
-                                    !canAttemptCheckOut && styles.actionButtonDisabled
-                                ]}
-                                onPress={() => checkOutMutation.mutate()}
-                                disabled={checkOutMutation.isPending || !canAttemptCheckOut}
-                            >
-                                {checkOutMutation.isPending ? (
-                                    <ActivityIndicator color="#fff" />
-                                ) : (
-                                    <>
-                                        <Clock size={24} color="#fff" />
-                                        <Text style={styles.actionButtonText}>Check Out</Text>
-                                    </>
+                            <>
+                                <AnimatedPressable
+                                    entering={FadeInUp.delay(200)}
+                                    style={[
+                                        styles.actionButton,
+                                        styles.checkOutButton,
+                                        !canAttemptCheckOut && styles.actionButtonDisabled
+                                    ]}
+                                    onPress={() => checkOutMutation.mutate()}
+                                    disabled={checkOutMutation.isPending || !canAttemptCheckOut}
+                                >
+                                    {checkOutMutation.isPending ? (
+                                        <ActivityIndicator color="#fff" />
+                                    ) : (
+                                        <>
+                                            <Clock size={24} color="#fff" />
+                                            <Text style={styles.actionButtonText}>Check Out</Text>
+                                        </>
+                                    )}
+                                </AnimatedPressable>
+                                {canRequestExtension && (
+                                    <AnimatedPressable
+                                        entering={FadeInUp.delay(250)}
+                                        style={[
+                                            styles.actionButton,
+                                            styles.extendButton,
+                                            extendMutation.isPending && styles.actionButtonDisabled
+                                        ]}
+                                        onPress={openExtensionModal}
+                                        disabled={extendMutation.isPending}
+                                    >
+                                        {extendMutation.isPending ? (
+                                            <ActivityIndicator color="#F59E0B" />
+                                        ) : (
+                                            <>
+                                                <Zap size={24} color="#F59E0B" />
+                                                <Text style={styles.extendButtonText}>Continue Working</Text>
+                                            </>
+                                        )}
+                                    </AnimatedPressable>
                                 )}
-                            </AnimatedPressable>
+                            </>
                         )}
                     </Animated.View>
                 )}
@@ -1363,6 +1534,113 @@ export default function SelfAttendance() {
                         ))}
                     </Animated.View>
                 )}
+
+                <Modal
+                    visible={showExtensionModal}
+                    transparent
+                    animationType="slide"
+                    onRequestClose={() => setShowExtensionModal(false)}
+                >
+                    <KeyboardAvoidingView
+                        style={{ flex: 1 }}
+                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+                    >
+                        <View style={styles.modalOverlay}>
+                            <View style={styles.modalContent}>
+                                <View style={styles.modalHeader}>
+                                    <Text style={styles.modalTitle}>Continue Working?</Text>
+                                    <Pressable onPress={() => setShowExtensionModal(false)}>
+                                        <CloseIcon size={24} color="#666" />
+                                    </Pressable>
+                                </View>
+
+                                <ScrollView style={styles.modalForm} contentContainerStyle={{ paddingBottom: 30 }}>
+                                    <View style={styles.infoBox}>
+                                        <Info size={18} color="#1E40AF" />
+                                        <Text style={styles.infoBoxText}>
+                                            You can extend only once, and never beyond {maxExtensionHours} hours after school end.
+                                        </Text>
+                                    </View>
+
+                                    <Text style={styles.inputLabel}>Standard End</Text>
+                                    <View style={styles.dateInput}>
+                                        <Clock size={18} color="#666" />
+                                        <Text style={styles.dateText}>
+                                            {windows?.checkOut?.deadline ? new Date(windows.checkOut.deadline).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
+                                        </Text>
+                                    </View>
+
+                                    <Text style={styles.inputLabel}>Max Allowed</Text>
+                                    <View style={styles.dateInput}>
+                                        <AlertTriangle size={18} color="#666" />
+                                        <Text style={styles.dateText}>
+                                            {windows?.checkOut?.maxExtendedEnd ? new Date(windows.checkOut.maxExtendedEnd).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '--'}
+                                        </Text>
+                                    </View>
+
+                                    <Text style={styles.inputLabel}>Quick Options</Text>
+                                    <View style={styles.quickActionRow}>
+                                        <Pressable style={styles.quickActionChip} onPress={() => requestExtension(1)}>
+                                            <Text style={styles.quickActionChipText}>+1 hour</Text>
+                                        </Pressable>
+                                        <Pressable style={styles.quickActionChip} onPress={() => requestExtension(2)}>
+                                            <Text style={styles.quickActionChipText}>+2 hours</Text>
+                                        </Pressable>
+                                    </View>
+
+                                    <Text style={styles.inputLabel}>Custom Time</Text>
+                                    <Pressable
+                                        style={styles.dateInput}
+                                        onPress={() => setShowCustomExtensionPicker(true)}
+                                    >
+                                        <Clock size={18} color="#666" />
+                                        <Text style={styles.dateText}>
+                                            {customExtensionDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                        </Text>
+                                        <ChevronRight size={18} color="#666" />
+                                    </Pressable>
+                                    {showCustomExtensionPicker && (
+                                        <DateTimePicker
+                                            value={customExtensionDate}
+                                            mode="time"
+                                            display="default"
+                                            onChange={(event, selectedDate) => {
+                                                setShowCustomExtensionPicker(false);
+                                                if (selectedDate) {
+                                                    setCustomExtensionDate(selectedDate);
+                                                }
+                                            }}
+                                        />
+                                    )}
+                                </ScrollView>
+
+                                <View style={styles.modalActions}>
+                                    <Pressable
+                                        style={[styles.modalButton, styles.modalButtonSecondary]}
+                                        onPress={() => setShowExtensionModal(false)}
+                                    >
+                                        <Text style={styles.modalButtonTextSecondary}>Cancel</Text>
+                                    </Pressable>
+                                    <Pressable
+                                        style={[styles.modalButton, styles.modalButtonPrimary]}
+                                        onPress={requestCustomExtension}
+                                        disabled={extendMutation.isPending}
+                                    >
+                                        {extendMutation.isPending ? (
+                                            <ActivityIndicator color="#fff" />
+                                        ) : (
+                                            <>
+                                                <Zap size={18} color="#fff" />
+                                                <Text style={styles.modalButtonTextPrimary}>Confirm Extension</Text>
+                                            </>
+                                        )}
+                                    </Pressable>
+                                </View>
+                            </View>
+                        </View>
+                    </KeyboardAvoidingView>
+                </Modal>
 
                 {/* Leave Request Modal */}
                 <Modal
@@ -1768,8 +2046,10 @@ const styles = StyleSheet.create({
     actionButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, paddingVertical: 18, borderRadius: 16 },
     checkInButton: { backgroundColor: '#0469ff' },
     checkOutButton: { backgroundColor: '#10B981' },
+    extendButton: { backgroundColor: '#FFFBEB', borderWidth: 1.5, borderColor: '#FCD34D' },
     actionButtonDisabled: { opacity: 0.55 },
     actionButtonText: { fontSize: 18, fontWeight: '700', color: '#fff' },
+    extendButtonText: { fontSize: 18, fontWeight: '700', color: '#B45309' },
 
     secondaryActions: { flexDirection: 'row', paddingHorizontal: 20, gap: 12, marginTop: 12 },
     secondaryButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 14, backgroundColor: '#fff', borderRadius: 12, borderWidth: 2, borderColor: '#E2E8F0' },
@@ -1812,6 +2092,9 @@ const styles = StyleSheet.create({
     pickerOptionActive: { borderColor: '#0469ff', backgroundColor: '#EEF2FF' },
     pickerOptionText: { fontSize: 13, fontWeight: '600', color: '#666' },
     pickerOptionTextActive: { color: '#0469ff' },
+    quickActionRow: { flexDirection: 'row', gap: 12 },
+    quickActionChip: { flex: 1, paddingVertical: 12, borderRadius: 12, borderWidth: 1.5, borderColor: '#FCD34D', backgroundColor: '#FFFBEB', alignItems: 'center' },
+    quickActionChipText: { fontSize: 14, fontWeight: '700', color: '#B45309' },
 
     windowCard: { margin: 20, marginTop: 12, padding: 16, backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0' },
     checkOutCard: { margin: 20, marginTop: 2, padding: 16, backgroundColor: '#fff', borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0' },

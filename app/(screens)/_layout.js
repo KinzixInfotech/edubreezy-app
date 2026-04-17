@@ -5,6 +5,7 @@ export default function ScreenLayout() {
   return (
     <SafeAreaProvider>
       <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="onboarding" />
         <Stack.Screen name="notification" />
         <Stack.Screen name="paymenthistory" />
         <Stack.Screen name="greeting" />

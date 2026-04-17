@@ -105,7 +105,7 @@ function RootLayoutContent() {
     const segments = useSegments();
 
     // Excluded routes where we don't show NoInternet screen
-    const excludedRoutes = ['(auth)', 'login', 'profile', 'index'];
+    const excludedRoutes = ['(auth)', 'login', 'profile', 'index', 'onboarding'];
     const isExcludedRoute = excludedRoutes.some(route =>
         pathname?.includes(route) || segments?.includes(route)
     );

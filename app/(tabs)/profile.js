@@ -22,6 +22,7 @@ import Constants from 'expo-constants';
 import { emitProfilePictureChange } from '../../lib/profileEvents';
 import { stopForegroundLocationTracking } from '../../lib/transport-location-task';
 import fcmService from '../../services/fcmService';
+import { clearTransientAuthState, getLoggedOutRedirectTarget } from '../../lib/authRedirect';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const isSmallDevice = SCREEN_WIDTH < 375;
@@ -901,22 +902,6 @@ export default function ProfileScreen() {
           setIsLoggingOut(true);
           setTimeout(async () => {
             try {
-              // Revoke current session before logout
-              const storedSessionId = await SecureStore.getItemAsync('currentSessionId');
-              const userStr = await SecureStore.getItemAsync('user');
-              if (storedSessionId && userStr) {
-                try {
-                  const parsed = JSON.parse(userStr);
-                  await api.delete(`/auth/sessions/${storedSessionId}`, {
-                    headers: { 'x-user-id': parsed.id },
-                  });
-                  console.log('✅ Session revoked on logout');
-                } catch (e) {
-                  console.warn('Could not revoke session:', e.message);
-                }
-              }
-              await SecureStore.deleteItemAsync('currentSessionId');
-
               const { data: { session } } = await supabase.auth.getSession();
               const currentSchool = await getCurrentSchool();
 
@@ -947,30 +932,11 @@ export default function ProfileScreen() {
                 }
               }
 
-              await SecureStore.deleteItemAsync('user');
-              await SecureStore.deleteItemAsync('userRole');
-              await SecureStore.deleteItemAsync('token');
+              queryClient.clear();
+              await clearTransientAuthState();
 
-              if (currentSchool?.schoolCode) {
-                const { getProfilesForSchool } = await import('../../lib/profileManager');
-                const savedProfiles = await getProfilesForSchool(currentSchool.schoolCode);
-
-                if (savedProfiles && savedProfiles.length > 0) {
-                  router.replace({
-                    pathname: '/(auth)/profile-selector',
-                    params: {
-                      schoolCode: currentSchool.schoolCode,
-                      ...(currentSchool.schoolData && {
-                        schoolData: JSON.stringify(currentSchool.schoolData),
-                      }),
-                    },
-                  });
-                } else {
-                  router.replace('/(auth)/schoolcode');
-                }
-              } else {
-                router.replace('/(auth)/schoolcode');
-              }
+              const redirectTarget = await getLoggedOutRedirectTarget();
+              router.replace(redirectTarget);
             } catch (error) {
               console.log('Logout error:', error);
               setIsLoggingOut(false);

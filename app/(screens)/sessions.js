@@ -67,7 +67,10 @@ export default function SessionsScreen() {
         queryFn: async () => {
             if (!userId) return [];
             const res = await api.get('/auth/sessions', {
-                headers: { 'x-user-id': userId },
+                headers: {
+                    'x-user-id': userId,
+                    ...(currentSessionId ? { 'x-session-id': currentSessionId } : {}),
+                },
             });
             return res.data.sessions || [];
         },
@@ -166,7 +169,7 @@ export default function SessionsScreen() {
     };
 
     const renderSession = ({ item: session, index }) => {
-        const isCurrent = session.id === currentSessionId || session.isCurrent;
+        const isCurrent = session.id === currentSessionId;
         const DeviceIcon = getDeviceIcon(session.deviceType);
         const isRevoking = revokeMutation.isPending && revokeMutation.variables === session.id;
 

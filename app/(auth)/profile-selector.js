@@ -111,25 +111,30 @@ export default function ProfileSelectorScreen() {
             }
 
             // Load profiles
-            await loadProfilesForCode(code);
+            await loadProfilesForCode(code, data);
         } catch (error) {
             console.error('Error initializing profile selector:', error);
             router.replace('/(auth)/schoolcode');
         }
     };
 
-    const loadProfilesForCode = async (code) => {
+    const loadProfilesForCode = async (code, dataOverride = null) => {
         try {
             setLoading(true);
             const savedProfiles = await getProfilesForSchool(code);
+            const effectiveSchoolData = dataOverride || schoolData;
             setProfiles(savedProfiles || []);
 
             // If no profiles saved, go to login
             if (!savedProfiles || savedProfiles.length === 0) {
-                router.replace({
-                    pathname: '/(auth)/login',
-                    params: { schoolConfig: JSON.stringify(schoolData) },
-                });
+                if (effectiveSchoolData) {
+                    router.replace({
+                        pathname: '/(auth)/login',
+                        params: { schoolConfig: JSON.stringify(effectiveSchoolData) },
+                    });
+                } else {
+                    router.replace('/(auth)/schoolcode');
+                }
             }
         } catch (error) {
             console.error('Error loading profiles:', error);
@@ -157,7 +162,7 @@ export default function ProfileSelectorScreen() {
                         // Stop background location if old user was a driver
                         const oldRole = await SecureStore.getItemAsync('userRole');
                         if (oldRole) {
-                            const parsedRole = JSON.parse(oldRole);
+                            const parsedRole = oldRole.replace(/^"|"$/g, '');
                             if (parsedRole === 'DRIVER' || parsedRole === 'CONDUCTOR') {
                                 console.log('[FCM] 🛑 Stopping background location for old driver/conductor profile');
                                 await stopForegroundLocationTracking();
@@ -173,20 +178,26 @@ export default function ProfileSelectorScreen() {
             queryClient.clear();
             console.log('🧹 Query cache cleared');
 
-            // Debug: Check if profile has stored refresh token
             const hasRefreshToken = !!profile?.sessionTokens?.refresh_token;
-            console.log('🔍 Profile selection:', {
+            console.log('🔍 Profile selection started:', {
                 name: profile.name,
                 email: profile.email,
                 hasRefreshToken,
-                refreshTokenPrefix: hasRefreshToken ? profile.sessionTokens.refresh_token.substring(0, 10) + '...' : 'none',
             });
 
             // Update last used timestamp
             await updateLastUsed(schoolCode, profile.id);
 
-            // Try to restore session using token manager
-            const result = await tryRestoreSession(schoolCode, profile);
+            let result = null;
+            const { data: { session: currentSession } } = await supabase.auth.getSession();
+
+            if (currentSession?.user?.id === profile.userData?.id && currentSession?.access_token) {
+                console.log('✅ Reusing already active session for selected profile');
+                result = { success: true, session: currentSession };
+            } else {
+                // Try to restore session using token manager
+                result = await tryRestoreSession(schoolCode, profile);
+            }
 
             if (!result.success) {
                 console.log('➡️ Session restore failed, redirecting to login');
@@ -206,7 +217,7 @@ export default function ProfileSelectorScreen() {
 
             // Save user data as current user
             await SecureStore.setItemAsync('user', JSON.stringify(profile.userData));
-            await SecureStore.setItemAsync('userRole', JSON.stringify(profile.role));
+            await SecureStore.setItemAsync('userRole', profile.role);
 
             // Token is already saved by tryRestoreSession, but verify
             if (result.session?.access_token) {
@@ -234,8 +245,6 @@ export default function ProfileSelectorScreen() {
             router.replace('/(tabs)/home');
         } catch (error) {
             console.error('Error selecting profile:', error);
-            // Clear potentially corrupted tokens
-            await clearProfileSession(schoolCode, profile.userId);
             Alert.alert(
                 'Session Expired',
                 'Please log in again to continue.',

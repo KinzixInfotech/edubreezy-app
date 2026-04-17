@@ -30,6 +30,7 @@ import { syncAttendanceQueue } from '../lib/attendanceQueue';
 import * as Linking from 'expo-linking';
 import { hydrateRecoverySessionFromUrl } from '../lib/passwordRecovery';
 import { queueReviewPromptAfterLogin } from '../lib/reviewPrompt';
+import { clearForcedLogoutDeviceState } from '../lib/authRedirect';
 
 const BADGE_KEY = 'noticeBadgeCount';
 
@@ -118,6 +119,7 @@ function RootLayoutContent() {
 
 
     const fcmUnsubscribeRef = useRef(null);
+    const forcedLogoutRef = useRef(false);
 
     const { incrementNoticeBadge, setBadgeCount, isLoaded } = useNotification();
 
@@ -328,6 +330,100 @@ function RootLayoutContent() {
         };
 
         run();
+    }, [loggedInUserId]);
+
+    useEffect(() => {
+        let mounted = true;
+        let sessionChannel = null;
+
+        const handleRemoteSessionRevoked = async () => {
+            if (forcedLogoutRef.current || !mounted) return;
+            forcedLogoutRef.current = true;
+
+            try {
+                if (sessionChannel) {
+                    supabase.removeChannel(sessionChannel);
+                    sessionChannel = null;
+                }
+
+                await supabase.auth.signOut().catch(() => null);
+                await clearForcedLogoutDeviceState();
+                router.replace('/(auth)/schoolcode');
+
+                setTimeout(() => {
+                    Alert.alert(
+                        'Session ended',
+                        'This device was signed out from another session. Saved profiles on this device were removed for safety.'
+                    );
+                }, 150);
+            } catch (error) {
+                console.error('Forced logout cleanup failed:', error);
+            }
+        };
+
+        const subscribeToCurrentSession = async () => {
+            try {
+                const sessionId = await SecureStore.getItemAsync('currentSessionId');
+
+                if (!mounted || !sessionId) return;
+
+                if (sessionChannel) {
+                    supabase.removeChannel(sessionChannel);
+                    sessionChannel = null;
+                }
+
+                sessionChannel = supabase
+                    .channel(`user-session:${sessionId}`)
+                    .on(
+                        'postgres_changes',
+                        {
+                            event: 'UPDATE',
+                            schema: 'public',
+                            table: 'UserSession',
+                            filter: `id=eq.${sessionId}`,
+                        },
+                        async (payload) => {
+                            const session = payload.new;
+                            const isExpired = session?.expiresAt ? new Date(session.expiresAt) <= new Date() : false;
+
+                            if (session?.isRevoked || isExpired) {
+                                await handleRemoteSessionRevoked();
+                            }
+                        }
+                    )
+                    .on(
+                        'postgres_changes',
+                        {
+                            event: 'DELETE',
+                            schema: 'public',
+                            table: 'UserSession',
+                            filter: `id=eq.${sessionId}`,
+                        },
+                        async () => {
+                            await handleRemoteSessionRevoked();
+                        }
+                    )
+                    .subscribe((status) => {
+                        if (status === 'SUBSCRIBED') {
+                            console.log(`[Session Realtime] Subscribed to ${sessionId}`);
+                        } else if (status === 'CHANNEL_ERROR') {
+                            console.warn(`[Session Realtime] Subscription error for ${sessionId}`);
+                        }
+                    });
+            } catch (error) {
+                console.error('Failed to subscribe to current session:', error);
+            }
+        };
+
+        subscribeToCurrentSession();
+
+        return () => {
+            mounted = false;
+            if (sessionChannel) {
+                supabase.removeChannel(sessionChannel);
+                sessionChannel = null;
+            }
+        };
     }, [loggedInUserId]);
 
     // Detect user login/logout by watching SecureStore + route changes

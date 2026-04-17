@@ -14,8 +14,9 @@ import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { supabase } from '../../lib/supabase';
 import { getCurrentSchool, getProfilesForSchool } from '../../lib/profileManager';
-import { tryRestoreSession } from '../../lib/tokenManager';
+import { refreshSessionIfNeeded, tryRestoreSession } from '../../lib/tokenManager';
 import { responsiveFontSize, responsiveHeight, responsiveWidth } from '../utils/responsive';
+import { clearTransientAuthState, getLoggedOutRedirectTarget } from '../../lib/authRedirect';
 const { height, width } = Dimensions.get('window');
 
 export default function GreetingScreen() {
@@ -46,11 +47,15 @@ export default function GreetingScreen() {
             try {
                 const storedUser = await loadUser();
                 if (!storedUser?.id) {
-                    router.replace('/(auth)/schoolcode');
+                    const redirectTarget = await getLoggedOutRedirectTarget();
+                    router.replace(redirectTarget);
                     return;
                 }
 
-                const { data: { session } } = await supabase.auth.getSession();
+                let { data: { session } } = await supabase.auth.getSession();
+                if (!session?.access_token) {
+                    session = await refreshSessionIfNeeded();
+                }
                 if (session?.access_token) {
                     setIsAuthReady(true);
                     return;
@@ -72,13 +77,13 @@ export default function GreetingScreen() {
                     }
                 }
 
-                await SecureStore.deleteItemAsync('user');
-                await SecureStore.deleteItemAsync('userRole');
-                await SecureStore.deleteItemAsync('token');
-                router.replace(currentSchool?.schoolCode ? '/(auth)/profile-selector' : '/(auth)/schoolcode');
+                await clearTransientAuthState();
+                const redirectTarget = await getLoggedOutRedirectTarget();
+                router.replace(redirectTarget);
             } catch (error) {
                 console.error('Greeting auth validation failed:', error);
-                router.replace('/(auth)/schoolcode');
+                const redirectTarget = await getLoggedOutRedirectTarget();
+                router.replace(redirectTarget);
             }
         };
 

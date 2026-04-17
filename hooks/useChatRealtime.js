@@ -212,6 +212,26 @@ export function useChatRealtime(schoolId, conversationId, { enabled = true, curr
                     }, {
                         currentUserId,
                     });
+
+                    // Incoming messages from other users should always force a live
+                    // refetch for the active room. This keeps the open thread in sync
+                    // even if a realtime cache injection races with pagination state.
+                    if (newMessage.senderId && currentUserId && newMessage.senderId !== currentUserId) {
+                        qc.invalidateQueries({
+                            queryKey: queryKey,
+                            exact: true,
+                            refetchType: 'active',
+                        });
+                        qc.invalidateQueries({
+                            queryKey: chatKeys.conversation(schoolId, conversationId),
+                            exact: true,
+                            refetchType: 'active',
+                        });
+                        qc.invalidateQueries({
+                            queryKey: chatKeys.conversations(schoolId),
+                            refetchType: 'inactive',
+                        });
+                    }
                 }
             )
             .on(

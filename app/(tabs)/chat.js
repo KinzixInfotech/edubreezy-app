@@ -30,11 +30,7 @@ import { deleteConversation, markConversationsReadBulk } from '../../services/ch
 
 const CHAT_ROW_HEIGHT = 80;
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
-const PAGE_SIZE =  Math.max(12, Math.ceil(SCREEN_HEIGHT / CHAT_ROW_HEIGHT) + 2);
-const VIEWABILITY_CONFIG = {
-    itemVisiblePercentThreshold: 60,
-    minimumViewTime: 120,
-};
+const PAGE_SIZE = Math.max(12, Math.ceil(SCREEN_HEIGHT / CHAT_ROW_HEIGHT) + 2);
 const READ_SYNC_DEBOUNCE_MS = 350;
 
 function parseChatDate(dateStr) {
@@ -436,18 +432,6 @@ export default function ChatScreen() {
 
     const keyExtractor = useCallback((item) => item.id, []);
 
-    const onViewableItemsChanged = useCallback(({ viewableItems }) => {
-        const conversationIds = viewableItems
-            .map((entry) => entry.item)
-            .filter((item) => item?.id && (item.unreadCount || 0) > 0)
-            .map((item) => item.id);
-
-        if (!conversationIds.length) return;
-
-        markConversationsReadOptimistically(conversationIds);
-        queueReadSync(conversationIds);
-    }, [markConversationsReadOptimistically, queueReadSync]);
-
     const handleEndReached = useCallback(() => {
         if (!hasNextPage || isFetchingNextPage || searchQuery.trim()) return;
         fetchNextPage();
@@ -502,8 +486,6 @@ export default function ChatScreen() {
                             colors={['#0469ff']}
                         />
                     }
-                    onViewableItemsChanged={onViewableItemsChanged}
-                    viewabilityConfig={VIEWABILITY_CONFIG}
                     onEndReached={handleEndReached}
                     onEndReachedThreshold={0.35}
                     ListFooterComponent={
@@ -576,10 +558,14 @@ const styles = StyleSheet.create({
 
     // Avatar
     avatarContainer: { position: 'relative' },
-    avatar: { width: 52, height: 52, borderRadius: 26 },
+    avatar: {
+        width: 52, height: 52, borderRadius: 26,
+        borderWidth: 1,
+    },
     avatarPlaceholder: {
         backgroundColor: '#eff6ff',
         alignItems: 'center',
+        borderWidth: 1,
         justifyContent: 'center',
     },
     groupAvatar: {

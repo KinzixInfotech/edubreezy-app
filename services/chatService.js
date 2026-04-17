@@ -22,6 +22,8 @@ const generateClientUuid = () => {
     });
 };
 
+const DIRECT_CONVERSATION_TYPES = new Set(['DIRECT', 'PARENT_TEACHER', 'TEACHER_TEACHER']);
+
 export async function getCachedUser(userId) {
     const cached = userCache.get(userId);
     if (cached && Date.now() - cached.ts < USER_CACHE_TTL) return cached.data;
@@ -253,10 +255,36 @@ export const getConversations = async (schoolId, params = {}) => {
         };
     });
 
+    // If duplicate 1:1 conversations exist in the backend, keep only the newest
+    // conversation per participant pair so both users land in the same thread.
+    const deduped = [];
+    const seenDirectKeys = new Set();
+
+    for (const conversation of formatted) {
+        const otherParticipantId = conversation.participants?.[0]?.id;
+        const isDirectLike =
+            DIRECT_CONVERSATION_TYPES.has(conversation.type) &&
+            (conversation.participants?.length || 0) === 1 &&
+            !!otherParticipantId;
+
+        if (!isDirectLike) {
+            deduped.push(conversation);
+            continue;
+        }
+
+        const key = `${conversation.type}:${otherParticipantId}`;
+        if (seenDirectKeys.has(key)) {
+            continue;
+        }
+
+        seenDirectKeys.add(key);
+        deduped.push(conversation);
+    }
+
     return {
         success: true,
-        conversations: formatted,
-        pagination: { page, limit, total, totalPages },
+        conversations: deduped,
+        pagination: { page, limit, total: deduped.length, totalPages },
     };
 };
 
@@ -620,5 +648,15 @@ export const sendHeartbeat = async () => {
 
 export const markAsDelivered = async (schoolId, conversationId) => {
     const { data } = await api.put(`/schools/${schoolId}/chat/conversations/${conversationId}/deliver`);
+    return data;
+};
+
+export const markConversationActive = async (schoolId, conversationId) => {
+    const { data } = await api.post(`/schools/${schoolId}/chat/conversations/${conversationId}/active`);
+    return data;
+};
+
+export const markConversationInactive = async (schoolId, conversationId) => {
+    const { data } = await api.delete(`/schools/${schoolId}/chat/conversations/${conversationId}/active`);
     return data;
 };

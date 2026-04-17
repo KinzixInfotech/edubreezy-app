@@ -36,7 +36,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { z } from 'zod';
 import { supabase } from '../../lib/supabase';
 import { StatusBar } from 'expo-status-bar';
-import { saveProfile, saveCurrentSchool, clearCurrentSchool } from '../../lib/profileManager';
+import { saveProfile, saveCurrentSchool, clearCurrentSchool, getCurrentSchool } from '../../lib/profileManager';
 import * as WebBrowser from 'expo-web-browser';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../../lib/api';
@@ -45,6 +45,7 @@ import { getDeviceInfo } from '../../lib/deviceInfo';
 import { queueReviewPromptAfterLogin } from '../../lib/reviewPrompt';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import YoutubePlayer from 'react-native-youtube-iframe';
+import { clearTransientAuthState } from '../../lib/authRedirect';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('screen');
 export const PRIMARY_COLOR = '#0b5cde';
@@ -239,6 +240,9 @@ export default function LoginScreen() {
     const scrollViewRef = useRef(null);
     const { schoolConfig: schoolConfigParam, prefillEmail } = useLocalSearchParams();
     const [schoolConfig, setSchoolConfig] = useState(null);
+    const [resolvedSchoolConfigParam, setResolvedSchoolConfigParam] = useState(
+        typeof schoolConfigParam === 'string' ? schoolConfigParam : null
+    );
     const [credential, setCredential] = useState(prefillEmail || '');
     const [password, setPassword] = useState('');
     const [errors, setErrors] = useState({});
@@ -276,14 +280,32 @@ export default function LoginScreen() {
     }, []);
 
     useEffect(() => {
-        if (schoolConfigParam) {
+        const resolveSchoolContext = async () => {
             try {
-                const config = JSON.parse(schoolConfigParam || '{}');
-                setSchoolConfig(config.school);
+                if (typeof schoolConfigParam === 'string' && schoolConfigParam) {
+                    const config = JSON.parse(schoolConfigParam);
+                    setResolvedSchoolConfigParam(schoolConfigParam);
+                    setSchoolConfig(config.school || config);
+                    return;
+                }
+
+                const savedSchool = await getCurrentSchool();
+                if (savedSchool?.schoolData) {
+                    setResolvedSchoolConfigParam(JSON.stringify(savedSchool.schoolData));
+                    setSchoolConfig(savedSchool.schoolData.school || savedSchool.schoolData);
+                    return;
+                }
+
+                setResolvedSchoolConfigParam(null);
+                setSchoolConfig(null);
             } catch (error) {
-                console.error('Error parsing school config:', error);
+                console.error('Error resolving school config:', error);
+                setResolvedSchoolConfigParam(null);
+                setSchoolConfig(null);
             }
-        }
+        };
+
+        resolveSchoolContext();
     }, [schoolConfigParam]);
 
     const handleForgotPassword = async () => {
@@ -291,7 +313,7 @@ export default function LoginScreen() {
             pathname: '/(auth)/forgot-password',
             params: {
                 prefillCredential: credential.trim(),
-                ...(schoolConfigParam ? { schoolConfig: schoolConfigParam } : {}),
+                ...(resolvedSchoolConfigParam ? { schoolConfig: resolvedSchoolConfigParam } : {}),
             },
         });
     };
@@ -300,9 +322,7 @@ export default function LoginScreen() {
         try {
             console.log('🔄 Switching schools - clearing all data...');
             await supabase.auth.signOut();
-            await SecureStore.deleteItemAsync('user');
-            await SecureStore.deleteItemAsync('userRole');
-            await SecureStore.deleteItemAsync('token');
+            await clearTransientAuthState();
             await SecureStore.deleteItemAsync('lastSchoolCode');
             await clearCurrentSchool();
             console.log('✅ All data cleared - navigating to school code');
@@ -507,7 +527,7 @@ export default function LoginScreen() {
             } else if (!err.response) {
                 message = 'Network error. Please check your connection.';
             }
-            setErrors({ message });
+            setErrors({ general: message });
         } finally {
             setLoading(false);
         }

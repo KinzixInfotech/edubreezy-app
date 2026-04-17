@@ -189,6 +189,10 @@ export function ChatProvider({ children }) {
                     // Use ref to get latest pathname without re-subscribing channel
                     const currentPath = pathnameRef.current;
                     const isInThisConversation = currentPath?.includes(newMsg.conversationId);
+                    const isOnChatListScreen =
+                        currentPath?.includes('/(tabs)/chat') ||
+                        currentPath === '/chat' ||
+                        currentPath?.endsWith('/chat');
 
                     // ── Update badge count ──
                     if (!isInThisConversation) {
@@ -199,7 +203,7 @@ export function ChatProvider({ children }) {
                         });
                     }
                     // ── Show in-app toast (only when NOT in this conversation) ──
-                    if (!isInThisConversation) {
+                    if (!isInThisConversation && !isOnChatListScreen) {
                         // Vibrate / Haptic feedback
                         if (Platform.OS === 'ios') {
                             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

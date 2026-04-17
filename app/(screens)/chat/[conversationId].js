@@ -6,7 +6,7 @@ import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import {
     View, Text, FlatList, TextInput, StyleSheet, Image,
     KeyboardAvoidingView, Platform, Alert, Vibration,
-    ActivityIndicator, Animated, Modal, TouchableOpacity,
+    ActivityIndicator, Animated, Modal, TouchableOpacity, AppState,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
@@ -21,6 +21,7 @@ import * as Haptics from 'expo-haptics';
 import { Audio, Video, ResizeMode } from 'expo-av';
 import HapticTouchable from '../../components/HapticTouch';
 import { pickMedia, getPresignedUrls, uploadToR2, detectMediaType } from '../../../lib/r2Upload';
+import { markConversationActive, markConversationInactive } from '../../../services/chatService';
 import { useQueryClient } from '@tanstack/react-query';
 import {
     useMessages, useSendMessage, useDeleteMessage,
@@ -136,6 +137,7 @@ const MessageStatusTicks = ({ status, isMine }) => {
 };
 
 const HEADER_BAR_HEIGHT = 62;
+const ACTIVE_CONVERSATION_HEARTBEAT_MS = 25000;
 
 // ── Message Bubble ────────────────────────────────────────────────────────────
 
@@ -366,6 +368,7 @@ export default function ChatRoomScreen() {
     const [isUploading, setIsUploading] = useState(false);
 
     const inputRef = useRef(null);
+    const activeConversationTimerRef = useRef(null);
 
     const [sheetVisible, setSheetVisible] = useState(false);
     const [sheetTitle, setSheetTitle] = useState(null);
@@ -418,6 +421,50 @@ export default function ChatRoomScreen() {
             }
         };
     }, []);
+
+    useEffect(() => {
+        if (!schoolId || !conversationId || !currentUser?.id) return;
+
+        let isMounted = true;
+
+        const sendActiveHeartbeat = async () => {
+            if (!isMounted) return;
+            try {
+                await markConversationActive(schoolId, conversationId);
+            } catch (error) {
+                console.warn('[chat] failed to mark conversation active:', error?.message || error);
+            }
+        };
+
+        const clearActiveHeartbeat = async () => {
+            try {
+                await markConversationInactive(schoolId, conversationId);
+            } catch (error) {
+                console.warn('[chat] failed to clear active conversation:', error?.message || error);
+            }
+        };
+
+        sendActiveHeartbeat();
+        activeConversationTimerRef.current = setInterval(sendActiveHeartbeat, ACTIVE_CONVERSATION_HEARTBEAT_MS);
+
+        const appStateSubscription = AppState.addEventListener('change', (nextState) => {
+            if (nextState === 'active') {
+                sendActiveHeartbeat();
+            } else if (nextState.match(/inactive|background/)) {
+                clearActiveHeartbeat();
+            }
+        });
+
+        return () => {
+            isMounted = false;
+            if (activeConversationTimerRef.current) {
+                clearInterval(activeConversationTimerRef.current);
+                activeConversationTimerRef.current = null;
+            }
+            appStateSubscription.remove();
+            clearActiveHeartbeat();
+        };
+    }, [schoolId, conversationId, currentUser?.id]);
 
     const playSendBubbleSound = useCallback(async () => {
         try {

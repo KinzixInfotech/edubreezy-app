@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCurrentSchool, getProfilesForSchool } from '../lib/profileManager';
-import { tryRestoreSession } from '../lib/tokenManager';
+import { refreshSessionIfNeeded, tryRestoreSession } from '../lib/tokenManager';
 
 const ONBOARDING_STORAGE_KEY = 'hasSeenOnboarding';
 
@@ -25,7 +25,11 @@ export default function Index() {
                     try {
                         const parsedUser = JSON.parse(userData);
                         if (parsedUser && (parsedUser.id || parsedUser.email)) {
-                            const { data: { session } } = await supabase.auth.getSession();
+                            let { data: { session } } = await supabase.auth.getSession();
+
+                            if (!session?.access_token) {
+                                session = await refreshSessionIfNeeded();
+                            }
 
                             if (session?.access_token) {
                                 console.log('✅ Valid user + active session found - going to greeting');
@@ -97,13 +101,13 @@ export default function Index() {
         checkAuth();
 
         // Listen for session changes - but only route into app when both session and user exist
-        const { data: listener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-            if (session) {
+        const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
+            if (event === 'SIGNED_IN' && session) {
                 const userData = await SecureStore.getItemAsync('user');
                 if (userData) {
                     setRedirectTo('greeting');
                 }
-            } else {
+            } else if (event === 'SIGNED_OUT') {
                 const userData = await SecureStore.getItemAsync('user');
                 if (userData) {
                     const currentSchool = await getCurrentSchool();

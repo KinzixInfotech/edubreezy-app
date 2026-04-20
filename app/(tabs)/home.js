@@ -42,6 +42,7 @@ import { dataUi } from '../data/_uidata';
 
 import { StatusBar } from 'expo-status-bar';
 import * as NavigationBar from 'expo-navigation-bar';
+import * as WebBrowser from 'expo-web-browser';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import api from '../../lib/api';
@@ -322,10 +323,9 @@ export default function HomeScreen() {
             setLoading(false);
             return;
         }
-        loadUser();
         checkNotificationPermission();
         // router.replace('/(screens)/wish')
-    }, [checkNotificationPermission]);
+    }, [checkNotificationPermission, hasInitiallyLoadedRef, setLoading, user]);
 
     // Configure Android navigation bar color to match theme
     useEffect(() => {
@@ -2058,6 +2058,8 @@ export default function HomeScreen() {
         const fees = dashboardData?.fees;
         const todaysCollections = dashboardData?.todaysCollections;
         const recentPayments = dashboardData?.recentPayments || [];
+        const collectionTrend = dashboardData?.collectionTrend || [];
+        const classProgress = dashboardData?.classProgress || [];
         const notices = (dashboardData?.notices || []).map(n => ({
             id: n.id,
             title: n.title,
@@ -2080,6 +2082,66 @@ export default function HomeScreen() {
             if (!date) return '';
             const d = new Date(date);
             return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+        };
+
+        const formatCurrency = (amount) => `₹${(amount || 0).toLocaleString('en-IN')}`;
+
+        const openRecentPaymentActions = async (payment) => {
+            Alert.alert(
+                payment.studentName,
+                `${formatCurrency(payment.amount)} • ${payment.method?.replaceAll('_', ' ') || 'Payment'}`,
+                [
+                    payment.receiptUrl ? {
+                        text: 'View Receipt',
+                        onPress: async () => {
+                            try {
+                                await WebBrowser.openBrowserAsync(payment.receiptUrl);
+                            } catch (error) {
+                                Alert.alert('Error', 'Could not open receipt.');
+                            }
+                        },
+                    } : undefined,
+                    payment.studentId ? {
+                        text: 'View Profile',
+                        onPress: () => {
+                            navigateOnce('/(screens)/accountant-collect-fee', {
+                                selectedStudent: JSON.stringify({
+                                    id: payment.studentId,
+                                    userId: payment.studentId,
+                                    name: payment.studentName,
+                                    admissionNo: payment.admissionNo,
+                                    admissionNumber: payment.admissionNo,
+                                    class: { className: payment.className },
+                                    section: { name: payment.sectionName },
+                                    profilePicture: payment.profilePicture,
+                                    fatherName: payment.fatherName,
+                                    motherName: payment.motherName,
+                                    guardianName: payment.guardianName,
+                                    guardianRelation: payment.guardianRelation,
+                                }),
+                            });
+                        },
+                    } : undefined,
+                    payment.studentId ? {
+                        text: 'Payment History',
+                        onPress: () => {
+                            navigateOnce('/(screens)/accountant-payment-history', {
+                                selectedStudent: JSON.stringify({
+                                    id: payment.studentId,
+                                    userId: payment.studentId,
+                                    name: payment.studentName,
+                                    admissionNo: payment.admissionNo,
+                                    admissionNumber: payment.admissionNo,
+                                    class: { className: payment.className },
+                                    section: { name: payment.sectionName },
+                                    profilePicture: payment.profilePicture,
+                                }),
+                            });
+                        },
+                    } : undefined,
+                    { text: 'Cancel', style: 'cancel' },
+                ].filter(Boolean)
+            );
         };
 
         // Quick actions - matching parent/teacher actionGroups pattern
@@ -2160,16 +2222,16 @@ export default function HomeScreen() {
                 {/* School Banner Carousel */}
                 <BannerCarousel schoolId={schoolId} role={user_acc?.role?.name} />
 
-                {/* Fee Overview - stat cards matching parent/teacher gradient style */}
+                {/* Fee Overview */}
                 <Animated.View entering={FadeInDown.delay(200).duration(600)} style={styles.section}>
                     <Text style={styles.sectionTitle}>Fee Overview</Text>
-                    <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
-                        <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/(screens)/payfees')}>
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 12 }}>
+                        <HapticTouchable style={{ width: '48%' }} onPress={() => navigateOnce('/(screens)/accountant-collect-fee')}>
                             <LinearGradient
                                 colors={['#0469ff', '#0256d0']}
                                 start={{ x: 0, y: 0 }}
                                 end={{ x: 1, y: 1 }}
-                                style={[styles.statCard, { shadowColor: '#0469ff', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                                style={[styles.statCard, { minHeight: 132, shadowColor: '#0469ff', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
                             >
                                 <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
                                 <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
@@ -2178,17 +2240,20 @@ export default function HomeScreen() {
                                     <Text style={styles.statValue} numberOfLines={1} ellipsizeMode="tail">
                                         ₹{isLoading ? '...' : formatAbbr(fees?.totalFees)}
                                     </Text>
-                                    <Text style={styles.statLabel} numberOfLines={1} ellipsizeMode="tail">Total Fees</Text>
+                                    <Text style={styles.statLabel}>Total Fees Collected Target</Text>
+                                    <Text style={{ color: 'rgba(255,255,255,0.82)', fontSize: 11, marginTop: 4 }}>
+                                        Expected {isLoading ? '...' : formatCurrency(fees?.expectedCollection)}
+                                    </Text>
                                 </View>
                             </LinearGradient>
                         </HapticTouchable>
 
-                        <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/(screens)/accountant-payment-history')}>
+                        <HapticTouchable style={{ width: '48%' }} onPress={() => navigateOnce('/(screens)/accountant-payment-history')}>
                             <LinearGradient
                                 colors={['#10B981', '#059669']}
                                 start={{ x: 0, y: 0 }}
                                 end={{ x: 1, y: 1 }}
-                                style={[styles.statCard, { shadowColor: '#10B981', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                                style={[styles.statCard, { minHeight: 132, shadowColor: '#10B981', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
                             >
                                 <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
                                 <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
@@ -2197,19 +2262,22 @@ export default function HomeScreen() {
                                     <Text style={styles.statValue} numberOfLines={1} ellipsizeMode="tail">
                                         ₹{isLoading ? '...' : formatAbbr(fees?.collected)}
                                     </Text>
-                                    <Text style={styles.statLabel} numberOfLines={1} ellipsizeMode="tail">
-                                        Collected{fees?.collectionRate > 0 ? ` (${fees.collectionRate}%)` : ''}
+                                    <Text style={styles.statLabel}>
+                                        Total Fees Collected
+                                    </Text>
+                                    <Text style={{ color: 'rgba(255,255,255,0.82)', fontSize: 11, marginTop: 4 }}>
+                                        Progress {fees?.collectionRate || 0}%
                                     </Text>
                                 </View>
                             </LinearGradient>
                         </HapticTouchable>
 
-                        <HapticTouchable style={{ flex: 1 }} onPress={() => navigateOnce('/(screens)/payfees')}>
+                        <HapticTouchable style={{ width: '48%' }} onPress={() => navigateOnce('/(screens)/accountant-collect-fee')}>
                             <LinearGradient
                                 colors={fees?.pending > 0 ? ['#FF6B6B', '#EE5A5A'] : ['#6B7280', '#4B5563']}
                                 start={{ x: 0, y: 0 }}
                                 end={{ x: 1, y: 1 }}
-                                style={[styles.statCard, { shadowColor: fees?.pending > 0 ? '#FF6B6B' : '#6B7280', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                                style={[styles.statCard, { minHeight: 132, shadowColor: fees?.pending > 0 ? '#FF6B6B' : '#6B7280', shadowOpacity: 0.35, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
                             >
                                 <View style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(255,255,255,0.1)' }} />
                                 <View style={{ position: 'absolute', bottom: -30, left: -20, width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.08)' }} />
@@ -2218,10 +2286,54 @@ export default function HomeScreen() {
                                     <Text style={styles.statValue} numberOfLines={1} ellipsizeMode="tail">
                                         ₹{isLoading ? '...' : formatAbbr(fees?.pending)}
                                     </Text>
-                                    <Text style={styles.statLabel} numberOfLines={1} ellipsizeMode="tail">Pending</Text>
+                                    <Text style={styles.statLabel}>Fees Pending Across Year</Text>
                                 </View>
                             </LinearGradient>
                         </HapticTouchable>
+
+                        <View style={{ width: '48%' }}>
+                            <LinearGradient
+                                colors={['#8B5CF6', '#7C3AED']}
+                                start={{ x: 0, y: 0 }}
+                                end={{ x: 1, y: 1 }}
+                                style={[styles.statCard, { minHeight: 132, shadowColor: '#8B5CF6', shadowOpacity: 0.3, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 }]}
+                            >
+                                <View style={styles.statIcon}><ChartPie size={22} color="#fff" /></View>
+                                <View>
+                                    <Text style={styles.statValue} numberOfLines={1}>₹{isLoading ? '...' : formatAbbr(fees?.discountGiven)}</Text>
+                                    <Text style={styles.statLabel}>Discount Given</Text>
+                                    <Text style={{ color: 'rgba(255,255,255,0.82)', fontSize: 11, marginTop: 4 }}>
+                                        Expected {isLoading ? '...' : formatCurrency(fees?.expectedCollection)}
+                                    </Text>
+                                </View>
+                            </LinearGradient>
+                        </View>
+                    </View>
+
+                    <View style={{
+                        marginTop: 12,
+                        backgroundColor: '#fff',
+                        borderRadius: 16,
+                        padding: 14,
+                        borderWidth: 1,
+                        borderColor: '#E2E8F0'
+                    }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text style={{ fontSize: 14, fontWeight: '700', color: '#0F172A' }}>Collection Progress</Text>
+                            <Text style={{ fontSize: 13, fontWeight: '700', color: '#0469ff' }}>{fees?.collectionRate || 0}%</Text>
+                        </View>
+                        <View style={{ height: 10, backgroundColor: '#E2E8F0', borderRadius: 999, marginTop: 12, overflow: 'hidden' }}>
+                            <View style={{
+                                width: `${Math.max(0, Math.min(100, fees?.collectionRate || 0))}%`,
+                                height: '100%',
+                                backgroundColor: '#10B981',
+                                borderRadius: 999,
+                            }} />
+                        </View>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
+                            <Text style={{ fontSize: 12, color: '#64748B' }}>Collected {formatCurrency(fees?.collected)}</Text>
+                            <Text style={{ fontSize: 12, color: '#64748B' }}>Target {formatCurrency(fees?.expectedCollection)}</Text>
+                        </View>
                     </View>
                 </Animated.View>
 
@@ -2254,6 +2366,93 @@ export default function HomeScreen() {
                             <Text style={{ fontSize: 10, color: '#FFFFFF', fontWeight: '600', opacity: 0.9, textAlign: 'center' }}>payments</Text>
                         </View>
                     </LinearGradient>
+                </Animated.View>
+
+                {/* Collection Trend */}
+                <Animated.View entering={FadeInDown.delay(340).duration(600)} style={styles.section}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Collection Trend</Text>
+                        <Text style={styles.seeAll}>Last 6 months</Text>
+                    </View>
+                    <View style={{
+                        marginTop: 8,
+                        backgroundColor: '#fff',
+                        borderRadius: 18,
+                        borderWidth: 1,
+                        borderColor: '#E2E8F0',
+                        padding: 16,
+                    }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', height: 180 }}>
+                            {collectionTrend.map((item) => {
+                                const maxAmount = Math.max(...collectionTrend.map((entry) => entry.amount || 0), 1);
+                                const barHeight = Math.max(18, Math.round(((item.amount || 0) / maxAmount) * 132));
+                                return (
+                                    <View key={item.label} style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-end' }}>
+                                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#10B981', marginBottom: 8 }}>
+                                            ₹{formatAbbr(item.amount)}
+                                        </Text>
+                                        <LinearGradient
+                                            colors={['#60A5FA', '#1D4ED8']}
+                                            start={{ x: 0, y: 0 }}
+                                            end={{ x: 0, y: 1 }}
+                                            style={{
+                                                width: SCREEN_WIDTH < 390 ? 22 : 28,
+                                                height: barHeight,
+                                                borderRadius: 12,
+                                            }}
+                                        />
+                                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#475569', marginTop: 10 }}>{item.label}</Text>
+                                    </View>
+                                );
+                            })}
+                        </View>
+                    </View>
+                </Animated.View>
+
+                {/* Class Progress */}
+                <Animated.View entering={FadeInDown.delay(380).duration(600)} style={styles.section}>
+                    <View style={styles.sectionHeader}>
+                        <Text style={styles.sectionTitle}>Class Collection Progress</Text>
+                        <HapticTouchable onPress={() => navigateOnce('/(screens)/accountant-collect-fee')}>
+                            <Text style={styles.seeAll}>Collect</Text>
+                        </HapticTouchable>
+                    </View>
+                    <FlatList
+                        horizontal
+                        data={classProgress}
+                        keyExtractor={(item) => `${item.className}`}
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={{ gap: 10, paddingTop: 6 }}
+                        renderItem={({ item }) => (
+                            <View style={{
+                                width: SCREEN_WIDTH < 390 ? 248 : 272,
+                                backgroundColor: '#fff',
+                                borderRadius: 16,
+                                borderWidth: 1,
+                                borderColor: '#E2E8F0',
+                                padding: 14,
+                            }}>
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <Text style={{ fontSize: 14, fontWeight: '700', color: '#0F172A' }}>Class {item.className}</Text>
+                                    <Text style={{ fontSize: 12, color: '#64748B' }}>{item.students} students</Text>
+                                </View>
+                                <View style={{ height: 8, backgroundColor: '#E2E8F0', borderRadius: 999, marginTop: 10, overflow: 'hidden' }}>
+                                    <View style={{
+                                        width: `${Math.max(0, Math.min(100, item.progress || 0))}%`,
+                                        height: '100%',
+                                        backgroundColor: '#10B981',
+                                    }} />
+                                </View>
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 }}>
+                                    <Text style={{ fontSize: 12, color: '#64748B' }}>Collected {formatCurrency(item.collected)}</Text>
+                                    <Text style={{ fontSize: 12, color: '#EF4444' }}>Pending {formatCurrency(item.pending)}</Text>
+                                </View>
+                                <Text style={{ marginTop: 8, fontSize: 11, color: '#0469ff', fontWeight: '700' }}>
+                                    {item.progress || 0}% collection progress
+                                </Text>
+                            </View>
+                        )}
+                    />
                 </Animated.View>
 
 
@@ -2318,7 +2517,8 @@ export default function HomeScreen() {
                             borderWidth: 1, borderColor: '#F1F5F9', overflow: 'hidden',
                         }}>
                             {recentPayments.slice(0, 5).map((payment, index) => (
-                                <View key={payment.id} style={{
+                                <HapticTouchable key={payment.id} onPress={() => openRecentPaymentActions(payment)}>
+                                <View style={{
                                     flexDirection: 'row', alignItems: 'center', padding: 14,
                                     borderBottomWidth: index < Math.min(recentPayments.length, 5) - 1 ? 1 : 0,
                                     borderBottomColor: '#F8FAFC',
@@ -2337,6 +2537,11 @@ export default function HomeScreen() {
                                         <Text style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>
                                             {payment.className}{payment.sectionName ? ` - ${payment.sectionName}` : ''} • {formatDate(payment.date)}
                                         </Text>
+                                        {(payment.fatherName || payment.motherName || payment.guardianName) ? (
+                                            <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }} numberOfLines={1}>
+                                                {payment.fatherName || payment.motherName || payment.guardianName}
+                                            </Text>
+                                        ) : null}
                                     </View>
                                     <View style={{ alignItems: 'flex-end' }}>
                                         <Text style={{ fontSize: 15, fontWeight: '700', color: '#10B981' }}>₹{payment.amount}</Text>
@@ -2345,6 +2550,7 @@ export default function HomeScreen() {
                                         </Text>
                                     </View>
                                 </View>
+                                </HapticTouchable>
                             ))}
                         </View>
                     )}

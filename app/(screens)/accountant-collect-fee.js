@@ -8,39 +8,37 @@ import {
     ActivityIndicator,
     Platform,
     Alert,
+    Share,
     KeyboardAvoidingView,
     TouchableOpacity,
     Dimensions,
+    Modal,
 } from 'react-native';
-import { useState, useMemo, useCallback } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { router } from 'expo-router';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from '@tanstack/react-query';
+import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import {
     ArrowLeft,
     Search,
-    User,
     ChevronRight,
     X,
     DollarSign,
-    Banknote,
-    CreditCard,
     CheckCircle,
-    AlertCircle,
     Calendar,
-    Hash,
-    FileText,
-    ArrowRight,
-    Loader2,
+    Receipt,
+    Percent,
 } from 'lucide-react-native';
 import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as SecureStore from 'expo-secure-store';
+import { Image } from 'expo-image';
 import HapticTouchable from '../components/HapticTouch';
 import api from '../../lib/api';
 
 export default function AccountantCollectFeeScreen() {
     const queryClient = useQueryClient();
+    const params = useLocalSearchParams();
 
     // Load user data from SecureStore
     const { data: userData } = useQuery({
@@ -58,9 +56,15 @@ export default function AccountantCollectFeeScreen() {
     const [step, setStep] = useState('search');
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedClassFilter, setSelectedClassFilter] = useState(null);
+    const [selectedSectionFilter, setSelectedSectionFilter] = useState(null);
     const [showClassDropdown, setShowClassDropdown] = useState(false);
     const [showSectionDropdown, setShowSectionDropdown] = useState(false);
     const [selectedStudent, setSelectedStudent] = useState(null);
+    const [discountModalVisible, setDiscountModalVisible] = useState(false);
+    const [ledgerModalVisible, setLedgerModalVisible] = useState(false);
+    const [selectedLedgerEntry, setSelectedLedgerEntry] = useState(null);
+    const [discountAmount, setDiscountAmount] = useState('');
+    const [discountReason, setDiscountReason] = useState('');
 
     // Payment form state
     const [paymentMethod, setPaymentMethod] = useState('CASH');
@@ -79,26 +83,28 @@ export default function AccountantCollectFeeScreen() {
         select: (data) => data?.find(y => y.isActive),
     });
 
-    // Student search using director/students API
-    const { data: searchResults, isLoading: searchLoading } = useQuery({
-        queryKey: ['accountant-student-search', schoolId, searchQuery],
-        queryFn: async () => {
-            const res = await api.get(`/schools/${schoolId}/director/students?search=${encodeURIComponent(searchQuery)}`);
-            return res.data?.students || [];
+    const {
+        data: studentsPages,
+        isLoading: studentsLoading,
+        isFetchingNextPage,
+        fetchNextPage,
+        hasNextPage,
+        refetch: refetchStudents,
+    } = useInfiniteQuery({
+        queryKey: ['accountant-student-search', schoolId, searchQuery, selectedClassFilter, selectedSectionFilter],
+        queryFn: async ({ pageParam = 1 }) => {
+            const params = new URLSearchParams({
+                page: String(pageParam),
+                limit: '25',
+            });
+            if (searchQuery) params.set('search', searchQuery);
+            const res = await api.get(`/schools/${schoolId}/director/students?${params.toString()}`);
+            return res.data;
         },
-        enabled: step === 'search' && !!schoolId && searchQuery.length >= 1,
+        enabled: step === 'search' && !!schoolId,
         staleTime: 1000 * 30,
-    });
-
-    // Load all students initially
-    const { data: allStudents, isLoading: allStudentsLoading } = useQuery({
-        queryKey: ['accountant-student-search', schoolId, ''],
-        queryFn: async () => {
-            const res = await api.get(`/schools/${schoolId}/director/students`);
-            return res.data?.students || [];
-        },
-        enabled: step === 'search' && !!schoolId && searchQuery.length < 1,
-        staleTime: 1000 * 60,
+        initialPageParam: 1,
+        getNextPageParam: (lastPage) => lastPage?.pagination?.nextPage ?? undefined,
     });
 
     // Fetch classes from API
@@ -138,9 +144,8 @@ export default function AccountantCollectFeeScreen() {
     }, [classesData, selectedClassFilter]);
 
     // Filtered students based on selected class + section
-    const [selectedSectionFilter, setSelectedSectionFilter] = useState(null);
     const filteredStudents = useMemo(() => {
-        const baseStudents = searchQuery.length >= 1 ? searchResults : allStudents;
+        const baseStudents = studentsPages?.pages?.flatMap((page) => page?.students || []) || [];
         if (!baseStudents) return [];
         let result = baseStudents;
         if (selectedClassFilter) {
@@ -150,7 +155,25 @@ export default function AccountantCollectFeeScreen() {
             result = result.filter(s => (s.section?.name || s.section?.sectionName) === selectedSectionFilter);
         }
         return result;
-    }, [searchResults, allStudents, searchQuery, selectedClassFilter, selectedSectionFilter]);
+    }, [studentsPages, selectedClassFilter, selectedSectionFilter]);
+
+    useEffect(() => {
+        if (!params?.selectedStudent || selectedStudent) return;
+        try {
+            const parsed = JSON.parse(params.selectedStudent);
+            if (parsed?.id || parsed?.userId) {
+                setSelectedStudent({
+                    ...parsed,
+                    id: parsed.id || parsed.userId,
+                    userId: parsed.userId || parsed.id,
+                    admissionNo: parsed.admissionNo || parsed.admissionNumber,
+                });
+                setStep('payment');
+            }
+        } catch (error) {
+            console.warn('Failed to parse selected student param:', error);
+        }
+    }, [params?.selectedStudent, selectedStudent]);
 
     // Student fee details when student is selected
     const { data: studentFee, isLoading: feeLoading } = useQuery({
@@ -162,10 +185,35 @@ export default function AccountantCollectFeeScreen() {
         enabled: step === 'payment' && !!selectedStudent && !!academicYears?.id,
     });
 
+    const applyDiscountMutation = useMutation({
+        mutationFn: async ({ ledgerEntryId, amount, reason }) => {
+            const res = await api.patch('/schools/fee/ledger', {
+                action: 'discount',
+                ledgerEntryId,
+                discountAmount: Number(amount),
+                reason,
+                userId: userData?.id,
+            });
+            return res.data;
+        },
+        onSuccess: async () => {
+            setDiscountModalVisible(false);
+            setSelectedLedgerEntry(null);
+            setDiscountAmount('');
+            setDiscountReason('');
+            await queryClient.invalidateQueries({ queryKey: ['student-fee-detail', selectedStudent?.id, academicYears?.id] });
+            await queryClient.invalidateQueries({ queryKey: ['home', 'accountantDashboard', schoolId, userData?.id] });
+            Alert.alert('Success', 'Discount updated successfully.');
+        },
+        onError: (error) => {
+            Alert.alert('Error', error.response?.data?.error || error.message || 'Could not apply discount');
+        },
+    });
+
     // All installments sorted
     const allInstallments = useMemo(() => {
         if (!studentFee?.installments) return [];
-        return [...studentFee.installments].sort((a, b) => a.installmentNumber - b.installmentNumber);
+        return [...studentFee.installments].sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
     }, [studentFee]);
 
     // Pending installments only
@@ -180,6 +228,11 @@ export default function AccountantCollectFeeScreen() {
             .filter(i => selectedInstallmentIds.includes(i.id))
             .reduce((sum, inst) => sum + (inst.amount - (inst.paidAmount || 0)), 0);
     }, [selectedInstallmentIds, allInstallments]);
+
+    const studentProfile = studentFee?.studentProfile;
+    const ledgerMonths = studentFee?.ledgerMonths || [];
+    const summary = studentFee?.summary;
+    const collectionProgress = summary?.collectionProgress || 0;
 
     // Record payment mutation
     const recordPayment = useMutation({
@@ -221,6 +274,26 @@ export default function AccountantCollectFeeScreen() {
             // Select just the next pending installment
             setSelectedInstallmentIds([pendingInstallments[0].id]);
         }
+    };
+
+    const openDiscountModal = (entry) => {
+        setSelectedLedgerEntry(entry);
+        setDiscountAmount(entry?.discountAmount ? String(entry.discountAmount) : '');
+        setDiscountReason('');
+        setDiscountModalVisible(true);
+    };
+
+    const submitDiscount = () => {
+        const numericDiscount = Number(discountAmount);
+        if (!selectedLedgerEntry?.id || !numericDiscount || numericDiscount < 0) {
+            Alert.alert('Invalid amount', 'Enter a valid discount amount.');
+            return;
+        }
+        applyDiscountMutation.mutate({
+            ledgerEntryId: selectedLedgerEntry.id,
+            amount: numericDiscount,
+            reason: discountReason || 'Adjusted from accountant mobile app',
+        });
     };
 
     const toggleInstallment = (id) => {
@@ -278,6 +351,23 @@ export default function AccountantCollectFeeScreen() {
         return `₹${(amount || 0).toLocaleString('en-IN')}`;
     };
 
+    const handleShareStudentReport = async () => {
+        if (!selectedStudent || !summary) return;
+        await Share.share({
+            title: `${selectedStudent.name} fee report`,
+            message: [
+                `${selectedStudent.name} Fee Summary`,
+                `Admission No: ${selectedStudent.admissionNo || selectedStudent.admissionNumber || 'N/A'}`,
+                `Expected: ${formatCurrency(summary.expectedCollection)}`,
+                `Collected: ${formatCurrency(summary.totalFeesCollected)}`,
+                `Pending: ${formatCurrency(summary.feesPendingAcrossYear)}`,
+                `Discount: ${formatCurrency(summary.discountGiven)}`,
+                `Late Fee: ${formatCurrency(summary.lateFeeAccrued)}`,
+                `Collection Progress: ${collectionProgress}%`,
+            ].join('\n'),
+        });
+    };
+
     const paymentMethods = [
         { key: 'CASH', label: 'Cash', icon: '💵' },
         { key: 'UPI', label: 'UPI', icon: '📱' },
@@ -289,7 +379,7 @@ export default function AccountantCollectFeeScreen() {
 
     // ── STEP 1: SEARCH ──
     const renderSearch = () => {
-        const loading = searchQuery.length >= 1 ? searchLoading : allStudentsLoading;
+        const loading = studentsLoading;
 
         const getClassSectionLabel = (student) => {
             const className = student.class?.name || student.class?.className;
@@ -298,9 +388,44 @@ export default function AccountantCollectFeeScreen() {
             return sectionName ? `Class ${className} - ${sectionName}` : `Class ${className}`;
         };
 
+        const renderStudentItem = ({ item: student, index }) => (
+            <Animated.View entering={FadeInDown.delay(40 + index * 20).duration(250)}>
+                <HapticTouchable onPress={() => handleStudentSelect(student)}>
+                    <View style={s.studentCard}>
+                        <View style={s.studentAvatar}>
+                            {/* <Text style={s.studentAvatarText}>
+                                {(student.name || '?').charAt(0).toUpperCase()}
+                            </Text> */}
+                            {student?.profilePicture && student.profilePicture !== 'default.png' ? (
+                                <Image source={{ uri: student.profilePicture }} style={s.profileImage} />
+                            ) : (
+                                <View style={s.studentAvatarFallback}>
+                                    <Text style={s.studentAvatarText}>
+                                        {(student?.name || '?').charAt(0).toUpperCase()}
+                                    </Text>
+                                </View>
+                            )}
+                        </View>
+                        <View style={{ flex: 1 }}>
+                            <Text style={s.studentName}>{student.name}</Text>
+                            <View style={s.studentMetaRow}>
+                                <View style={s.classBadge}>
+                                    <Text style={s.classBadgeText}>{getClassSectionLabel(student)}</Text>
+                                </View>
+                                <Text style={s.admissionText}>
+                                    {student.admissionNumber || student.admissionNo || 'N/A'}
+                                </Text>
+                            </View>
+                        </View>
+                        <ChevronRight size={16} color="#CBD5E1" />
+                    </View>
+                </HapticTouchable>
+            </Animated.View>
+        );
+
         return (
             <View style={{ flex: 1 }}>
-                {/* Enhanced Search Bar */}
+                {/* Search bar */}
                 <Animated.View entering={FadeInDown.delay(150).duration(400)} style={s.searchBarWrapper}>
                     <View style={s.searchBar}>
                         <View style={s.searchIconWrapper}>
@@ -329,18 +454,14 @@ export default function AccountantCollectFeeScreen() {
                     </View>
                 </Animated.View>
 
-                {/* Class & Section Dropdowns */}
+                {/* Filters — OUTSIDE FlatList so dropdown z-index works */}
                 {uniqueClasses.length > 0 && (
-                    <Animated.View entering={FadeInDown.delay(200).duration(350)} style={s.filterDropdownRow}>
-                        {/* Class Dropdown */}
+                    <Animated.View entering={FadeInDown.delay(200).duration(350)} style={[s.filterDropdownRow, { zIndex: 200 }]}>
                         <View style={{ flex: 1, position: 'relative', zIndex: 110 }}>
                             <Text style={s.filterDropdownLabel}>Class</Text>
                             <TouchableOpacity
                                 activeOpacity={0.7}
-                                onPress={() => {
-                                    setShowClassDropdown(!showClassDropdown);
-                                    setShowSectionDropdown(false);
-                                }}
+                                onPress={() => { setShowClassDropdown(!showClassDropdown); setShowSectionDropdown(false); }}
                                 style={[s.filterDropdown, showClassDropdown && s.filterDropdownOpen]}
                             >
                                 <Text style={[s.filterDropdownValue, !selectedClassFilter && s.filterDropdownPlaceholder]}>
@@ -350,35 +471,33 @@ export default function AccountantCollectFeeScreen() {
                             </TouchableOpacity>
                             {showClassDropdown && (
                                 <View style={s.dropdownMenu}>
-                                    <TouchableOpacity
-                                        onPress={() => { setSelectedClassFilter(null); setSelectedSectionFilter(null); setShowClassDropdown(false); }}
-                                        style={[s.dropdownItem, !selectedClassFilter && s.dropdownItemActive]}
-                                    >
-                                        <Text style={[s.dropdownItemText, !selectedClassFilter && s.dropdownItemTextActive]}>All Classes</Text>
-                                    </TouchableOpacity>
-                                    {uniqueClasses.map((cls) => (
+                                    <ScrollView nestedScrollEnabled style={{ maxHeight: 220 }}>
                                         <TouchableOpacity
-                                            key={cls}
-                                            onPress={() => { setSelectedClassFilter(cls); setSelectedSectionFilter(null); setShowClassDropdown(false); }}
-                                            style={[s.dropdownItem, selectedClassFilter === cls && s.dropdownItemActive]}
+                                            onPress={() => { setSelectedClassFilter(null); setSelectedSectionFilter(null); setShowClassDropdown(false); }}
+                                            style={[s.dropdownItem, !selectedClassFilter && s.dropdownItemActive]}
                                         >
-                                            <Text style={[s.dropdownItemText, selectedClassFilter === cls && s.dropdownItemTextActive]}>Class {cls}</Text>
+                                            <Text style={[s.dropdownItemText, !selectedClassFilter && s.dropdownItemTextActive]}>All Classes</Text>
                                         </TouchableOpacity>
-                                    ))}
+                                        {uniqueClasses.map((cls) => (
+                                            <TouchableOpacity
+                                                key={cls}
+                                                onPress={() => { setSelectedClassFilter(cls); setSelectedSectionFilter(null); setShowClassDropdown(false); }}
+                                                style={[s.dropdownItem, selectedClassFilter === cls && s.dropdownItemActive]}
+                                            >
+                                                <Text style={[s.dropdownItemText, selectedClassFilter === cls && s.dropdownItemTextActive]}>Class {cls}</Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </ScrollView>
                                 </View>
                             )}
                         </View>
 
-                        {/* Section Dropdown */}
                         {uniqueSections.length > 0 && (
                             <View style={{ flex: 1, position: 'relative', zIndex: 100 }}>
                                 <Text style={s.filterDropdownLabel}>Section</Text>
                                 <TouchableOpacity
                                     activeOpacity={0.7}
-                                    onPress={() => {
-                                        setShowSectionDropdown(!showSectionDropdown);
-                                        setShowClassDropdown(false);
-                                    }}
+                                    onPress={() => { setShowSectionDropdown(!showSectionDropdown); setShowClassDropdown(false); }}
                                     style={[s.filterDropdown, showSectionDropdown && s.filterDropdownOpen]}
                                 >
                                     <Text style={[s.filterDropdownValue, !selectedSectionFilter && s.filterDropdownPlaceholder]}>
@@ -388,21 +507,23 @@ export default function AccountantCollectFeeScreen() {
                                 </TouchableOpacity>
                                 {showSectionDropdown && (
                                     <View style={s.dropdownMenu}>
-                                        <TouchableOpacity
-                                            onPress={() => { setSelectedSectionFilter(null); setShowSectionDropdown(false); }}
-                                            style={[s.dropdownItem, !selectedSectionFilter && s.dropdownItemActive]}
-                                        >
-                                            <Text style={[s.dropdownItemText, !selectedSectionFilter && s.dropdownItemTextActive]}>All Sections</Text>
-                                        </TouchableOpacity>
-                                        {uniqueSections.map((sec) => (
+                                        <ScrollView nestedScrollEnabled style={{ maxHeight: 220 }}>
                                             <TouchableOpacity
-                                                key={sec}
-                                                onPress={() => { setSelectedSectionFilter(sec); setShowSectionDropdown(false); }}
-                                                style={[s.dropdownItem, selectedSectionFilter === sec && s.dropdownItemActive]}
+                                                onPress={() => { setSelectedSectionFilter(null); setShowSectionDropdown(false); }}
+                                                style={[s.dropdownItem, !selectedSectionFilter && s.dropdownItemActive]}
                                             >
-                                                <Text style={[s.dropdownItemText, selectedSectionFilter === sec && s.dropdownItemTextActive]}>{sec}</Text>
+                                                <Text style={[s.dropdownItemText, !selectedSectionFilter && s.dropdownItemTextActive]}>All Sections</Text>
                                             </TouchableOpacity>
-                                        ))}
+                                            {uniqueSections.map((sec) => (
+                                                <TouchableOpacity
+                                                    key={sec}
+                                                    onPress={() => { setSelectedSectionFilter(sec); setShowSectionDropdown(false); }}
+                                                    style={[s.dropdownItem, selectedSectionFilter === sec && s.dropdownItemActive]}
+                                                >
+                                                    <Text style={[s.dropdownItemText, selectedSectionFilter === sec && s.dropdownItemTextActive]}>{sec}</Text>
+                                                </TouchableOpacity>
+                                            ))}
+                                        </ScrollView>
                                     </View>
                                 )}
                             </View>
@@ -410,56 +531,46 @@ export default function AccountantCollectFeeScreen() {
                     </Animated.View>
                 )}
 
-                {/* Results Count */}
-                {!loading && filteredStudents && filteredStudents.length > 0 && (
+                {!studentsLoading && filteredStudents.length > 0 && (
                     <View style={s.resultsCountRow}>
                         <Text style={s.resultsCountText}>
-                            {filteredStudents.length} student{filteredStudents.length !== 1 ? 's' : ''}
+                            {filteredStudents.length} loaded{hasNextPage ? ' • more available' : ''}
                         </Text>
                     </View>
                 )}
 
-                {/* Student List */}
-                <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20 }}>
-                    {loading ? (
-                        <View style={{ padding: 40, alignItems: 'center' }}>
-                            <ActivityIndicator size="large" color="#6366F1" />
-                            <Text style={{ color: '#94A3B8', marginTop: 10, fontSize: 13 }}>Searching students...</Text>
+                {/* FlatList with empty ListHeaderComponent */}
+                <FlatList
+                    data={filteredStudents}
+                    keyExtractor={(item) => `${item.id}`}
+                    renderItem={renderStudentItem}
+                    style={{ flex: 1 }}
+                    keyboardShouldPersistTaps="handled"
+                    contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 20, paddingTop: 8 }}
+                    onEndReachedThreshold={0.35}
+                    onEndReached={() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }}
+                    refreshing={false}
+                    onRefresh={refetchStudents}
+                    ListEmptyComponent={
+                        studentsLoading ? (
+                            <View style={{ padding: 40, alignItems: 'center' }}>
+                                <ActivityIndicator size="large" color="#6366F1" />
+                                <Text style={{ color: '#94A3B8', marginTop: 10, fontSize: 13 }}>Loading students...</Text>
+                            </View>
+                        ) : (
+                            <View style={{ padding: 40, alignItems: 'center' }}>
+                                <Search size={48} color="#E2E8F0" />
+                                <Text style={{ color: '#94A3B8', marginTop: 12, fontSize: 15, fontWeight: '500' }}>No students found</Text>
+                                <Text style={{ color: '#CBD5E1', marginTop: 4, fontSize: 13 }}>Try a different search or filter</Text>
+                            </View>
+                        )
+                    }
+                    ListFooterComponent={isFetchingNextPage ? (
+                        <View style={{ paddingVertical: 20 }}>
+                            <ActivityIndicator color="#6366F1" />
                         </View>
-                    ) : filteredStudents && filteredStudents.length > 0 ? (
-                        filteredStudents.map((student, index) => (
-                            <Animated.View key={student.id} entering={FadeInDown.delay(40 + index * 20).duration(250)}>
-                                <HapticTouchable onPress={() => handleStudentSelect(student)}>
-                                    <View style={s.studentCard}>
-                                        <View style={s.studentAvatar}>
-                                            <Text style={s.studentAvatarText}>
-                                                {(student.name || '?').charAt(0).toUpperCase()}
-                                            </Text>
-                                        </View>
-                                        <View style={{ flex: 1 }}>
-                                            <Text style={s.studentName}>{student.name}</Text>
-                                            <View style={s.studentMetaRow}>
-                                                <View style={s.classBadge}>
-                                                    <Text style={s.classBadgeText}>{getClassSectionLabel(student)}</Text>
-                                                </View>
-                                                <Text style={s.admissionText}>
-                                                    {student.admissionNumber || student.admissionNo || 'N/A'}
-                                                </Text>
-                                            </View>
-                                        </View>
-                                        <ChevronRight size={16} color="#CBD5E1" />
-                                    </View>
-                                </HapticTouchable>
-                            </Animated.View>
-                        ))
-                    ) : searchQuery.length > 0 || selectedClassFilter || selectedSectionFilter ? (
-                        <View style={{ padding: 40, alignItems: 'center' }}>
-                            <Search size={48} color="#E2E8F0" />
-                            <Text style={{ color: '#94A3B8', marginTop: 12, fontSize: 15, fontWeight: '500' }}>No students found</Text>
-                            <Text style={{ color: '#CBD5E1', marginTop: 4, fontSize: 13 }}>Try a different search or filter</Text>
-                        </View>
-                    ) : null}
-                </ScrollView>
+                    ) : <View style={{ height: 20 }} />}
+                />
             </View>
         );
     };
@@ -476,22 +587,29 @@ export default function AccountantCollectFeeScreen() {
                 <Animated.View entering={FadeInDown.duration(300)}>
                     <View style={s.infoCard}>
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <View style={{ flex: 1 }}>
-                                <Text style={s.infoName}>{selectedStudent?.name}</Text>
-                                <Text style={s.infoMeta}>
-                                    {selectedStudent?.admissionNo || selectedStudent?.admissionNumber} • {(() => {
-                                        const className = selectedStudent?.class?.name || selectedStudent?.class?.className;
-                                        const sectionName = selectedStudent?.section?.name || selectedStudent?.section?.sectionName;
-                                        if (!className) return 'N/A';
-                                        return sectionName ? `Class ${className} - ${sectionName}` : `Class ${className}`;
-                                    })()}
-                                </Text>
-                            </View>
-                            <HapticTouchable onPress={() => { setStep('search'); setSearchQuery(''); }}>
-                                <View style={s.changeBtn}>
-                                    <Text style={s.changeBtnText}>Change</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
+                                {studentProfile?.profilePicture ? (
+                                    <Image source={{ uri: studentProfile.profilePicture }} style={s.profileImage} />
+                                ) : (
+                                    <View style={s.profileAvatarFallback}>
+                                        <Text style={s.profileAvatarText}>
+                                            {(selectedStudent?.name || '?').charAt(0).toUpperCase()}
+                                        </Text>
+                                    </View>
+                                )}
+                                <View style={{ flex: 1 }}>
+                                    <Text style={s.infoName}>{selectedStudent?.name}</Text>
+                                    <Text style={s.infoMeta}>
+                                        {selectedStudent?.admissionNo || selectedStudent?.admissionNumber} • {(() => {
+                                            const className = selectedStudent?.class?.name || selectedStudent?.class?.className || studentProfile?.className;
+                                            const sectionName = selectedStudent?.section?.name || selectedStudent?.section?.sectionName || studentProfile?.sectionName;
+                                            if (!className) return 'N/A';
+                                            return sectionName ? `Class ${className} - ${sectionName}` : `Class ${className}`;
+                                        })()}
+                                    </Text>
                                 </View>
-                            </HapticTouchable>
+                            </View>
+
                         </View>
 
                         {feeLoading ? (
@@ -499,20 +617,73 @@ export default function AccountantCollectFeeScreen() {
                                 <ActivityIndicator size="small" color="#10B981" />
                             </View>
                         ) : studentFee ? (
-                            <View style={s.feeRow}>
-                                <View style={s.feeStat}>
-                                    <Text style={s.feeStatLabel}>Total</Text>
-                                    <Text style={s.feeStatValue}>{formatCurrency(studentFee.finalAmount || studentFee.originalAmount)}</Text>
+                            <>
+                                <View style={s.guardianRow}>
+                                    {studentProfile?.fatherName ? <Text style={s.guardianLine}>Father: {studentProfile.fatherName}</Text> : null}
+                                    {studentProfile?.motherName ? <Text style={s.guardianLine}>Mother: {studentProfile.motherName}</Text> : null}
+                                    {studentProfile?.guardianName ? (
+                                        <Text style={s.guardianLine}>
+                                            {studentProfile.guardianRelation || 'Guardian'}: {studentProfile.guardianName}
+                                        </Text>
+                                    ) : null}
+                                    {studentProfile?.joinedOnLabel ? <Text style={s.guardianLine}>Joined: {studentProfile.joinedOnLabel}</Text> : null}
                                 </View>
-                                <View style={[s.feeStat, { borderLeftWidth: 1, borderLeftColor: '#f0f0f0' }]}>
-                                    <Text style={s.feeStatLabel}>Paid</Text>
-                                    <Text style={[s.feeStatValue, { color: '#10B981' }]}>{formatCurrency(studentFee.paidAmount)}</Text>
+                                <View style={{ flexDirection: 'row', gap: 8 }}>
+                                    <HapticTouchable onPress={() => router.push({
+                                        pathname: '/(screens)/accountant-payment-history',
+                                        params: {
+                                            selectedStudent: JSON.stringify(selectedStudent),
+                                        },
+                                    })}>
+                                        <View style={s.changeBtn}>
+                                            <Receipt size={14} color="#64748B" />
+                                            <Text style={s.changeBtnText}>History</Text>
+                                        </View>
+                                    </HapticTouchable>
+                                    <HapticTouchable onPress={() => { setStep('search'); setSearchQuery(''); }}>
+                                        <View style={s.changeBtn}>
+                                            <Text style={s.changeBtnText}>Change</Text>
+                                        </View>
+                                    </HapticTouchable>
                                 </View>
-                                <View style={[s.feeStat, { borderLeftWidth: 1, borderLeftColor: '#f0f0f0' }]}>
-                                    <Text style={s.feeStatLabel}>Balance</Text>
-                                    <Text style={[s.feeStatValue, { color: '#EF4444' }]}>{formatCurrency(studentFee.balanceAmount)}</Text>
+                                <View style={s.feeRow}>
+                                    <View style={s.feeStat}>
+                                        <Text style={s.feeStatLabel}>Total</Text>
+                                        <Text style={s.feeStatValue}>{formatCurrency(studentFee.finalAmount || studentFee.originalAmount)}</Text>
+                                    </View>
+                                    <View style={[s.feeStat, { borderLeftWidth: 1, borderLeftColor: '#f0f0f0' }]}>
+                                        <Text style={s.feeStatLabel}>Paid</Text>
+                                        <Text style={[s.feeStatValue, { color: '#10B981' }]}>{formatCurrency(studentFee.paidAmount)}</Text>
+                                    </View>
+                                    <View style={[s.feeStat, { borderLeftWidth: 1, borderLeftColor: '#f0f0f0' }]}>
+                                        <Text style={s.feeStatLabel}>Balance</Text>
+                                        <Text style={[s.feeStatValue, { color: '#EF4444' }]}>{formatCurrency(studentFee.balanceAmount)}</Text>
+                                    </View>
                                 </View>
-                            </View>
+                                <View style={[s.feeRow, { marginTop: 10 }]}>
+                                    <View style={s.feeStat}>
+                                        <Text style={s.feeStatLabel}>Discount</Text>
+                                        <Text style={[s.feeStatValue, { color: '#7C3AED' }]}>{formatCurrency(summary?.discountGiven)}</Text>
+                                    </View>
+                                    <View style={[s.feeStat, { borderLeftWidth: 1, borderLeftColor: '#f0f0f0' }]}>
+                                        <Text style={s.feeStatLabel}>Expected</Text>
+                                        <Text style={s.feeStatValue}>{formatCurrency(summary?.expectedCollection)}</Text>
+                                    </View>
+                                    <View style={[s.feeStat, { borderLeftWidth: 1, borderLeftColor: '#f0f0f0' }]}>
+                                        <Text style={s.feeStatLabel}>Late Fee</Text>
+                                        <Text style={[s.feeStatValue, { color: '#F59E0B' }]}>{formatCurrency(summary?.lateFeeAccrued)}</Text>
+                                    </View>
+                                </View>
+                                <View style={{ marginTop: 14 }}>
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                                        <Text style={s.progressLabel}>Collection Progress</Text>
+                                        <Text style={s.progressValue}>{collectionProgress}%</Text>
+                                    </View>
+                                    <View style={s.progressTrack}>
+                                        <View style={[s.progressFill, { width: `${collectionProgress}%` }]} />
+                                    </View>
+                                </View>
+                            </>
                         ) : (
                             <View style={{ paddingTop: 12 }}>
                                 <Text style={{ color: '#999', fontSize: 13 }}>No fee assigned for this student</Text>
@@ -544,7 +715,7 @@ export default function AccountantCollectFeeScreen() {
                         {/* Installments */}
                         {allInstallments.length > 0 && (
                             <Animated.View entering={FadeInDown.delay(150).duration(300)} style={{ marginTop: 16 }}>
-                                <Text style={s.sectionLabel}>Installments</Text>
+                                <Text style={s.sectionLabel}>Pay by Month</Text>
                                 <View style={s.installmentList}>
                                     {allInstallments.map((inst) => {
                                         const isPaid = inst.status === 'PAID';
@@ -557,7 +728,7 @@ export default function AccountantCollectFeeScreen() {
                                                         {isSelected && <CheckCircle size={14} color="#fff" />}
                                                     </View>
                                                     <View style={{ flex: 1 }}>
-                                                        <Text style={[s.installmentTitle, isPaid && { color: '#666' }]}>Installment {inst.installmentNumber}</Text>
+                                                        <Text style={[s.installmentTitle, isPaid && { color: '#666' }]}>{inst.monthLabel || `Installment ${inst.installmentNumber}`}</Text>
                                                         <Text style={s.installmentDue}>
                                                             {isPaid ? 'Paid' : `Due: ${new Date(inst.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}`}
                                                         </Text>
@@ -577,6 +748,32 @@ export default function AccountantCollectFeeScreen() {
                                             </HapticTouchable>
                                         );
                                     })}
+                                </View>
+                            </Animated.View>
+                        )}
+
+                        {ledgerMonths.length > 0 && (
+                            <Animated.View entering={FadeInDown.delay(180).duration(300)} style={{ marginTop: 18 }}>
+                                <View style={s.ledgerEntryCard}>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={s.sectionLabel}>Financial Ledger</Text>
+                                        <Text style={s.sectionNote}>
+                                            Open the month-wise ledger in a modal so payment selection stays clean.
+                                        </Text>
+                                    </View>
+                                    <View style={s.ledgerEntryActions}>
+                                        <HapticTouchable onPress={() => setLedgerModalVisible(true)}>
+                                            <View style={s.ledgerPrimaryButton}>
+                                                <Receipt size={15} color="#0469ff" />
+                                                <Text style={s.ledgerPrimaryButtonText}>View Ledger</Text>
+                                            </View>
+                                        </HapticTouchable>
+                                        <HapticTouchable onPress={handleShareStudentReport}>
+                                            <View style={s.ledgerSecondaryButton}>
+                                                <Text style={s.ledgerSecondaryButtonText}>Generate Report</Text>
+                                            </View>
+                                        </HapticTouchable>
+                                    </View>
                                 </View>
                             </Animated.View>
                         )}
@@ -744,6 +941,115 @@ export default function AccountantCollectFeeScreen() {
             {step === 'search' && renderSearch()}
             {step === 'payment' && renderPayment()}
             {step === 'success' && renderSuccess()}
+
+            <Modal visible={ledgerModalVisible} animationType="slide" onRequestClose={() => setLedgerModalVisible(false)}>
+                <View style={s.ledgerModalContainer}>
+                    <View style={s.ledgerModalHeader}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={s.ledgerModalTitle}>Financial Ledger</Text>
+                            <Text style={s.ledgerModalSubtitle}>Month-wise breakdown with detailed fee tracking.</Text>
+                        </View>
+                        <HapticTouchable onPress={() => setLedgerModalVisible(false)}>
+                            <View style={s.backButton}>
+                                <X size={20} color="#111" />
+                            </View>
+                        </HapticTouchable>
+                    </View>
+
+                    <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 32 }} showsVerticalScrollIndicator={false}>
+                        {ledgerMonths.map((month) => (
+                            <View key={month.monthKey} style={s.ledgerMonthCard}>
+                                <View style={s.ledgerMonthHeader}>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={s.ledgerMonthTitle}>{month.monthLabel}</Text>
+                                        <Text style={s.ledgerMonthMeta}>{month.monthStatus}</Text>
+                                    </View>
+                                    <View style={{ alignItems: 'flex-end' }}>
+                                        <Text style={s.ledgerMonthAmount}>{formatCurrency(month.totalNet)}</Text>
+                                        <Text style={s.ledgerMonthDue}>Due: {formatCurrency(month.totalBalance)}</Text>
+                                    </View>
+                                </View>
+
+                                {month.groups.length === 0 ? (
+                                    <Text style={s.emptyLedgerMonth}>No fees scheduled for this month</Text>
+                                ) : month.groups.map((group) => (
+                                    <View key={group.key} style={{ marginTop: 12 }}>
+                                        <Text style={s.ledgerGroupTitle}>{group.title}</Text>
+                                        {group.items.map((item) => (
+                                            <View key={item.id} style={s.ledgerItemRow}>
+                                                <View style={{ flex: 1 }}>
+                                                    <Text style={s.ledgerItemTitle}>{item.title}</Text>
+                                                    <Text style={s.ledgerItemDue}>Due: {item.dueDateLabel}</Text>
+                                                    <Text style={[s.ledgerItemStatus, item.statusMeta?.tone === 'overdue' && { color: '#EF4444' }]}>
+                                                        {item.statusMeta?.badge}
+                                                    </Text>
+                                                </View>
+                                                <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                                                    <Text style={s.ledgerItemAmount}>{formatCurrency(item.balanceAmount || item.netAmount)}</Text>
+                                                    {item.canAdjust ? (
+                                                        <HapticTouchable onPress={() => openDiscountModal(item)}>
+                                                            <View style={s.adjustButton}>
+                                                                <Percent size={12} color="#7C3AED" />
+                                                                <Text style={s.adjustButtonText}>Adjust</Text>
+                                                            </View>
+                                                        </HapticTouchable>
+                                                    ) : null}
+                                                </View>
+                                            </View>
+                                        ))}
+                                    </View>
+                                ))}
+                            </View>
+                        ))}
+                    </ScrollView>
+                </View>
+            </Modal>
+
+            <Modal visible={discountModalVisible} transparent animationType="fade" onRequestClose={() => setDiscountModalVisible(false)}>
+                <View style={s.modalBackdrop}>
+                    <View style={s.modalCard}>
+                        <Text style={s.modalTitle}>Adjust Discount</Text>
+                        <Text style={s.modalSubtitle}>{selectedLedgerEntry?.title}</Text>
+
+                        <Text style={s.modalLabel}>Discount Amount</Text>
+                        <TextInput
+                            value={discountAmount}
+                            onChangeText={setDiscountAmount}
+                            keyboardType="numeric"
+                            placeholder="Enter discount amount"
+                            placeholderTextColor="#94A3B8"
+                            style={s.modalInput}
+                        />
+
+                        <Text style={s.modalLabel}>Reason</Text>
+                        <TextInput
+                            value={discountReason}
+                            onChangeText={setDiscountReason}
+                            placeholder="Reason for discount"
+                            placeholderTextColor="#94A3B8"
+                            style={[s.modalInput, { height: 88, textAlignVertical: 'top' }]}
+                            multiline
+                        />
+
+                        <View style={s.modalActions}>
+                            <HapticTouchable onPress={() => setDiscountModalVisible(false)} style={{ flex: 1 }}>
+                                <View style={s.modalSecondaryBtn}>
+                                    <Text style={s.modalSecondaryText}>Cancel</Text>
+                                </View>
+                            </HapticTouchable>
+                            <HapticTouchable onPress={submitDiscount} style={{ flex: 1 }} disabled={applyDiscountMutation.isPending}>
+                                <LinearGradient colors={['#7C3AED', '#6D28D9']} style={s.modalPrimaryBtn}>
+                                    {applyDiscountMutation.isPending ? (
+                                        <ActivityIndicator color="#fff" />
+                                    ) : (
+                                        <Text style={s.modalPrimaryText}>Apply</Text>
+                                    )}
+                                </LinearGradient>
+                            </HapticTouchable>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 }
@@ -899,6 +1205,7 @@ const s = StyleSheet.create({
         padding: 14,
         backgroundColor: '#FFFFFF',
         borderRadius: 14,
+
         marginBottom: 8,
         gap: 12,
         borderWidth: 1,
@@ -908,8 +1215,11 @@ const s = StyleSheet.create({
         width: 44,
         height: 44,
         borderRadius: 22,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
         backgroundColor: '#EEF2FF',
         alignItems: 'center',
+
         justifyContent: 'center',
     },
     studentAvatarText: {
@@ -952,13 +1262,26 @@ const s = StyleSheet.create({
         backgroundColor: '#f8f9fa', borderRadius: 16, padding: 16,
         borderWidth: 1, borderColor: '#f0f0f0',
     },
+    profileImage: {
+        width: 54, height: 54, borderRadius: 27, backgroundColor: '#E2E8F0', borderWidth: 1,
+        borderColor: '#E2E8F0',
+    },
+    profileAvatarFallback: {
+        width: 54, height: 54, borderRadius: 27, backgroundColor: '#DBEAFE',
+        alignItems: 'center', justifyContent: 'center',
+    },
+    profileAvatarText: { fontSize: 20, fontWeight: '800', color: '#1D4ED8' },
     infoName: { fontSize: 18, fontWeight: '700', color: '#111' },
     infoMeta: { fontSize: 13, color: '#666', marginTop: 2 },
     changeBtn: {
         backgroundColor: '#fff', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6,
         borderWidth: 1, borderColor: '#e5e5e5',
+        flexDirection: 'row', alignItems: 'center', gap: 6,
+        marginTop: 15,
     },
     changeBtnText: { fontSize: 12, fontWeight: '600', color: '#666' },
+    guardianRow: { marginTop: 20, gap: 4 },
+    guardianLine: { fontSize: 12, color: '#475569', fontWeight: '500' },
     feeRow: {
         flexDirection: 'row', marginTop: 14, paddingTop: 14,
         borderTopWidth: 1, borderTopColor: '#eee',
@@ -966,6 +1289,10 @@ const s = StyleSheet.create({
     feeStat: { flex: 1, alignItems: 'center' },
     feeStatLabel: { fontSize: 11, color: '#999', fontWeight: '500' },
     feeStatValue: { fontSize: 16, fontWeight: '700', color: '#111', marginTop: 4 },
+    progressLabel: { fontSize: 13, fontWeight: '700', color: '#0F172A' },
+    progressValue: { fontSize: 13, fontWeight: '800', color: '#0469ff' },
+    progressTrack: { height: 10, borderRadius: 999, backgroundColor: '#E2E8F0', overflow: 'hidden' },
+    progressFill: { height: '100%', borderRadius: 999, backgroundColor: '#10B981' },
 
     // Quick fill
     quickFillBtn: {
@@ -977,6 +1304,43 @@ const s = StyleSheet.create({
 
     // Installments
     sectionLabel: { fontSize: 13, fontWeight: '600', color: '#666', marginBottom: 8 },
+    sectionNote: { fontSize: 12, color: '#94A3B8', lineHeight: 18 },
+    ledgerEntryCard: {
+        backgroundColor: '#FFFFFF',
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+        padding: 14,
+        gap: 14,
+    },
+    ledgerEntryActions: {
+        flexDirection: 'row',
+        gap: 10,
+        flexWrap: 'wrap',
+    },
+    ledgerPrimaryButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        backgroundColor: '#EFF6FF',
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#BFDBFE',
+    },
+    ledgerPrimaryButtonText: { fontSize: 13, fontWeight: '700', color: '#0469ff' },
+    ledgerSecondaryButton: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        backgroundColor: '#F8FAFC',
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+    },
+    ledgerSecondaryButtonText: { fontSize: 13, fontWeight: '700', color: '#334155' },
     installmentList: { borderRadius: 12, overflow: 'hidden', borderWidth: 1, borderColor: '#f0f0f0' },
     installmentItem: {
         flexDirection: 'row', alignItems: 'center', padding: 12,
@@ -991,6 +1355,60 @@ const s = StyleSheet.create({
     installmentTitle: { fontSize: 14, fontWeight: '600', color: '#111' },
     installmentDue: { fontSize: 11, color: '#999', marginTop: 2 },
     installmentAmount: { fontSize: 14, fontWeight: '700', color: '#111' },
+    ledgerMonthCard: {
+        backgroundColor: '#fff',
+        borderRadius: 16,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+        padding: 14,
+    },
+    ledgerMonthHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+    },
+    ledgerMonthTitle: { fontSize: 16, fontWeight: '800', color: '#0F172A' },
+    ledgerMonthMeta: { fontSize: 12, color: '#64748B', marginTop: 4 },
+    ledgerMonthAmount: { fontSize: 16, fontWeight: '800', color: '#111827' },
+    ledgerMonthDue: { fontSize: 12, color: '#EF4444', marginTop: 4 },
+    ledgerGroupTitle: { fontSize: 12, fontWeight: '800', color: '#F97316', marginBottom: 8, textTransform: 'uppercase' },
+    ledgerItemRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        paddingVertical: 10,
+        borderTopWidth: 1,
+        borderTopColor: '#F1F5F9',
+    },
+    ledgerItemTitle: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
+    ledgerItemDue: { fontSize: 11, color: '#64748B', marginTop: 2 },
+    ledgerItemStatus: { fontSize: 11, color: '#0EA5E9', marginTop: 2, fontWeight: '700' },
+    ledgerItemAmount: { fontSize: 14, fontWeight: '800', color: '#111827' },
+    adjustButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 8,
+        paddingVertical: 5,
+        borderRadius: 999,
+        backgroundColor: '#F5F3FF',
+    },
+    adjustButtonText: { fontSize: 11, fontWeight: '700', color: '#7C3AED' },
+    emptyLedgerMonth: { fontSize: 13, color: '#94A3B8', marginTop: 12 },
+    ledgerModalContainer: { flex: 1, backgroundColor: '#F8FAFC' },
+    ledgerModalHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 16,
+        paddingTop: Platform.OS === 'ios' ? 58 : 20,
+        paddingHorizontal: 16,
+        paddingBottom: 14,
+        borderBottomWidth: 1,
+        borderBottomColor: '#E2E8F0',
+        backgroundColor: '#FFFFFF',
+    },
+    ledgerModalTitle: { fontSize: 20, fontWeight: '800', color: '#0F172A' },
+    ledgerModalSubtitle: { fontSize: 12, color: '#64748B', marginTop: 4 },
 
     // Amount
     amountInputContainer: {
@@ -1016,6 +1434,46 @@ const s = StyleSheet.create({
         fontSize: 14, color: '#111', minHeight: 60, textAlignVertical: 'top',
         borderWidth: 1, borderColor: '#e5e5e5',
     },
+    modalBackdrop: {
+        flex: 1,
+        backgroundColor: 'rgba(15, 23, 42, 0.45)',
+        justifyContent: 'center',
+        padding: 20,
+    },
+    modalCard: {
+        backgroundColor: '#fff',
+        borderRadius: 20,
+        padding: 18,
+    },
+    modalTitle: { fontSize: 18, fontWeight: '800', color: '#111827' },
+    modalSubtitle: { fontSize: 13, color: '#64748B', marginTop: 4, marginBottom: 14 },
+    modalLabel: { fontSize: 12, fontWeight: '700', color: '#475569', marginBottom: 8, marginTop: 8 },
+    modalInput: {
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
+        borderRadius: 12,
+        paddingHorizontal: 14,
+        paddingVertical: 12,
+        fontSize: 14,
+        color: '#111827',
+        backgroundColor: '#F8FAFC',
+    },
+    modalActions: { flexDirection: 'row', gap: 10, marginTop: 18 },
+    modalSecondaryBtn: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 12,
+        backgroundColor: '#F1F5F9',
+        paddingVertical: 14,
+    },
+    modalSecondaryText: { fontSize: 14, fontWeight: '700', color: '#475569' },
+    modalPrimaryBtn: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 12,
+        paddingVertical: 14,
+    },
+    modalPrimaryText: { fontSize: 14, fontWeight: '700', color: '#fff' },
 
     // Record button
     recordButton: {

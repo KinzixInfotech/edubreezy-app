@@ -463,7 +463,7 @@ export default function SchoolCodePage() {
           });
         } else {
           router.push({
-            pathname: '/(auth)/login',
+            pathname: '/(auth)/role-selector',
             params: { schoolConfig: JSON.stringify(schoolData) },
           });
         }
@@ -515,7 +515,7 @@ export default function SchoolCodePage() {
           });
         } else {
           router.push({
-            pathname: '/(auth)/login',
+            pathname: '/(auth)/role-selector',
             params: { schoolConfig: JSON.stringify(data) },
           });
         }

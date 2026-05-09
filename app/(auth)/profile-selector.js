@@ -129,7 +129,7 @@ export default function ProfileSelectorScreen() {
             if (!savedProfiles || savedProfiles.length === 0) {
                 if (effectiveSchoolData) {
                     router.replace({
-                        pathname: '/(auth)/login',
+                        pathname: '/(auth)/role-selector',
                         params: { schoolConfig: JSON.stringify(effectiveSchoolData) },
                     });
                 } else {
@@ -268,7 +268,7 @@ export default function ProfileSelectorScreen() {
 
     const handleAddAccount = () => {
         router.push({
-            pathname: '/(auth)/login',
+            pathname: '/(auth)/role-selector',
             params: {
                 schoolConfig: JSON.stringify(schoolData),
                 isAddingAccount: 'true',
@@ -335,7 +335,7 @@ export default function ProfileSelectorScreen() {
                         await clearSchoolProfiles(schoolCode);
                         // After clearing all profiles, go to login for this school
                         router.replace({
-                            pathname: '/(auth)/login',
+                            pathname: '/(auth)/role-selector',
                             params: { schoolConfig: JSON.stringify(schoolData) },
                         });
                     },

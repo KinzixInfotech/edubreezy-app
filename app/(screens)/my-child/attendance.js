@@ -294,7 +294,7 @@ export default function ParentAttendanceView() {
     }, [queryClient]);
 
     // Calendar day size based on insets
-    const calendarWidth = SCREEN_WIDTH - 32 - insets.left - insets.right;
+    const calendarWidth = SCREEN_WIDTH - 64 - insets.left - insets.right;
     const DAY_SIZE = calendarWidth / 7;
 
     // ── Error state ──────────────────────────────────────────────────────────

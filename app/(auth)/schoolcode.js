@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Image as CachedImage } from 'expo-image';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { getProfilesForSchool } from '../../lib/profileManager';
+import * as Haptics from 'expo-haptics';
 import {
   View,
   Text,
@@ -227,11 +228,31 @@ export default function SchoolCodePage() {
   const [userCity, setUserCity] = useState('');
   const [locationLoading, setLocationLoading] = useState(false);
   const [locationPermissionGranted, setLocationPermissionGranted] = useState(null); // null = unknown, true/false
-
+  const heartbeatIntervalRef = useRef(null);
   const fadeIn = useSharedValue(0);
   const cardScale = useSharedValue(0.95);
   const buttonPulse = useSharedValue(1);
 
+
+
+  useEffect(() => {
+    if (loading) {
+      // Heartbeat: two quick taps (lub-dub) then a pause, repeat
+      const beat = async () => {
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Rigid); // lub
+        setTimeout(async () => {
+          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium); // dub
+        }, 150);
+      };
+
+      beat(); // fire immediately
+      heartbeatIntervalRef.current = setInterval(beat, 700); // repeat every ~900ms
+    } else {
+      clearInterval(heartbeatIntervalRef.current);
+    }
+
+    return () => clearInterval(heartbeatIntervalRef.current);
+  }, [loading]);
   // Load saved school code on mount
   useEffect(() => {
     const loadSavedCode = async () => {

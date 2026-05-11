@@ -201,15 +201,14 @@ export default function CreateStudentScreen() {
 
     const validateForm = () => {
         if (!formData.studentName.trim()) return "Student name is required";
-        if (!formData.email.trim()) return "Email is required";
+        if (formData.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) return "Enter a valid student email or leave it blank";
         if (!formData.password.trim() || formData.password.length < 6) return "Password must be at least 6 characters";
         if (!formData.admissionNo.trim()) return "Admission number is required";
-        if (!formData.contactNumber.trim()) return "Primary contact number is required";
         if (!formData.linkedParentId && !createParentProfile) return "Please search and link an existing Parent or create a new one";
         if (createParentProfile) {
             if (!formData.parentName.trim()) return "Parent name is required";
-            if (!formData.parentContactNumber.trim()) return "Parent contact number is required";
             if (!formData.parentPassword.trim() || formData.parentPassword.length < 6) return "Parent password must be at least 6 characters";
+            if (formData.parentPassword === formData.password) return "Parent and student passwords must be different";
         }
         return null; // Valid
     };
@@ -351,7 +350,7 @@ export default function CreateStudentScreen() {
                 <Animated.View entering={FadeInDown.delay(300).duration(400)} style={styles.card}>
                     <Text style={styles.cardTitle}>System Login</Text>
                     <View style={styles.inputGroup}>
-                        <Text style={styles.label}>Email Address *</Text>
+                        <Text style={styles.label}>Email Address (Optional)</Text>
                         <TextInput style={styles.input} autoCapitalize="none" keyboardType="email-address" placeholder="student@school.com" value={formData.email} onChangeText={t => handleChange('email', t)} />
                     </View>
                     <View style={styles.inputGroup}>
@@ -495,7 +494,7 @@ export default function CreateStudentScreen() {
                             </View>
                             <View style={styles.row}>
                                 <View style={[styles.inputGroup, { flex: 1 }]}>
-                                    <Text style={styles.label}>Contact Number *</Text>
+                                    <Text style={styles.label}>Contact Number (Optional)</Text>
                                     <TextInput style={styles.input} keyboardType="phone-pad" placeholder="10 Digits" value={formData.parentContactNumber} onChangeText={t => handleChange('parentContactNumber', t)} />
                                 </View>
                                 <View style={[styles.inputGroup, { flex: 1 }]}>

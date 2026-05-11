@@ -108,6 +108,9 @@ export default function PaymentHistoryScreen() {
             return res.data;
         },
         enabled: !!childData && !!academicYears?.id,
+        refetchOnMount: 'always',
+        refetchOnWindowFocus: true,
+        staleTime: 0,
     });
 
     const { data: payments, isLoading: paymentsLoading } = useQuery({
@@ -122,17 +125,19 @@ export default function PaymentHistoryScreen() {
             return res.data;
         },
         enabled: !!childData && !!academicYears,
+        refetchOnMount: 'always',
+        refetchOnWindowFocus: true,
+        staleTime: 0,
     });
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
-        if (activeTab === 'DETAILS') {
-            await queryClient.invalidateQueries(['student-fee']);
-        } else {
-            await queryClient.invalidateQueries(['payment-history']);
-        }
+        await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ['student-fee'] }),
+            queryClient.invalidateQueries({ queryKey: ['payment-history'] }),
+        ]);
         setRefreshing(false);
-    }, [activeTab]);
+    }, [queryClient]);
 
     const formatCurrency = (amount) =>
         new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount || 0);
@@ -376,11 +381,22 @@ export default function PaymentHistoryScreen() {
                                     );
                                 }
 
-                                // Group ledger entries by monthLabel
+                                // Group ledger entries by stable month key
                                 const grouped = {};
                                 ledger.forEach((entry) => {
-                                    const key = entry.monthLabel || 'Unknown';
-                                    if (!grouped[key]) grouped[key] = { entries: [], month: entry.month };
+                                    const entryDate = entry.month ? new Date(entry.month) : null;
+                                    const key = entryDate && !Number.isNaN(entryDate.getTime())
+                                        ? `${entryDate.getFullYear()}-${String(entryDate.getMonth() + 1).padStart(2, '0')}`
+                                        : entry.monthLabel || 'Unknown';
+                                    if (!grouped[key]) {
+                                        grouped[key] = {
+                                            entries: [],
+                                            month: entry.month,
+                                            label: entry.monthLabel || (entryDate && !Number.isNaN(entryDate.getTime())
+                                                ? entryDate.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })
+                                                : 'Unknown')
+                                        };
+                                    }
                                     grouped[key].entries.push(entry);
                                 });
 
@@ -389,13 +405,14 @@ export default function PaymentHistoryScreen() {
                                     new Date(a[1].month) - new Date(b[1].month)
                                 );
 
-                                return sortedMonths.map(([monthLabel, data]) => {
+                                return sortedMonths.map(([monthKey, data]) => {
+                                    const monthLabel = data.label || monthKey;
                                     const totalDue = data.entries.reduce((s, e) => s + (e.netAmount || 0), 0);
                                     const totalPaid = data.entries.reduce((s, e) => s + (e.paidAmount || 0), 0);
-                                    const balance = totalDue - totalPaid;
+                                    const balance = data.entries.reduce((s, e) => s + (e.balanceAmount || 0), 0);
 
                                     // Determine status
-                                    const allPaid = data.entries.every(e => e.status === 'LEDGER_PAID');
+                                    const allPaid = balance <= 0 || data.entries.every(e => e.status === 'LEDGER_PAID');
                                     const anyPaid = data.entries.some(e => e.paidAmount > 0);
                                     const status = allPaid ? 'PAID' : anyPaid ? 'PARTIAL' : 'DUE';
 

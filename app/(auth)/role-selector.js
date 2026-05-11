@@ -26,6 +26,8 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
+import HapticTouchable from '../components/HapticTouch';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('screen');
 
@@ -34,7 +36,6 @@ const guidelineBaseHeight = 812;
 const scale = (size) => (SCREEN_WIDTH / guidelineBaseWidth) * size;
 const verticalScale = (size) => (SCREEN_HEIGHT / guidelineBaseHeight) * size;
 const moderateScale = (size, factor = 0.5) => size + (scale(size) - size) * factor;
-
 // ─── Role Configuration ───
 const ROLE_OPTIONS = [
     {
@@ -102,6 +103,7 @@ const ROLE_OPTIONS = [
         gradient: ['#DC2626', '#B91C1C'],
     },
 ];
+
 
 // ─── Animated Background ───
 const AnimatedBackground = () => {
@@ -335,13 +337,17 @@ export default function RoleSelectorScreen() {
 
                 {/* Role Cards Grid */}
                 <View style={s.rolesGrid}>
+
                     {ROLE_OPTIONS.map((role, index) => (
                         <RoleCard
                             key={role.key}
                             role={role}
                             index={index}
                             selected={selectedRole === role.key}
-                            onPress={setSelectedRole}
+                            onPress={async () => {
+                                await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                                setSelectedRole(role.key)
+                            }}
                         />
                     ))}
                 </View>
@@ -359,6 +365,7 @@ export default function RoleSelectorScreen() {
             >
                 {selectedRole && selectedRoleData && (
                     <Animated.View entering={FadeIn.duration(250)} style={s.selectedHint}>
+
                         <View style={[s.selectedHintIcon, { backgroundColor: selectedRoleData.color + '15' }]}>
                             <Ionicons name={selectedRoleData.icon} size={16} color={selectedRoleData.color} />
                         </View>
@@ -367,7 +374,8 @@ export default function RoleSelectorScreen() {
                         </Text>
                     </Animated.View>
                 )}
-                <TouchableOpacity
+                <HapticTouchable
+                    haptic='high'
                     style={[
                         s.continueButton,
                         !selectedRole && s.continueButtonDisabled,
@@ -379,7 +387,7 @@ export default function RoleSelectorScreen() {
                 >
                     <Text style={s.continueButtonText}>Continue</Text>
                     <Ionicons name="arrow-forward" size={20} color="#FFF" />
-                </TouchableOpacity>
+                </HapticTouchable>
             </Animated.View>
         </View>
     );

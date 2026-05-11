@@ -35,7 +35,7 @@ import HapticTouchable from '../components/HapticTouch';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const CALENDAR_WIDTH = SCREEN_WIDTH - 32;
+const CALENDAR_WIDTH = SCREEN_WIDTH - 64;
 const DAY_WIDTH = CALENDAR_WIDTH / 7;
 
 const eventTypeColors = {

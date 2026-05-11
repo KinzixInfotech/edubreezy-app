@@ -9,7 +9,6 @@ import {
     ActivityIndicator,
     RefreshControl,
     Linking,
-    Platform,
     Image,
 } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -43,6 +42,7 @@ import { calculateETA, resetETAState } from '../../../lib/eta-service';
 import { getSchoolLocation } from '../../../lib/geofence-service';
 import { useRealtimeLocation } from '../../../hooks/useRealtimeLocation';
 import { StatusBar } from 'expo-status-bar';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { height, width } = Dimensions.get('window');
 
@@ -126,6 +126,7 @@ const BusMarkerView = memo(({ status, isStale, licensePlate }) => {
 export default function BusTrackingScreen() {
     const params = useLocalSearchParams();
     const queryClient = useQueryClient();
+    const insets = useSafeAreaInsets();
     const [refreshing, setRefreshing] = useState(false);
     const mapRef = useRef(null);
     const markerRef = useRef(null);
@@ -189,47 +190,35 @@ export default function BusTrackingScreen() {
         return () => clearTimeout(t);
     }, []);
 
+    // Realtime location is read directly from Supabase; no location API polling.
+    const {
+        location: realtimeLocation,
+        secondsAgo: realtimeSecondsAgo,
+        refetch: refetchRealtimeLocation,
+    } = useRealtimeLocation(vehicleId, { enabled: !!vehicleId && vehicleId !== 'undefined' });
+
+    const vehicle = assignment?.vehicle || assignment?.route?.vehicle;
+    const location = realtimeLocation;
+    const activeTrip = assignment?.activeTrip || assignment?.trip || null;
+    const status = realtimeLocation
+        ? (realtimeLocation.status || 'MOVING')
+        : 'OFFLINE';
+    const secondsAgo = realtimeSecondsAgo;
+    const stops = assignment?.route?.busStops || [];
+    const busIsActive = status === 'MOVING' || status === 'IDLE';
+
     useEffect(() => {
         setTracksViewChanges(true);
         const t = setTimeout(() => setTracksViewChanges(false), 300);
         return () => clearTimeout(t);
     }, [status]);
 
-    // Fetch bus location metadata once (no polling — Realtime handles updates)
-    const { data: locationData, isLoading: locationLoading, refetch } = useQuery({
-        queryKey: ['bus-location-meta', vehicleId],
-        queryFn: async () => {
-            if (!vehicleId) return null;
-            const res = await api.get(`/schools/transport/location/${vehicleId}?history=false`);
-            return res.data;
-        },
-        enabled: !!vehicleId && vehicleId !== 'undefined',
-        staleTime: 1000 * 60 * 5, // Cache for 5 min (metadata doesn't change often)
-        // NO refetchInterval — Supabase Realtime handles live location
-    });
-
-    // 🔴 REALTIME: Subscribe to live vehicle location via Supabase
-    const {
-        location: realtimeLocation,
-        isConnected: isRealtimeConnected,
-        secondsAgo: realtimeSecondsAgo,
-    } = useRealtimeLocation(vehicleId, { enabled: !!vehicleId && vehicleId !== 'undefined' });
-
-    const vehicle = locationData?.vehicle || assignment?.vehicle || assignment?.route?.vehicle;
-    // Use realtime location if available, fall back to API-fetched location
-    const location = realtimeLocation || locationData?.currentLocation;
-    const activeTrip = locationData?.activeTrip;
-    const status = isRealtimeConnected && realtimeLocation ? 'LIVE' : (locationData?.status || 'OFFLINE');
-    const secondsAgo = realtimeSecondsAgo ?? locationData?.secondsAgo;
-    const stops = activeTrip?.route?.busStops || [];
-
     // EDGE CASE: Driver/Conductor from permanent assignment if no active trip
-    const driver = locationData?.driver || activeTrip?.driver || assignment?.route?.vehicle?.routeAssignments?.[0]?.driver;
-    const conductor = locationData?.conductor || activeTrip?.conductor || assignment?.route?.vehicle?.routeAssignments?.[0]?.conductor;
-    const schoolProfilePicture = locationData?.schoolProfilePicture;
+    const driver = assignment?.route?.vehicle?.routeAssignments?.[0]?.driver || assignment?.vehicle?.routeAssignments?.[0]?.driver;
+    const conductor = assignment?.route?.vehicle?.routeAssignments?.[0]?.conductor || assignment?.vehicle?.routeAssignments?.[0]?.conductor;
 
     // Edge Case #19: Detect stale data despite "MOVING" status
-    const isStale = secondsAgo > 60 && status === 'MOVING';
+    const isStale = secondsAgo > 60 && busIsActive;
 
     // Haversine formula to calculate distance in km
     const getDistanceKm = (lat1, lon1, lat2, lon2) => {
@@ -325,15 +314,14 @@ export default function BusTrackingScreen() {
         try {
             await Promise.all([
                 queryClient.invalidateQueries({ queryKey: ['child-transport', schoolId, childData?.studentId] }),
-                queryClient.invalidateQueries({ queryKey: ['bus-location-meta', vehicleId] })
             ]);
-            await refetch();
+            await refetchRealtimeLocation();
         } catch (error) {
             console.error('Refresh failed:', error);
         } finally {
             setRefreshing(false);
         }
-    }, [queryClient, schoolId, childData?.studentId, vehicleId, refetch]);
+    }, [queryClient, schoolId, childData?.studentId, refetchRealtimeLocation]);
 
     const handleCall = (phoneNumber) => {
         if (phoneNumber) {
@@ -369,7 +357,7 @@ export default function BusTrackingScreen() {
         }, 500);
     };
 
-    const isLoading = assignmentLoading || locationLoading;
+    const isLoading = assignmentLoading;
 
     // Format time ago with helpful messages for offline status
     const formatTimeAgo = (seconds, busStatus) => {
@@ -384,8 +372,6 @@ export default function BusTrackingScreen() {
     // ====== BLINKIT-STYLE POLYLINE LOGIC ======
     // When bus is ACTIVE (MOVING/IDLE) → solid blue road-following polyline from bus → child stop
     // When bus is OFFLINE → dashed line from school → child stop
-    const busIsActive = status === 'MOVING' || status === 'IDLE';
-
     // Fetch Google Directions route (only when bus is active)
     useEffect(() => {
         if (!busIsActive || !location?.latitude || !childStop?.latitude) {
@@ -425,7 +411,7 @@ export default function BusTrackingScreen() {
     // No child data error state
     if (!childData) {
         return (
-            <View style={styles.container}>
+            <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
                 <View style={styles.header}>
                     <HapticTouchable onPress={() => router.back()}>
                         <View style={styles.backButton}>
@@ -439,7 +425,7 @@ export default function BusTrackingScreen() {
                     <AlertCircle size={48} color="#EF4444" />
                     <Text style={styles.errorText}>No student selected</Text>
                 </View>
-            </View>
+            </SafeAreaView>
         );
     }
 
@@ -447,7 +433,7 @@ export default function BusTrackingScreen() {
 
 
     return (
-        <View style={styles.container}>
+        <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
             <StatusBar style='dark' />
             {/* Header */}
             <View style={styles.header}>
@@ -471,7 +457,7 @@ export default function BusTrackingScreen() {
                 </HapticTouchable>
             </View>
 
-            {isLoading && !locationData ? (
+            {isLoading ? (
                 <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color="#2563EB" />
                     <Text style={styles.loadingText}>Locating bus...</Text>
@@ -490,7 +476,7 @@ export default function BusTrackingScreen() {
                     <ScrollView
                         style={styles.detailsContainer}
                         showsVerticalScrollIndicator={false}
-                        contentContainerStyle={{ paddingBottom: 40 }}
+                        contentContainerStyle={{ paddingBottom: insets.bottom + 40 }}
                         refreshControl={
                             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#2563EB']} />
                         }
@@ -910,15 +896,15 @@ export default function BusTrackingScreen() {
                         {/* Helpful Tips */}
                         <View style={styles.tipsCard}>
                             <Text style={styles.tipsTitle}>💡 Tracking Tips</Text>
-                            <Text style={styles.tipsText}>• Location updates every 10 seconds when bus is moving</Text>
+                            <Text style={styles.tipsText}>• Location updates live when the bus sends a new position</Text>
                             <Text style={styles.tipsText}>• Tap the call button to contact driver directly</Text>
-                            <Text style={styles.tipsText}>• Pull down to refresh for latest location</Text>
+                            <Text style={styles.tipsText}>• Pull down to refresh route and assignment details</Text>
                         </View>
                     </ScrollView>
                 </View >
             )
             }
-        </View >
+        </SafeAreaView >
     );
 }
 
@@ -931,7 +917,7 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingTop: Platform.OS === 'ios' ? 65 : 48,
+        paddingTop: 12,
         paddingBottom: 16,
         paddingHorizontal: 20,
         backgroundColor: '#fff',

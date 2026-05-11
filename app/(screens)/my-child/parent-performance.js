@@ -228,11 +228,25 @@ export default function ParentPerformanceScreen() {
         staleTime: 1000 * 60 * 5,
     });
 
-    const isLoading = attendanceLoading || examLoading;
+    const { data: dashboardData, isLoading: dashboardLoading } = useQuery({
+        queryKey: ['parent-performance-dashboard', schoolId, userData?.parentData?.id, childId],
+        queryFn: async () => {
+            if (!schoolId || !userData?.parentData?.id || !childId) return null;
+            const res = await api.get(
+                `/mobile/dashboard/parent?schoolId=${schoolId}&parentId=${userData.parentData.id}&userId=${userData.id}&childId=${childId}`
+            );
+            return res.data?.data || res.data;
+        },
+        enabled: !!schoolId && !!userData?.parentData?.id && !!childId,
+        staleTime: 1000 * 60 * 5,
+    });
 
-    const monthlyStats = attendanceData?.monthlyStats || {};
-    const yearlyAggregate = attendanceData?.yearlyAggregate || {};
-    const examStats = examData?.stats || {};
+    const isLoading = attendanceLoading || examLoading || dashboardLoading;
+
+    const dashboardChildStats = dashboardData?.childStats || {};
+    const monthlyStats = dashboardChildStats?.attendance?.monthlyStats || attendanceData?.monthlyStats || {};
+    const yearlyAggregate = dashboardChildStats?.attendance?.yearlyAggregate || attendanceData?.yearlyAggregate || {};
+    const examStats = dashboardChildStats?.exams?.stats || examData?.stats || {};
     const recentExams = (examData?.results || []).slice(0, 5);
 
     const calculateOverallScore = () => {
@@ -256,6 +270,7 @@ export default function ParentPerformanceScreen() {
         await Promise.all([
             queryClient.invalidateQueries(['parent-performance-attendance']),
             queryClient.invalidateQueries(['parent-performance-exams']),
+            queryClient.invalidateQueries(['parent-performance-dashboard']),
         ]);
         setRefreshing(false);
     }, [queryClient]);

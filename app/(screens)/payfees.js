@@ -67,6 +67,10 @@ export default function PayFeesScreen() {
 
   const schoolId = userData?.schoolId;
 
+  const invalidateStudentFee = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ['student-fee'] });
+  }, [queryClient]);
+
   const { data: schoolDetails } = useQuery({
     queryKey: ['school-details', schoolId],
     queryFn: async () => {
@@ -101,9 +105,9 @@ export default function PayFeesScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await queryClient.invalidateQueries(['student-fee']);
+    await invalidateStudentFee();
     setRefreshing(false);
-  }, []);
+  }, [invalidateStudentFee]);
 
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-IN', {
@@ -230,6 +234,7 @@ export default function PayFeesScreen() {
             keyId: result.keyId,
             order: result.order,
             orderId: result.orderId,
+            gatewayOrderId: result.order.id,
             amount: result.order.amount,
             currency: result.order.currency,
             schoolName: schoolDetails?.name || userData?.school?.name || 'EduBreezy',
@@ -247,15 +252,73 @@ export default function PayFeesScreen() {
           setPaymentData({ redirectUrl: result.redirectUrl, params: result.params, method: result.method, orderId: result.orderId });
           setShowPaymentWebView(true);
         } else if (result.type === 'UPI_COLLECT') {
-          Alert.alert('UPI Payment', result.message || 'Please approve payment in your UPI app');
+          setPendingOrder({ type: 'UPI_COLLECT', orderId: result.orderId, merchantTranId: result.merchantTranId });
+          Alert.alert(
+            'UPI Payment',
+            result.message || 'Please approve payment in your UPI app',
+            [
+              { text: 'Later', style: 'cancel' },
+              { text: 'Check Status', onPress: () => reconcilePaymentStatus(result.orderId) },
+            ]
+          );
         }
       } else {
         Alert.alert('Error', result.error || 'Failed to initiate payment');
       }
     } catch (error) {
-      Alert.alert('Error', error.response?.data?.error || 'Failed to initiate payment');
+      const pendingPayment = error.response?.data?.pending ? error.response.data : null;
+      if (pendingPayment?.orderId) {
+        Alert.alert(
+          'Payment Already Pending',
+          pendingPayment.error || 'A payment is already pending for this amount.',
+          [
+            { text: 'Close', style: 'cancel' },
+            { text: 'Check Status', onPress: () => reconcilePaymentStatus(pendingPayment.orderId) },
+          ]
+        );
+      } else {
+        Alert.alert('Error', error.response?.data?.error || 'Failed to initiate payment');
+      }
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const reconcilePaymentStatus = async (orderId, options = {}) => {
+    if (!orderId) return null;
+
+    try {
+      const res = await api.get(`/payment/status/${encodeURIComponent(orderId)}`);
+      const statusData = res.data;
+
+      if (statusData.status === 'SUCCESS') {
+        await invalidateStudentFee();
+        setSelectedMonths([]);
+        setPendingOrder(null);
+        if (!options.silent) {
+          Alert.alert(
+            'Payment Successful',
+            `Receipt: ${statusData.receiptNumber || 'Generated'}\nAmount: ${formatCurrency(statusData.amount)}`
+          );
+        }
+      } else if (['FAILED', 'CANCELLED'].includes(statusData.status)) {
+        setPendingOrder(null);
+        if (!options.silent) {
+          Alert.alert(
+            statusData.status === 'CANCELLED' ? 'Payment Cancelled' : 'Payment Failed',
+            statusData.failureReason || 'This payment was not completed. No fee has been recorded for it.'
+          );
+        }
+      } else if (!options.silent) {
+        Alert.alert('Payment Pending', 'The payment is still pending. If money was debited, it will be reconciled automatically.');
+      }
+
+      return statusData;
+    } catch (error) {
+      if (!options.silent) {
+        Alert.alert('Unable to Check Payment', error.response?.data?.error || 'Please refresh and try again.');
+      }
+      return null;
     }
   };
 
@@ -277,9 +340,16 @@ export default function PayFeesScreen() {
     setTimeout(() => {
       RazorpayCheckout.open(options)
         .then(async (data) => { await handlePaymentComplete('SUCCESS', data); })
-        .catch((error) => {
+        .catch(async (error) => {
+          const orderId = pendingOrder?.gatewayOrderId || pendingOrder?.order?.id || pendingOrder?.orderId;
+          const reconciled = await reconcilePaymentStatus(orderId, { silent: true });
           setIsProcessing(false);
-          if (error.code !== 0) Alert.alert('Payment Failed', error.description || 'Something went wrong.');
+          if (reconciled?.status === 'SUCCESS') return;
+          if (error.code !== 0) {
+            Alert.alert('Payment Failed', error.description || 'Something went wrong.');
+          } else {
+            Alert.alert('Payment Not Completed', 'No successful payment was recorded. If money was debited, use Check Status after a moment.');
+          }
         });
     }, 500);
   };
@@ -287,6 +357,13 @@ export default function PayFeesScreen() {
   const handlePaymentComplete = async (status, data) => {
     setShowPaymentWebView(false);
     setPaymentData(null);
+    const orderId =
+      data?.razorpay_order_id ||
+      pendingOrder?.gatewayOrderId ||
+      pendingOrder?.order?.id ||
+      pendingOrder?.orderId ||
+      paymentData?.orderId;
+
     if (status === 'SUCCESS') {
       if (data?.razorpay_signature) {
         try {
@@ -297,7 +374,7 @@ export default function PayFeesScreen() {
               const paymentDetails = verifyRes.data.payment;
               const selectedMonthsArr = groupedLedger.filter(m => selectedMonths.includes(m.key));
               const isPromotionReceipt = selectedMonthsArr.some(m =>
-                m.entries.some(e => e.feeComponent.name.toLowerCase().includes('admission') || e.feeComponent.category.includes('ADMISSION'))
+                m.entries.some(e => (e.feeComponent?.name || '').toLowerCase().includes('admission') || (e.feeComponent?.category || '').includes('ADMISSION'))
               ) && selectedMonthsArr[0]?.key.endsWith('-04');
 
               const pdfUri = await generateReceiptPDF({
@@ -344,21 +421,33 @@ export default function PayFeesScreen() {
               setIsGeneratingReceipt(false);
             }
 
-            queryClient.invalidateQueries(['student-fee']);
+            await invalidateStudentFee();
             setSelectedMonths([]);
+            setPendingOrder(null);
             Alert.alert('Payment Successful! 🎉', `Receipt: ${verifyRes.data.payment?.receiptNumber || 'Generated'}\nAmount: ${formatCurrency(verifyRes.data.payment?.amount)}\n\nYour transaction has been recorded successfully.`, [{ text: 'OK' }]);
           } else {
-            Alert.alert('Verification Failed', 'Payment verification failed. Please contact support.');
+            const reconciled = await reconcilePaymentStatus(orderId, { silent: true });
+            if (reconciled?.status !== 'SUCCESS') {
+              Alert.alert('Verification Failed', 'Payment verification failed. Please contact support.');
+            }
           }
         } catch (error) {
-          Alert.alert('Verification Error', error.response?.data?.error || 'Failed to verify payment');
+          const reconciled = await reconcilePaymentStatus(orderId, { silent: true });
+          if (reconciled?.status === 'SUCCESS') {
+            Alert.alert('Payment Successful', 'Your payment was reconciled successfully.');
+          } else {
+            Alert.alert('Verification Error', error.response?.data?.error || 'Failed to verify payment. If money was debited, use Check Status after a moment.');
+          }
         } finally {
           setIsProcessing(false);
         }
       } else {
-        Alert.alert('Payment Successful! 🎉', 'Your payment has been processed successfully.');
-        queryClient.invalidateQueries(['student-fee']);
-        setSelectedMonths([]);
+        const reconciled = await reconcilePaymentStatus(orderId, { silent: true });
+        if (reconciled?.status === 'SUCCESS') {
+          Alert.alert('Payment Successful! 🎉', 'Your payment has been recorded successfully.');
+        } else {
+          Alert.alert('Payment Pending', 'We could not verify the gateway response yet. If money was debited, it will be reconciled automatically.');
+        }
         setIsProcessing(false);
       }
     } else {

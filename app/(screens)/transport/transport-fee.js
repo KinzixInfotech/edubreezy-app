@@ -1,5 +1,5 @@
 // Transport Fee Payment Screen for Parents — Modern UI
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
     View,
     Text,
@@ -89,6 +89,27 @@ export default function TransportFeeScreen() {
         enabled: !!schoolId && !!studentId,
     });
 
+    const { data: academicYear, isLoading: academicYearLoading } = useQuery({
+        queryKey: ['transport-fee-academic-year', schoolId],
+        queryFn: async () => {
+            const res = await api.get(`/schools/academic-years?schoolId=${schoolId}`);
+            const years = Array.isArray(res.data) ? res.data : (res.data?.academicYears || []);
+            return years.find(y => y.isActive);
+        },
+        enabled: !!schoolId,
+        staleTime: 1000 * 60 * 5,
+    });
+
+    const { data: studentFeeData, isLoading: studentFeeLoading } = useQuery({
+        queryKey: ['transport-fee-ledger', studentId, academicYear?.id],
+        queryFn: async () => {
+            const res = await api.get(`/schools/fee/students/${studentId}?academicYearId=${academicYear.id}`);
+            return res.data;
+        },
+        enabled: !!studentId && !!academicYear?.id,
+        staleTime: 1000 * 60 * 2,
+    });
+
     const { data: paymentsData, isLoading: paymentsLoading } = useQuery({
         queryKey: ['transport-payments', schoolId, studentId],
         queryFn: async () => {
@@ -98,14 +119,54 @@ export default function TransportFeeScreen() {
         enabled: !!schoolId && !!studentId,
     });
 
-    const feeDetails = feeData?.fees?.[0];
-    const payments = paymentsData?.payments || [];
+    const transportLedger = useMemo(() => {
+        const entries = studentFeeData?.ledger || [];
+        return entries.filter((entry) => {
+            const component = entry.feeComponent || {};
+            const haystack = [
+                component.name,
+                component.category,
+                component.type,
+                entry.name,
+                entry.description,
+            ].filter(Boolean).join(' ').toLowerCase();
+            return haystack.includes('transport') || haystack.includes('bus');
+        });
+    }, [studentFeeData?.ledger]);
+
+    const ledgerTotal = transportLedger.reduce((sum, entry) => sum + (entry.netAmount || entry.amount || 0), 0);
+    const ledgerPaid = transportLedger.reduce((sum, entry) => sum + (entry.paidAmount || 0), 0);
+    const ledgerPending = transportLedger.reduce((sum, entry) => sum + (entry.balanceAmount || 0), 0);
+    const ledgerFeeDetails = transportLedger.length > 0 ? {
+        id: 'ledger-transport-fee',
+        name: 'Transport Fee',
+        amount: ledgerTotal,
+        frequency: 'MONTHLY',
+        feeType: 'Transport',
+        dueDate: transportLedger.find(entry => entry.balanceAmount > 0)?.dueDate || transportLedger[0]?.dueDate,
+        route: feeData?.assignment?.route || feeData?.route,
+    } : null;
+
+    const feeDetails = feeData?.fees?.[0] || ledgerFeeDetails;
+    const paymentsFromApi = paymentsData?.payments || [];
+    const ledgerPayments = transportLedger
+        .filter(entry => (entry.paidAmount || 0) > 0)
+        .map(entry => ({
+            id: `ledger-${entry.id}`,
+            amount: entry.paidAmount,
+            status: entry.status === 'LEDGER_PAID' ? 'PAID' : 'PENDING',
+            paymentDate: entry.paidAt || entry.updatedAt || entry.dueDate,
+        }));
+    const payments = paymentsFromApi.length > 0 ? paymentsFromApi : ledgerPayments;
     const totalPaid = payments.filter(p => p.status === 'PAID').reduce((sum, p) => sum + (p.amount || 0), 0);
-    const pendingAmount = Math.max(0, (feeDetails?.amount || 0) - totalPaid);
-    const isLoading = feeLoading || paymentsLoading;
+    const pendingAmount = transportLedger.length > 0
+        ? Math.max(0, ledgerPending)
+        : Math.max(0, (feeDetails?.amount || 0) - totalPaid);
+    const paidAmount = transportLedger.length > 0 ? ledgerPaid : totalPaid;
+    const isLoading = feeLoading || paymentsLoading || academicYearLoading || studentFeeLoading;
 
     const paidPct = feeDetails?.amount > 0
-        ? Math.min(100, Math.round((totalPaid / feeDetails.amount) * 100))
+        ? Math.min(100, Math.round((paidAmount / feeDetails.amount) * 100))
         : 0;
 
     const onRefresh = useCallback(async () => {
@@ -113,6 +174,7 @@ export default function TransportFeeScreen() {
         await Promise.all([
             queryClient.invalidateQueries(['transport-fee']),
             queryClient.invalidateQueries(['transport-payments']),
+            queryClient.invalidateQueries(['transport-fee-ledger']),
         ]);
         setRefreshing(false);
     }, [queryClient]);
@@ -227,7 +289,7 @@ export default function TransportFeeScreen() {
                         <View style={styles.heroStats}>
                             <View style={styles.heroStat}>
                                 <Text style={[styles.heroStatVal, { color: '#34D399' }]}>
-                                    ₹{totalPaid.toLocaleString()}
+                                    ₹{paidAmount.toLocaleString()}
                                 </Text>
                                 <Text style={styles.heroStatLabel}>Paid</Text>
                             </View>

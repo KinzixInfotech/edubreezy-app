@@ -95,9 +95,7 @@ export default function TeacherClassAttendance() {
     const [showStudentModal, setShowStudentModal] = useState(false);
     const [currentMonth, setCurrentMonth] = useState(() => {
         const now = new Date();
-        const offset = 5.5 * 60 * 60 * 1000;
-        const ist = new Date(now.getTime() + offset);
-        return new Date(ist.getFullYear(), ist.getMonth(), 1);
+        return new Date(now.getFullYear(), now.getMonth(), 1);
     });
 
     const { data: userData } = useQuery({

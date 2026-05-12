@@ -6,6 +6,7 @@ import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCurrentSchool, getProfilesForSchool } from '../lib/profileManager';
 import { refreshSessionIfNeeded, tryRestoreSession } from '../lib/tokenManager';
+import { getLoggedOutRedirectTarget } from '../lib/authRedirect';
 
 const ONBOARDING_STORAGE_KEY = 'hasSeenOnboarding';
 
@@ -73,6 +74,13 @@ export default function Index() {
                 // No valid user data - check for saved school data
                 console.log('❌ No valid user data/session in SecureStore');
                 const hasSeenOnboarding = await AsyncStorage.getItem(ONBOARDING_STORAGE_KEY);
+                const loggedOutRedirectTarget = await getLoggedOutRedirectTarget();
+
+                if (loggedOutRedirectTarget !== '/(auth)/schoolcode') {
+                    setRedirectTo(loggedOutRedirectTarget);
+                    setIsLoading(false);
+                    return;
+                }
 
                 if (currentSchool?.schoolCode && currentSchool?.schoolData) {
                     console.log('📚 Found saved school data, going to profile-selector');
@@ -110,8 +118,7 @@ export default function Index() {
             } else if (event === 'SIGNED_OUT') {
                 const userData = await SecureStore.getItemAsync('user');
                 if (userData) {
-                    const currentSchool = await getCurrentSchool();
-                    setRedirectTo(currentSchool?.schoolCode ? 'profile-selector' : 'schoolcode');
+                    setRedirectTo(await getLoggedOutRedirectTarget());
                 }
             }
         });
@@ -129,6 +136,10 @@ export default function Index() {
 
     if (redirectTo === 'greeting') {
         return <Redirect href="/(screens)/greeting" />;
+    }
+
+    if (redirectTo && typeof redirectTo !== 'string') {
+        return <Redirect href={redirectTo} />;
     }
 
     if (redirectTo === 'profile-selector') {

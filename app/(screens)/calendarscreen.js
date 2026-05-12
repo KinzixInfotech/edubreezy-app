@@ -10,7 +10,8 @@ import {
     Platform,
     Modal,
     Linking,
-    ActivityIndicator
+    ActivityIndicator,
+    Alert
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { useLocalSearchParams, router } from 'expo-router';
@@ -35,7 +36,7 @@ import HapticTouchable from '../components/HapticTouch';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const CALENDAR_WIDTH = SCREEN_WIDTH - 64;
+const CALENDAR_WIDTH = SCREEN_WIDTH - 96;
 const DAY_WIDTH = CALENDAR_WIDTH / 7;
 
 const eventTypeColors = {

@@ -60,7 +60,7 @@ function TabsLayout() {
   if (!isAuthChecked) return null;
 
   if (!user) {
-    return <Redirect href="/" />;
+    return <Redirect href="/(auth)/schoolcode" />;
   }
 
   if (!role) return null;

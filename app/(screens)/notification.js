@@ -612,15 +612,27 @@ export default function NotificationScreen() {
     }, [filteredUnreadIds, flushPendingReads, markAllReadMutation, markNotificationsReadOptimistically]);
 
     const deleteAllMutation = useMutation({
-        mutationFn: () => api.delete('/notifications', {
+        mutationFn: ({ ids }) => api.delete('/notifications', {
             data: {
                 userId,
                 schoolId,
                 clearAll: true,
+                notificationIds: ids,
             },
         }),
-        onError: (error) => {
+        onError: async (error, variables) => {
             console.error('Failed to delete notifications:', error?.response?.data || error?.message || error);
+            if (variables?.previousDeletedIds) {
+                deletedNotificationIdsRef.current = variables.previousDeletedIds;
+                setDeletedNotificationVersion((value) => value + 1);
+                await persistDeletedNotificationIds(variables.previousDeletedIds);
+            }
+            if (variables?.previousFeedData) {
+                queryClient.setQueryData(notificationsQueryKey, variables.previousFeedData);
+            }
+            if (variables?.previousSummaryData) {
+                queryClient.setQueryData(notificationsSummaryQueryKey, variables.previousSummaryData);
+            }
             Alert.alert('Delete failed', 'Could not clear notifications right now. Please try again.');
         },
         onSettled: () => {
@@ -641,6 +653,9 @@ export default function NotificationScreen() {
                     style: 'destructive',
                     onPress: () => {
                         flushPendingReads();
+                        const previousDeletedIds = new Set(deletedNotificationIdsRef.current);
+                        const previousFeedData = queryClient.getQueryData(notificationsQueryKey);
+                        const previousSummaryData = queryClient.getQueryData(notificationsSummaryQueryKey);
                         const updatedDeletedIds = new Set(deletedNotificationIdsRef.current);
                         visibleNotificationIds.forEach((id) => updatedDeletedIds.add(id));
                         deletedNotificationIdsRef.current = updatedDeletedIds;
@@ -648,7 +663,12 @@ export default function NotificationScreen() {
                         persistDeletedNotificationIds(updatedDeletedIds);
                         setNotificationsCache((old) => removePagedNotifications(old, visibleNotificationIds));
                         queryClient.setQueryData(notificationsSummaryQueryKey, (old) => removeSummaryNotifications(old, visibleNotificationIds));
-                        deleteAllMutation.mutate();
+                        deleteAllMutation.mutate({
+                            ids: visibleNotificationIds,
+                            previousDeletedIds,
+                            previousFeedData,
+                            previousSummaryData,
+                        });
                     },
                 },
             ]
@@ -656,6 +676,7 @@ export default function NotificationScreen() {
     }, [
         deleteAllMutation,
         flushPendingReads,
+        notificationsQueryKey,
         notificationsSummaryQueryKey,
         persistDeletedNotificationIds,
         queryClient,

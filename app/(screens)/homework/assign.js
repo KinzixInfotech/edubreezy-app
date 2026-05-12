@@ -47,7 +47,10 @@ import { pickAndUploadImage, pickAndUploadDocument } from '../../../lib/uploadth
 import { StatusBar } from 'expo-status-bar';
 
 
-const TABS = ['Assign', 'My Homework'];
+const TABS = [
+    { label: 'Assign', icon: Send },
+    { label: 'My Homework', icon: BookOpen },
+];
 
 export default function AssignHomeworkScreen() {
     const queryClient = useQueryClient();
@@ -444,15 +447,20 @@ export default function AssignHomeworkScreen() {
 
             {/* Tabs */}
             <View style={styles.tabContainer}>
-                {TABS.map((tab, index) => (
-                    <HapticTouchable key={tab} onPress={() => setActiveTab(index)} style={{ flex: 1 }}>
-                        <View style={[styles.tab, activeTab === index && styles.tabActive]}>
-                            <Text style={[styles.tabText, activeTab === index && styles.tabTextActive]}>
-                                {tab}
-                            </Text>
-                        </View>
-                    </HapticTouchable>
-                ))}
+                {TABS.map((tab, index) => {
+                    const TabIcon = tab.icon;
+                    const isActive = activeTab === index;
+                    return (
+                        <HapticTouchable key={tab.label} onPress={() => setActiveTab(index)} style={{ flex: 1 }}>
+                            <View style={[styles.tab, isActive && styles.tabActive]}>
+                                <TabIcon size={18} color={isActive ? '#fff' : '#64748B'} />
+                                <Text style={[styles.tabText, isActive && styles.tabTextActive]}>
+                                    {tab.label}
+                                </Text>
+                            </View>
+                        </HapticTouchable>
+                    );
+                })}
             </View>
 
             {activeTab === 0 ? (
@@ -845,7 +853,7 @@ const styles = StyleSheet.create({
 
     // Tabs
     tabContainer: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 12, gap: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
-    tab: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 10, backgroundColor: '#f5f5f5' },
+    tab: { flex: 1, paddingVertical: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, borderRadius: 10, backgroundColor: '#f5f5f5' },
     tabActive: { backgroundColor: '#0469ff' },
     tabText: { fontSize: 15, fontWeight: '600', color: '#666' },
     tabTextActive: { color: '#fff' },

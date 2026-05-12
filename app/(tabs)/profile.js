@@ -1445,7 +1445,7 @@ export default function ProfileScreen() {
                         link.student.user.profilePicture !== '' ? (
                         <Image
                           source={{ uri: link.student.user.profilePicture }}
-                          style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#eee' }}
+                          style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#eee', borderWidth: 1, }}
                         />
                       ) : (
                         <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#E3F2FD', alignItems: 'center', justifyContent: 'center' }}>

@@ -54,14 +54,16 @@ const NoInternetScreen = ({ onRetry }) => {
     }, []);
 
     const handleRetry = () => {
-        // Spin animation on retry
+        // Call onRetry immediately — don't wait for animation
+        if (onRetry) onRetry();
+
+        // Play spin animation concurrently for visual feedback
         Animated.timing(rotateAnim, {
             toValue: 1,
             duration: 500,
             useNativeDriver: true,
         }).start(() => {
             rotateAnim.setValue(0);
-            if (onRetry) onRetry();
         });
     };
 
@@ -72,7 +74,7 @@ const NoInternetScreen = ({ onRetry }) => {
 
     return (
         <LinearGradient
-            colors={['#1a1a2e', '#16213e', '#0f3460']}
+            colors={['#F8FBFF', '#EEF5FF', '#FFFFFF']}
             style={styles.container}
         >
             {/* Decorative Background Elements */}
@@ -84,7 +86,7 @@ const NoInternetScreen = ({ onRetry }) => {
                         { top: '15%', left: '10%', transform: [{ translateY: floatAnim }] }
                     ]}
                 >
-                    <Cloud size={40} color="rgba(255,255,255,0.1)" />
+                    <Cloud size={40} color="rgba(4,105,255,0.12)" />
                 </Animated.View>
 
                 {/* Animated Cloud 2 */}
@@ -94,7 +96,7 @@ const NoInternetScreen = ({ onRetry }) => {
                         { top: '25%', right: '15%', transform: [{ translateY: Animated.multiply(floatAnim, -1) }] }
                     ]}
                 >
-                    <CloudOff size={30} color="rgba(255,255,255,0.08)" />
+                    <CloudOff size={30} color="rgba(239,68,68,0.12)" />
                 </Animated.View>
 
                 {/* Animated Cloud 3 */}
@@ -104,7 +106,7 @@ const NoInternetScreen = ({ onRetry }) => {
                         { bottom: '30%', left: '20%', transform: [{ translateY: floatAnim }] }
                     ]}
                 >
-                    <Cloud size={50} color="rgba(255,255,255,0.05)" />
+                    <Cloud size={50} color="rgba(4,105,255,0.08)" />
                 </Animated.View>
 
                 {/* Decorative circles */}
@@ -174,12 +176,11 @@ const NoInternetScreen = ({ onRetry }) => {
                     </LinearGradient>
                 </TouchableOpacity>
 
-                {/* Tips Section */}
                 <View style={styles.tipsContainer}>
-                    <Text style={styles.tipsTitle}>💡 Quick Tips</Text>
-                    <Text style={styles.tipItem}>• Check if WiFi or Mobile Data is enabled</Text>
-                    <Text style={styles.tipItem}>• Try moving closer to your router</Text>
-                    <Text style={styles.tipItem}>• Restart your device if the issue persists</Text>
+                    <Text style={styles.tipsTitle}>Quick Tips</Text>
+                    <Text style={styles.tipItem}>Check if WiFi or Mobile Data is enabled</Text>
+                    <Text style={styles.tipItem}>Try moving closer to your router</Text>
+                    <Text style={styles.tipItem}>Restart your device if the issue persists</Text>
                 </View>
             </View>
 
@@ -210,9 +211,9 @@ const styles = StyleSheet.create({
     decorCircle: {
         position: 'absolute',
         borderRadius: 999,
-        backgroundColor: 'rgba(255,255,255,0.03)',
+        backgroundColor: 'rgba(4,105,255,0.05)',
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.05)',
+        borderColor: 'rgba(4,105,255,0.08)',
     },
     content: {
         alignItems: 'center',
@@ -231,7 +232,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         shadowColor: '#ff6b6b',
         shadowOffset: { width: 0, height: 10 },
-        shadowOpacity: 0.4,
+        shadowOpacity: 0.22,
         shadowRadius: 20,
         elevation: 20,
     },
@@ -262,14 +263,14 @@ const styles = StyleSheet.create({
     title: {
         fontSize: 28,
         fontWeight: '800',
-        color: '#fff',
+        color: '#0F172A',
         marginBottom: 12,
         textAlign: 'center',
-        letterSpacing: 0.5,
+        letterSpacing: 0,
     },
     subtitle: {
         fontSize: 16,
-        color: 'rgba(255,255,255,0.7)',
+        color: '#64748B',
         textAlign: 'center',
         lineHeight: 24,
     },
@@ -282,10 +283,12 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 8,
-        backgroundColor: 'rgba(255,255,255,0.08)',
+        backgroundColor: '#FFFFFF',
         paddingHorizontal: 16,
         paddingVertical: 10,
         borderRadius: 20,
+        borderWidth: 1,
+        borderColor: '#E2E8F0',
     },
     statusDot: {
         width: 8,
@@ -300,7 +303,7 @@ const styles = StyleSheet.create({
     },
     statusText: {
         fontSize: 13,
-        color: 'rgba(255,255,255,0.8)',
+        color: '#334155',
         fontWeight: '500',
     },
     retryButtonWrapper: {
@@ -326,22 +329,27 @@ const styles = StyleSheet.create({
         color: '#fff',
     },
     tipsContainer: {
-        backgroundColor: 'rgba(255,255,255,0.08)',
+        backgroundColor: '#FFFFFF',
         borderRadius: 16,
         padding: 20,
         width: SCREEN_WIDTH - 64,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
+        borderColor: '#E2E8F0',
+        shadowColor: '#0F172A',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.06,
+        shadowRadius: 18,
+        elevation: 4,
     },
     tipsTitle: {
         fontSize: 15,
         fontWeight: '700',
-        color: '#fff',
+        color: '#0F172A',
         marginBottom: 12,
     },
     tipItem: {
         fontSize: 13,
-        color: 'rgba(255,255,255,0.6)',
+        color: '#64748B',
         marginBottom: 6,
         lineHeight: 20,
     },

@@ -56,6 +56,63 @@ export default function ProfileSelectorScreen() {
     const [loading, setLoading] = useState(true);
     const [selectingProfile, setSelectingProfile] = useState(null);
 
+    // Map stored profile roles to login screen role keys
+    const ROLE_TO_LOGIN_KEY = {
+        PARENT: 'parent',
+        STUDENT: 'student',
+        TEACHING_STAFF: 'teacher',
+        DRIVER: 'driver',
+        CONDUCTOR: 'conductor',
+        ACCOUNTANT: 'accountant',
+        DIRECTOR: 'director',
+        PRINCIPAL: 'principal',
+    };
+
+    /**
+     * Build reliable login redirect params with fallback school config sources.
+     * Ensures school context is never lost when redirecting to login.
+     */
+    const buildLoginRedirectParams = async (profile, prefillEmail) => {
+        const params = {};
+
+        // 1. Try current schoolData state
+        let effectiveSchoolData = schoolData;
+
+        // 2. Fallback: reconstruct from profile's stored userData.school
+        if (!effectiveSchoolData && profile?.userData?.school) {
+            effectiveSchoolData = { school: profile.userData.school };
+            console.log('📚 Using school data from profile userData as fallback');
+        }
+
+        // 3. Fallback: re-read from SecureStore
+        if (!effectiveSchoolData) {
+            try {
+                const savedSchool = await getCurrentSchool();
+                if (savedSchool?.schoolData) {
+                    effectiveSchoolData = savedSchool.schoolData;
+                    console.log('📚 Using school data from SecureStore as fallback');
+                }
+            } catch (e) {
+                console.warn('Could not read saved school:', e);
+            }
+        }
+
+        // Only pass schoolConfig if we have valid data
+        if (effectiveSchoolData) {
+            params.schoolConfig = JSON.stringify(effectiveSchoolData);
+        }
+
+        if (prefillEmail) {
+            params.prefillEmail = prefillEmail;
+        }
+
+        // Map profile role to login role key
+        const loginRole = ROLE_TO_LOGIN_KEY[profile?.role] || 'parent';
+        params.selectedRole = loginRole;
+
+        return params;
+    };
+
     // Keep token synced with Supabase session
     useEffect(() => {
         const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -202,12 +259,10 @@ export default function ProfileSelectorScreen() {
             if (!result.success) {
                 console.log('➡️ Session restore failed, redirecting to login');
                 console.log('   Reason: needsLogin =', result.needsLogin, 'hasRefreshToken =', hasRefreshToken);
+                const loginParams = await buildLoginRedirectParams(profile, result.email || profile.email);
                 router.replace({
                     pathname: '/(auth)/login',
-                    params: {
-                        schoolConfig: JSON.stringify(schoolData),
-                        prefillEmail: result.email || profile.email
-                    },
+                    params: loginParams,
                 });
                 return;
             }
@@ -245,6 +300,7 @@ export default function ProfileSelectorScreen() {
             router.replace('/(tabs)/home');
         } catch (error) {
             console.error('Error selecting profile:', error);
+            const fallbackParams = await buildLoginRedirectParams(profile, profile.email);
             Alert.alert(
                 'Session Expired',
                 'Please log in again to continue.',
@@ -253,10 +309,7 @@ export default function ProfileSelectorScreen() {
                         text: 'Login',
                         onPress: () => router.replace({
                             pathname: '/(auth)/login',
-                            params: {
-                                schoolConfig: JSON.stringify(schoolData),
-                                prefillEmail: profile.email
-                            },
+                            params: fallbackParams,
                         })
                     }
                 ]

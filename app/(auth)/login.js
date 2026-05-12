@@ -238,17 +238,31 @@ export default function LoginScreen() {
     useEffect(() => {
         const resolve = async () => {
             try {
-                if (typeof schoolConfigParam === 'string' && schoolConfigParam) {
-                    const config = JSON.parse(schoolConfigParam);
-                    setResolvedSchoolConfigParam(schoolConfigParam);
-                    setSchoolConfig(config.school || config);
-                    return;
+                // Try to parse the param if it's a non-empty, non-"null" string
+                if (typeof schoolConfigParam === 'string' && schoolConfigParam && schoolConfigParam !== 'null') {
+                    try {
+                        const config = JSON.parse(schoolConfigParam);
+                        // Validate that parsed config actually has school data
+                        const school = config?.school || config;
+                        if (school && school.id) {
+                            setResolvedSchoolConfigParam(schoolConfigParam);
+                            setSchoolConfig(school);
+                            return;
+                        }
+                        console.warn('Parsed schoolConfig has no valid school id, trying fallback...');
+                    } catch (parseErr) {
+                        console.warn('Failed to parse schoolConfigParam, trying fallback...', parseErr);
+                    }
                 }
+                // Fallback: read from SecureStore
                 const saved = await getCurrentSchool();
                 if (saved?.schoolData) {
-                    setResolvedSchoolConfigParam(JSON.stringify(saved.schoolData));
-                    setSchoolConfig(saved.schoolData.school || saved.schoolData);
-                    return;
+                    const school = saved.schoolData.school || saved.schoolData;
+                    if (school && school.id) {
+                        setResolvedSchoolConfigParam(JSON.stringify(saved.schoolData));
+                        setSchoolConfig(school);
+                        return;
+                    }
                 }
                 setResolvedSchoolConfigParam(null);
                 setSchoolConfig(null);

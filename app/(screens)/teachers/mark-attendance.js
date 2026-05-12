@@ -27,6 +27,7 @@ import {
   ArrowLeft
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '../../../lib/api';
 import HapticTouchable from '../../components/HapticTouch';
 import { StatusBar } from 'expo-status-bar';
@@ -45,6 +46,12 @@ const buildAttendanceLookup = (records = []) => {
     return acc;
   }, {});
 };
+
+const getAttendanceDraftKey = (schoolId, teacherId, classId, sectionId, date) => (
+  schoolId && teacherId && classId && date
+    ? `teacher_attendance_draft:${schoolId}:${teacherId}:${classId}:${sectionId || 'all'}:${date}`
+    : null
+);
 
 const updateBulkAttendanceCache = (old, attendanceByUserId, markedBy) => {
   if (!old?.students) return old;
@@ -75,6 +82,8 @@ export default function BulkAttendanceMarking() {
   const [attendance, setAttendance] = useState({});
   const [refreshing, setRefreshing] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+  const [draftHydrated, setDraftHydrated] = useState(false);
+  const [hydratedDraftKey, setHydratedDraftKey] = useState(null);
 
   // Load user data with TanStack Query
   const { data: userData } = useQuery({
@@ -169,6 +178,7 @@ export default function BulkAttendanceMarking() {
   // Extract classId and sectionId from teacher data
   const classId = teacherData?.classId;
   const sectionId = teacherData?.sectionId;
+  const draftKey = getAttendanceDraftKey(schoolId, userId, classId, sectionId, selectedDate);
 
   // Fetch students for bulk marking
   const { data: studentsData, isLoading: studentsLoading } = useQuery({
@@ -200,17 +210,88 @@ export default function BulkAttendanceMarking() {
 
   // Initialize attendance from existing data
   useEffect(() => {
-    if (students.length > 0) {
+    let cancelled = false;
+
+    const initializeAttendance = async () => {
+      setDraftHydrated(false);
+      setHydratedDraftKey(null);
       const initialAttendance = {};
       students.forEach(student => {
-        if (student.attendance) {
+        if (student.attendance?.status) {
           initialAttendance[student.userId] = student.attendance.status;
         }
       });
+
+      if (!draftKey) {
+        if (!cancelled) {
+          setAttendance(initialAttendance);
+          setHasChanges(false);
+          setDraftHydrated(true);
+          setHydratedDraftKey(draftKey);
+        }
+        return;
+      }
+
+      try {
+        const rawDraft = await AsyncStorage.getItem(draftKey);
+        if (cancelled) return;
+
+        if (rawDraft) {
+          const parsed = JSON.parse(rawDraft);
+          const validStudentIds = new Set(students.map((student) => String(student.userId)));
+          const draftAttendance = Object.entries(parsed.attendance || {}).reduce((acc, [studentId, status]) => {
+            if (validStudentIds.has(String(studentId)) && ['PRESENT', 'ABSENT', 'LATE'].includes(status)) {
+              acc[studentId] = status;
+            }
+            return acc;
+          }, {});
+
+          if (Object.keys(draftAttendance).length > 0) {
+            setAttendance({ ...initialAttendance, ...draftAttendance });
+            setHasChanges(true);
+            setDraftHydrated(true);
+            setHydratedDraftKey(draftKey);
+            return;
+          }
+        }
+      } catch (error) {
+        console.warn('Failed to load attendance draft:', error?.message || error);
+      }
+
       setAttendance(initialAttendance);
       setHasChanges(false);
-    }
-  }, [students]);
+      setDraftHydrated(true);
+      setHydratedDraftKey(draftKey);
+    };
+
+    initializeAttendance();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [students, draftKey]);
+
+  useEffect(() => {
+    if (!draftKey || !draftHydrated || hydratedDraftKey !== draftKey) return;
+
+    const persistDraft = async () => {
+      try {
+        if (!hasChanges || Object.keys(attendance).length === 0) {
+          await AsyncStorage.removeItem(draftKey);
+          return;
+        }
+
+        await AsyncStorage.setItem(draftKey, JSON.stringify({
+          attendance,
+          savedAt: new Date().toISOString(),
+        }));
+      } catch (error) {
+        console.warn('Failed to save attendance draft:', error?.message || error);
+      }
+    };
+
+    persistDraft();
+  }, [attendance, draftHydrated, draftKey, hasChanges, hydratedDraftKey]);
 
   // Submit bulk attendance - UPDATED WITH ERROR HANDLING
   const submitMutation = useMutation({
@@ -314,6 +395,7 @@ export default function BulkAttendanceMarking() {
         }
 
         setHasChanges(false);
+        if (draftKey) AsyncStorage.removeItem(draftKey).catch(() => null);
         const successCount = data.results?.success?.length || 0;
         const msg = successCount > 0
           ? `Successfully marked attendance for ${successCount} student(s)!`
@@ -371,7 +453,7 @@ export default function BulkAttendanceMarking() {
         {
           text: 'Confirm',
           onPress: () => {
-            const newAttendance = {};
+            const newAttendance = { ...attendance };
             filteredStudents.forEach(student => {
               newAttendance[student.userId] = status;
             });
@@ -418,9 +500,9 @@ export default function BulkAttendanceMarking() {
   };
 
   const filteredStudents = students.filter(student =>
-    student.name.toLowerCase().includes(search.toLowerCase()) ||
-    student.admissionNo.toLowerCase().includes(search.toLowerCase()) ||
-    student.rollNumber?.toLowerCase().includes(search.toLowerCase())
+    (student.name || '').toLowerCase().includes(search.toLowerCase()) ||
+    (student.admissionNo || '').toLowerCase().includes(search.toLowerCase()) ||
+    String(student.rollNumber || '').toLowerCase().includes(search.toLowerCase())
   ).sort((a, b) => {
     const rollA = parseInt(a.rollNumber) || Infinity; // Put those without roll number at end
     const rollB = parseInt(b.rollNumber) || Infinity;

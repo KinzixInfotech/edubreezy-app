@@ -29,7 +29,8 @@ import {
     Pencil,
     ImageIcon,
     Search,
-    UserPlus
+    UserPlus,
+    Phone
 } from 'lucide-react-native';
 import { Image } from 'expo-image';
 import * as SecureStore from 'expo-secure-store';
@@ -3997,6 +3998,15 @@ const TeacherView = memo(({ schoolId, userId, teacher, refreshing, onRefresh, up
                     color: '#10b981',
                     bgColor: '#dcfce7',
                     href: '/teachers/create-student',
+                    params: { teacherData: JSON.stringify(teacher) },
+                },
+                {
+                    icon: Phone,
+                    label: 'Parent Details',
+                    color: '#0EA5E9',
+                    bgColor: '#E0F2FE',
+                    href: '/teachers/parent-details',
+                    params: { teacherData: JSON.stringify(teacher) },
                 },
                 {
                     icon: Book,

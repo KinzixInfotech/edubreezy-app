@@ -12,7 +12,7 @@ import {
     KeyboardAvoidingView,
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { ArrowLeft, Upload, CheckCircle2, User, Camera, Mail, Phone, MapPin, X, Calendar as CalendarIcon, Save, Search } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
@@ -52,6 +52,7 @@ const INITIAL_FORM = {
 
 export default function CreateStudentScreen() {
     const queryClient = useQueryClient();
+    const params = useLocalSearchParams();
 
     const [formData, setFormData] = useState(INITIAL_FORM);
     const [isUploading, setIsUploading] = useState(false);
@@ -123,6 +124,17 @@ export default function CreateStudentScreen() {
     });
     const schoolId = userData?.schoolId;
     const userId = userData?.id;
+    const parsedTeacherData = React.useMemo(() => {
+        if (!params?.teacherData) return null;
+        try {
+            const data = JSON.parse(params.teacherData);
+            if (data?.sectionsAssigned?.length > 0) return data.sectionsAssigned[0];
+            if (data?.teacher?.length > 0) return data.teacher[0];
+            return data;
+        } catch {
+            return null;
+        }
+    }, [params?.teacherData]);
 
     const { data: teacherData, isLoading: teacherLoading } = useQuery({
         queryKey: ['teacher-data', schoolId, userId],
@@ -133,6 +145,7 @@ export default function CreateStudentScreen() {
             return Array.isArray(teachers) ? teachers[0] : teachers;
         },
         enabled: !!schoolId && !!userId,
+        initialData: parsedTeacherData,
     });
 
     const classId = teacherData?.classId;
@@ -140,7 +153,7 @@ export default function CreateStudentScreen() {
 
     const searchParentMutation = useMutation({
         mutationFn: async (query) => {
-            const res = await api.get(`/schools/${schoolId}/parents/search?q=${query}`);
+            const res = await api.get(`/schools/${schoolId}/parents/search?q=${encodeURIComponent(query.trim())}`);
             return res.data?.parents || [];
         },
         onSuccess: (data) => setSearchResults(data),
@@ -168,6 +181,7 @@ export default function CreateStudentScreen() {
                 { text: "OK", onPress: () => router.back() }
             ]);
             queryClient.invalidateQueries({ queryKey: ['teacher:students'] });
+            queryClient.invalidateQueries({ queryKey: ['teacher-parent-details'] });
             queryClient.invalidateQueries({ queryKey: ['students'] });
         },
         onError: (error) => {
@@ -201,6 +215,7 @@ export default function CreateStudentScreen() {
 
     const validateForm = () => {
         if (!formData.studentName.trim()) return "Student name is required";
+        if (!classId) return "Your teacher profile is not assigned to a class";
         if (formData.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email.trim())) return "Enter a valid student email or leave it blank";
         if (!formData.password.trim() || formData.password.length < 6) return "Password must be at least 6 characters";
         if (!formData.admissionNo.trim()) return "Admission number is required";

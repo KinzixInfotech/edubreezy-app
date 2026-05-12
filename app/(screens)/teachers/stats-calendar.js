@@ -81,9 +81,7 @@ export default function TeacherAttendanceView() {
     const [graphPeriod, setGraphPeriod] = useState('30d');
     const [currentMonth, setCurrentMonth] = useState(() => {
         const now = new Date();
-        const offset = 5.5 * 60 * 60 * 1000;
-        const ist = new Date(now.getTime() + offset);
-        return new Date(ist.getFullYear(), ist.getMonth(), 1);
+        return new Date(now.getFullYear(), now.getMonth(), 1);
     });
 
     // Modal States

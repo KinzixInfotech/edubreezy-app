@@ -342,7 +342,7 @@ export default function ParentAttendanceView() {
                 <View style={styles.headerCenter}>
                     <Text style={styles.headerTitle}>Attendance</Text>
                     <Text style={styles.headerSubtitle}>
-                        {childData.name} · {childData.class?.className}
+                        {childData.name}
                     </Text>
                 </View>
                 <View style={{ width: 40 }} />

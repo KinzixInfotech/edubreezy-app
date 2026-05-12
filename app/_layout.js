@@ -84,8 +84,8 @@ messaging().setBackgroundMessageHandler(async remoteMessage => {
 
 function RootLayoutContent() {
     const appState = useRef(AppState.currentState);
-    const [isAppActive, setIsAppActive] = useState(true);
-    const isAppActiveRef = useRef(isAppActive);
+    const [isAppActive, setIsAppActive] = useState(AppState.currentState === 'active');
+    const isAppActiveRef = useRef(AppState.currentState === 'active');
 
     // Video splash state
     const [showVideoSplash, setShowVideoSplash] = useState(true);
@@ -93,6 +93,7 @@ function RootLayoutContent() {
     // Network connectivity state
     const [isConnected, setIsConnected] = useState(true);
     const [isUserLoggedIn, setIsUserLoggedIn] = useState(false);
+    const offlineTimerRef = useRef(null);
 
     // Update & maintenance state
     const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
@@ -653,56 +654,105 @@ function RootLayoutContent() {
 
         checkUserLogin();
 
-        // Subscribe to network state changes
+        // Helper: determine connectivity — treat null isInternetReachable as connected
+        // (null means 'still determining', common during app resume transitions)
+        const isOnline = (state) => {
+            if (!state.isConnected) return false;
+            // null = still determining → assume online; false = confirmed offline
+            if (state.isInternetReachable === false) return false;
+            return true;
+        };
+
+        // Subscribe to network state changes with debounce for offline
         const unsubscribe = NetInfo.addEventListener(state => {
-            const connected = state.isConnected && state.isInternetReachable !== false;
-            console.log('🌐 Network state changed:', connected ? 'Online' : 'Offline');
-
-            if (connected && wasOfflineRef.current) {
-                syncAttendanceQueue().catch(error => {
-                    console.error('Attendance queue sync failed:', error);
-                });
+            // Ignore network events when app is not active (e.g. during minimize)
+            if (!isAppActiveRef.current) {
+                return;
             }
 
-            if (!connected) {
-                wasOfflineRef.current = true;
+            const connected = isOnline(state);
+
+            if (connected) {
+                // Going online: apply immediately, cancel any pending offline timer
+                if (offlineTimerRef.current) {
+                    clearTimeout(offlineTimerRef.current);
+                    offlineTimerRef.current = null;
+                }
+                if (wasOfflineRef.current) {
+                    syncAttendanceQueue().catch(error => {
+                        console.error('Attendance queue sync failed:', error);
+                    });
+                    wasOfflineRef.current = false;
+                }
+                setIsConnected(true);
             } else {
-                wasOfflineRef.current = false;
+                // Going offline: debounce by 2s to avoid false positives during
+                // app state transitions (minimize/resume flicker)
+                if (!offlineTimerRef.current) {
+                    offlineTimerRef.current = setTimeout(() => {
+                        offlineTimerRef.current = null;
+                        wasOfflineRef.current = true;
+                        setIsConnected(false);
+                        console.log('🌐 Confirmed offline after debounce');
+                    }, 2000);
+                }
             }
-
-            setIsConnected(connected);
         });
 
-        // Also check user login when app becomes active
+        // Re-check on app resume
         const appStateSubscription = AppState.addEventListener('change', async (nextState) => {
             if (nextState === 'active') {
                 await checkUserLogin();
+                // Wait a beat for NetInfo to settle after app resume
+                setTimeout(async () => {
+                    const state = await NetInfo.fetch();
+                    const connected = isOnline(state);
+                    if (connected && offlineTimerRef.current) {
+                        clearTimeout(offlineTimerRef.current);
+                        offlineTimerRef.current = null;
+                    }
+                    setIsConnected(connected);
+                }, 500);
             }
         });
 
         return () => {
             unsubscribe();
             appStateSubscription.remove();
+            if (offlineTimerRef.current) {
+                clearTimeout(offlineTimerRef.current);
+            }
         };
     }, []);
 
     // Handle retry button press
     const handleRetry = useCallback(async () => {
+        // Cancel any pending offline debounce
+        if (offlineTimerRef.current) {
+            clearTimeout(offlineTimerRef.current);
+            offlineTimerRef.current = null;
+        }
+        // Give a brief moment for network to stabilize after user action
+        await new Promise(resolve => setTimeout(resolve, 300));
         const state = await NetInfo.fetch();
+        // On retry, treat null isInternetReachable as online (give benefit of the doubt)
         const connected = state.isConnected && state.isInternetReachable !== false;
         setIsConnected(connected);
+        if (connected) {
+            wasOfflineRef.current = false;
+        }
     }, []);
 
     if (!fontsLoaded) return null;
 
     // Determine if we should show NoInternet screen
     // Conditions: User logged in + Offline + Not on excluded routes
-    const shouldShowNoInternet = !isConnected && isUserLoggedIn && !isExcludedRoute;
+    const shouldShowNoInternet = isAppActive && !isConnected && isUserLoggedIn && !isExcludedRoute;
 
     if (shouldShowNoInternet) {
         return (
             <View style={{ flex: 1 }}>
-                <StatusBar style='light' />
+                <StatusBar style='dark' />
                 <NoInternetScreen onRetry={handleRetry} />
             </View>
         );

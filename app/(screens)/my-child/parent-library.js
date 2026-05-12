@@ -1,5 +1,5 @@
 // app/(screens)/my-child/parent-library.js
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
     View,
     Text,
@@ -11,17 +11,25 @@ import {
     Modal,
     Dimensions,
     Alert,
+    StyleSheet as RNStyleSheet,
 } from 'react-native';
 import { Image } from 'expo-image';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
-import Animated, { FadeInDown, FadeInRight, FadeIn } from 'react-native-reanimated';
+import Animated, {
+    FadeInDown,
+    FadeInRight,
+    FadeIn,
+    FadeOut,
+    SlideInDown,
+    SlideOutDown,
+    Easing,
+} from 'react-native-reanimated';
 import {
     BookOpen,
     ArrowLeft,
     AlertCircle,
     Clock,
-    User,
     AlertTriangle,
     CheckCircle2,
     Calendar,
@@ -35,6 +43,7 @@ import {
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as Haptics from 'expo-haptics';
+import { BlurView } from 'expo-blur';
 import HapticTouchable from '../../components/HapticTouch';
 import api from '../../../lib/api';
 import { StatusBar } from 'expo-status-bar';
@@ -49,19 +58,256 @@ const TABS = [
     { id: 'history', label: 'History', icon: CheckCircle2 },
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Pure helper functions (stable references, never recreated)
+// ─────────────────────────────────────────────────────────────────────────────
+const formatDate = (dateStr) => {
+    if (!dateStr) return '';
+    return new Date(dateStr).toLocaleDateString('en-US', {
+        month: 'short', day: 'numeric', year: 'numeric',
+    });
+};
+
+const getDaysUntilDue = (dueDate) => {
+    const days = Math.ceil((new Date(dueDate) - new Date()) / (1000 * 60 * 60 * 24));
+    if (days < 0) return `${Math.abs(days)}d overdue`;
+    if (days === 0) return 'Due today';
+    if (days === 1) return 'Due tomorrow';
+    return `${days} days left`;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EmptyState — module-level so it's never recreated
+// ─────────────────────────────────────────────────────────────────────────────
+const EmptyState = React.memo(({ icon: Icon, title, subtitle }) => (
+    <Animated.View entering={FadeInDown.delay(100).duration(400)} style={styles.emptyState}>
+        <View style={styles.emptyIconBg}>
+            <Icon size={32} color="#ccc" />
+        </View>
+        <Text style={styles.emptyTitle}>{title}</Text>
+        <Text style={styles.emptySubtitle}>{subtitle}</Text>
+    </Animated.View>
+));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CatalogBookCard — module-level + React.memo so it never re-mounts when the
+// parent re-renders (e.g. modal open/close). The "entering" animation fires
+// only on the very first mount thanks to this.
+// ─────────────────────────────────────────────────────────────────────────────
+const CatalogBookCard = React.memo(({ book, index, onPress }) => {
+    const handlePress = useCallback(() => onPress(book), [book, onPress]);
+
+    return (
+        <Animated.View entering={FadeInRight.delay(60 + index * 35).duration(400)}>
+            <HapticTouchable onPress={handlePress}>
+                <View style={styles.catalogCard}>
+                    {book.coverImage ? (
+                        <Image
+                            source={{ uri: book.coverImage }}
+                            style={styles.catalogCover}
+                            contentFit="cover"
+                        />
+                    ) : (
+                        <View style={[styles.catalogCover, styles.noCover]}>
+                            <BookOpen size={22} color="#9CA3AF" />
+                        </View>
+                    )}
+                    <View style={styles.catalogContent}>
+                        <Text style={styles.catalogTitle} numberOfLines={2}>{book.title}</Text>
+                        <Text style={styles.catalogAuthor} numberOfLines={1}>by {book.author}</Text>
+                        <View style={styles.catalogMeta}>
+                            {book.category && (
+                                <View style={styles.categoryBadge}>
+                                    <Tag size={10} color="#6366F1" />
+                                    <Text style={styles.categoryText}>{book.category}</Text>
+                                </View>
+                            )}
+                            <View style={[
+                                styles.availabilityBadge,
+                                { backgroundColor: book.availableCopies > 0 ? '#D1FAE5' : '#FEE2E2' },
+                            ]}>
+                                <Text style={[
+                                    styles.availabilityText,
+                                    { color: book.availableCopies > 0 ? '#10B981' : '#EF4444' },
+                                ]}>
+                                    {book.availableCopies > 0 ? `${book.availableCopies} avail.` : 'Unavailable'}
+                                </Text>
+                            </View>
+                        </View>
+                    </View>
+                    <ChevronRight size={16} color="#ccc" />
+                </View>
+            </HapticTouchable>
+        </Animated.View>
+    );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BookDetailModal — module-level component.
+// Uses the same noticeboard pattern: animationType="none" + BlurView overlay
+// + SlideInDown / SlideOutDown so it feels consistent with the rest of the app.
+// ─────────────────────────────────────────────────────────────────────────────
+const BookDetailModal = React.memo(({
+    visible,
+    innerVisible,
+    selectedBook,
+    childData,
+    isRequesting,
+    insets,
+    onClose,
+    onRequest,
+}) => (
+    <Modal
+        visible={visible}
+        transparent
+        animationType="none"
+        onRequestClose={onClose}
+    >
+        {innerVisible && (
+            <View style={styles.modalOverlay}>
+                {/* Blurred backdrop */}
+                <BlurView intensity={20} style={RNStyleSheet.absoluteFill} tint="dark" />
+
+                {/* Tap-outside-to-close */}
+                <Animated.View
+                    style={RNStyleSheet.absoluteFill}
+                    entering={FadeIn.duration(200)}
+                    exiting={FadeOut.duration(200)}
+                >
+                    <HapticTouchable style={RNStyleSheet.absoluteFill} onPress={onClose} />
+                </Animated.View>
+
+                {/* Sheet */}
+                <Animated.View
+                    style={[styles.modalContent, { paddingBottom: insets.bottom + 16 }]}
+                    entering={SlideInDown.duration(400).easing(Easing.out(Easing.cubic))}
+                    exiting={SlideOutDown.duration(300).easing(Easing.in(Easing.cubic))}
+                >
+                    <View style={styles.modalHandle} />
+                    <View style={styles.modalHeader}>
+                        <Text style={styles.modalTitle}>Book Details</Text>
+                        <HapticTouchable onPress={onClose}>
+                            <View style={styles.modalCloseBtn}>
+                                <X size={20} color="#666" />
+                            </View>
+                        </HapticTouchable>
+                    </View>
+
+                    <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
+                        {selectedBook && (
+                            <>
+                                <View style={styles.modalCoverContainer}>
+                                    {selectedBook.coverImage ? (
+                                        <Image
+                                            source={{ uri: selectedBook.coverImage }}
+                                            style={styles.modalCover}
+                                            contentFit="cover"
+                                        />
+                                    ) : (
+                                        <View style={[styles.modalCover, styles.noCoverLarge]}>
+                                            <BookOpen size={48} color="#9CA3AF" />
+                                        </View>
+                                    )}
+                                </View>
+
+                                <Text style={styles.modalBookTitle}>{selectedBook.title}</Text>
+                                <Text style={styles.modalBookAuthor}>by {selectedBook.author}</Text>
+
+                                <View style={[
+                                    styles.modalAvailability,
+                                    { backgroundColor: selectedBook.availableCopies > 0 ? '#D1FAE5' : '#FEE2E2' },
+                                ]}>
+                                    {selectedBook.availableCopies > 0
+                                        ? <CheckCircle2 size={16} color="#10B981" />
+                                        : <AlertCircle size={16} color="#EF4444" />
+                                    }
+                                    <Text style={[
+                                        styles.modalAvailabilityText,
+                                        { color: selectedBook.availableCopies > 0 ? '#10B981' : '#EF4444' },
+                                    ]}>
+                                        {selectedBook.availableCopies > 0
+                                            ? `${selectedBook.availableCopies} of ${selectedBook.totalCopies} copies available`
+                                            : 'All copies currently issued'}
+                                    </Text>
+                                </View>
+
+                                <View style={styles.detailsGrid}>
+                                    {[
+                                        { icon: Tag, color: '#6366F1', label: 'Category', value: selectedBook.category || 'General' },
+                                        { icon: BookMarked, color: '#0EA5E9', label: 'Publisher', value: selectedBook.publisher || 'N/A' },
+                                        selectedBook.edition && { icon: Info, color: '#F59E0B', label: 'Edition', value: selectedBook.edition },
+                                        selectedBook.ISBN && { icon: Info, color: '#10B981', label: 'ISBN', value: selectedBook.ISBN },
+                                    ].filter(Boolean).map((item, i) => {
+                                        const Icon = item.icon;
+                                        return (
+                                            <View key={i} style={styles.detailItem}>
+                                                <Icon size={15} color={item.color} />
+                                                <Text style={styles.detailLabel}>{item.label}</Text>
+                                                <Text style={styles.detailValue}>{item.value}</Text>
+                                            </View>
+                                        );
+                                    })}
+                                </View>
+
+                                {selectedBook.description && (
+                                    <View style={styles.descriptionContainer}>
+                                        <Text style={styles.descriptionLabel}>About this book</Text>
+                                        <Text style={styles.descriptionText}>{selectedBook.description}</Text>
+                                    </View>
+                                )}
+
+                                <View style={styles.requestButtonContainer}>
+                                    <HapticTouchable
+                                        onPress={() => onRequest(selectedBook.id)}
+                                        disabled={isRequesting || selectedBook.availableCopies === 0}
+                                    >
+                                        <View style={[
+                                            styles.requestButton,
+                                            (isRequesting || selectedBook.availableCopies === 0) && styles.requestButtonDisabled,
+                                        ]}>
+                                            {isRequesting ? (
+                                                <>
+                                                    <ActivityIndicator size="small" color="#fff" />
+                                                    <Text style={styles.requestButtonText}>Requesting...</Text>
+                                                </>
+                                            ) : (
+                                                <Text style={styles.requestButtonText}>
+                                                    {selectedBook.availableCopies > 0
+                                                        ? `Request for ${childData?.name}`
+                                                        : 'Not Available'}
+                                                </Text>
+                                            )}
+                                        </View>
+                                    </HapticTouchable>
+                                </View>
+                            </>
+                        )}
+                    </ScrollView>
+                </Animated.View>
+            </View>
+        )}
+    </Modal>
+));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main screen
+// ─────────────────────────────────────────────────────────────────────────────
 export default function ParentLibraryScreen() {
     const params = useLocalSearchParams();
     const queryClient = useQueryClient();
     const insets = useSafeAreaInsets();
+
     const [refreshing, setRefreshing] = useState(false);
     const [activeTab, setActiveTab] = useState('borrowed');
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedBook, setSelectedBook] = useState(null);
     const [showBookModal, setShowBookModal] = useState(false);
+    const [innerVisible, setInnerVisible] = useState(false);
     const [isRequesting, setIsRequesting] = useState(false);
 
     const childData = params.childData ? JSON.parse(params.childData) : null;
 
+    // ── Queries ───────────────────────────────────────────────────────────────
     const { data: userData } = useQuery({
         queryKey: ['user-data'],
         queryFn: async () => {
@@ -112,7 +358,8 @@ export default function ParentLibraryScreen() {
     const pendingRequests = libraryData?.pendingRequests || [];
     const returnHistory = libraryData?.returnHistory || [];
     const summary = libraryData?.summary || {};
-    const settings = libraryData?.settings || {};
+
+    // ── Handlers ──────────────────────────────────────────────────────────────
 
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
@@ -121,27 +368,22 @@ export default function ParentLibraryScreen() {
         setRefreshing(false);
     }, [queryClient]);
 
-    const formatDate = (dateStr) => {
-        if (!dateStr) return '';
-        return new Date(dateStr).toLocaleDateString('en-US', {
-            month: 'short', day: 'numeric', year: 'numeric'
-        });
-    };
-
-    const getDaysUntilDue = (dueDate) => {
-        const days = Math.ceil((new Date(dueDate) - new Date()) / (1000 * 60 * 60 * 24));
-        if (days < 0) return `${Math.abs(days)}d overdue`;
-        if (days === 0) return 'Due today';
-        if (days === 1) return 'Due tomorrow';
-        return `${days} days left`;
-    };
-
-    const openBookDetails = (book) => {
+    // Stable callback passed into CatalogBookCard — won't change between renders
+    const openBookDetails = useCallback((book) => {
         setSelectedBook(book);
         setShowBookModal(true);
-    };
+        requestAnimationFrame(() => setInnerVisible(true));
+    }, []);
 
-    const handleRequestBook = async (bookId) => {
+    const closeBookModal = useCallback(() => {
+        setInnerVisible(false);
+        setTimeout(() => {
+            setShowBookModal(false);
+            setSelectedBook(null);
+        }, 320);
+    }, []);
+
+    const handleRequestBook = useCallback(async (bookId) => {
         if (!schoolId || !studentId) {
             Alert.alert('Error', 'Unable to request book. Student information missing.');
             return;
@@ -157,15 +399,16 @@ export default function ParentLibraryScreen() {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             Alert.alert('Success', `Book request submitted for ${childData.name}!`);
             await queryClient.invalidateQueries(['parent-library']);
-            setShowBookModal(false);
+            closeBookModal();
         } catch (error) {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
             Alert.alert('Error', error.response?.data?.error || 'Failed to request book.');
         } finally {
             setIsRequesting(false);
         }
-    };
+    }, [schoolId, studentId, parentUserId, childData, queryClient, closeBookModal]);
 
+    // ── Early exit — no child ─────────────────────────────────────────────────
     if (!childData) {
         return (
             <SafeAreaView style={styles.container}>
@@ -185,155 +428,7 @@ export default function ParentLibraryScreen() {
         );
     }
 
-    // ── Catalog card ────────────────────────────────────────────────────────
-    const CatalogBookCard = ({ book, index }) => (
-        <Animated.View entering={FadeInRight.delay(60 + index * 35).duration(400)}>
-            <HapticTouchable onPress={() => openBookDetails(book)}>
-                <View style={styles.catalogCard}>
-                    {book.coverImage ? (
-                        <Image source={{ uri: book.coverImage }} style={styles.catalogCover} contentFit="cover" />
-                    ) : (
-                        <View style={[styles.catalogCover, styles.noCover]}>
-                            <BookOpen size={22} color="#9CA3AF" />
-                        </View>
-                    )}
-                    <View style={styles.catalogContent}>
-                        <Text style={styles.catalogTitle} numberOfLines={2}>{book.title}</Text>
-                        <Text style={styles.catalogAuthor} numberOfLines={1}>by {book.author}</Text>
-                        <View style={styles.catalogMeta}>
-                            {book.category && (
-                                <View style={styles.categoryBadge}>
-                                    <Tag size={10} color="#6366F1" />
-                                    <Text style={styles.categoryText}>{book.category}</Text>
-                                </View>
-                            )}
-                            <View style={[
-                                styles.availabilityBadge,
-                                { backgroundColor: book.availableCopies > 0 ? '#D1FAE5' : '#FEE2E2' }
-                            ]}>
-                                <Text style={[
-                                    styles.availabilityText,
-                                    { color: book.availableCopies > 0 ? '#10B981' : '#EF4444' }
-                                ]}>
-                                    {book.availableCopies > 0 ? `${book.availableCopies} avail.` : 'Unavailable'}
-                                </Text>
-                            </View>
-                        </View>
-                    </View>
-                    <ChevronRight size={16} color="#ccc" />
-                </View>
-            </HapticTouchable>
-        </Animated.View>
-    );
-
-    // ── Book detail modal ────────────────────────────────────────────────────
-    const BookDetailModal = () => (
-        <Modal
-            visible={showBookModal}
-            animationType="slide"
-            transparent
-            onRequestClose={() => setShowBookModal(false)}
-        >
-            <View style={styles.modalOverlay}>
-                <Animated.View
-                    entering={FadeIn.duration(200)}
-                    style={[styles.modalContent, { paddingBottom: insets.bottom + 16 }]}
-                >
-                    <View style={styles.modalHandle} />
-                    <View style={styles.modalHeader}>
-                        <Text style={styles.modalTitle}>Book Details</Text>
-                        <HapticTouchable onPress={() => setShowBookModal(false)}>
-                            <View style={styles.modalCloseBtn}><X size={20} color="#666" /></View>
-                        </HapticTouchable>
-                    </View>
-
-                    <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
-                        {selectedBook && (
-                            <>
-                                <View style={styles.modalCoverContainer}>
-                                    {selectedBook.coverImage ? (
-                                        <Image source={{ uri: selectedBook.coverImage }} style={styles.modalCover} contentFit="cover" />
-                                    ) : (
-                                        <View style={[styles.modalCover, styles.noCoverLarge]}>
-                                            <BookOpen size={48} color="#9CA3AF" />
-                                        </View>
-                                    )}
-                                </View>
-
-                                <Text style={styles.modalBookTitle}>{selectedBook.title}</Text>
-                                <Text style={styles.modalBookAuthor}>by {selectedBook.author}</Text>
-
-                                <View style={[
-                                    styles.modalAvailability,
-                                    { backgroundColor: selectedBook.availableCopies > 0 ? '#D1FAE5' : '#FEE2E2' }
-                                ]}>
-                                    {selectedBook.availableCopies > 0
-                                        ? <CheckCircle2 size={16} color="#10B981" />
-                                        : <AlertCircle size={16} color="#EF4444" />
-                                    }
-                                    <Text style={[
-                                        styles.modalAvailabilityText,
-                                        { color: selectedBook.availableCopies > 0 ? '#10B981' : '#EF4444' }
-                                    ]}>
-                                        {selectedBook.availableCopies > 0
-                                            ? `${selectedBook.availableCopies} of ${selectedBook.totalCopies} copies available`
-                                            : 'All copies currently issued'}
-                                    </Text>
-                                </View>
-
-                                <View style={styles.detailsGrid}>
-                                    {[
-                                        { icon: Tag, color: '#6366F1', label: 'Category', value: selectedBook.category || 'General' },
-                                        { icon: BookMarked, color: '#0EA5E9', label: 'Publisher', value: selectedBook.publisher || 'N/A' },
-                                        selectedBook.edition && { icon: Info, color: '#F59E0B', label: 'Edition', value: selectedBook.edition },
-                                        selectedBook.ISBN && { icon: Info, color: '#10B981', label: 'ISBN', value: selectedBook.ISBN },
-                                    ].filter(Boolean).map((item, i) => {
-                                        const Icon = item.icon;
-                                        return (
-                                            <View key={i} style={styles.detailItem}>
-                                                <Icon size={15} color={item.color} />
-                                                <Text style={styles.detailLabel}>{item.label}</Text>
-                                                <Text style={styles.detailValue}>{item.value}</Text>
-                                            </View>
-                                        );
-                                    })}
-                                </View>
-
-                                {selectedBook.description && (
-                                    <View style={styles.descriptionContainer}>
-                                        <Text style={styles.descriptionLabel}>About this book</Text>
-                                        <Text style={styles.descriptionText}>{selectedBook.description}</Text>
-                                    </View>
-                                )}
-
-                                <View style={styles.requestButtonContainer}>
-                                    <HapticTouchable
-                                        onPress={() => handleRequestBook(selectedBook.id)}
-                                        disabled={isRequesting || selectedBook.availableCopies === 0}
-                                    >
-                                        <View style={[
-                                            styles.requestButton,
-                                            (isRequesting || selectedBook.availableCopies === 0) && styles.requestButtonDisabled
-                                        ]}>
-                                            {isRequesting
-                                                ? <><ActivityIndicator size="small" color="#fff" /><Text style={styles.requestButtonText}>Requesting...</Text></>
-                                                : <Text style={styles.requestButtonText}>
-                                                    {selectedBook.availableCopies > 0
-                                                        ? `Request for ${childData.name}`
-                                                        : 'Not Available'}
-                                                </Text>
-                                            }
-                                        </View>
-                                    </HapticTouchable>
-                                </View>
-                            </>
-                        )}
-                    </ScrollView>
-                </Animated.View>
-            </View>
-        </Modal>
-    );
-
+    // ── Render ────────────────────────────────────────────────────────────────
     return (
         <SafeAreaView style={styles.container}>
             <StatusBar style="dark" />
@@ -377,7 +472,7 @@ export default function ParentLibraryScreen() {
                 </View>
             </Animated.View>
 
-            {/* Tab bar — outside scroll, always visible */}
+            {/* Tab bar */}
             <Animated.View entering={FadeInDown.delay(160).duration(400)} style={styles.tabBar}>
                 <ScrollView
                     horizontal
@@ -430,12 +525,13 @@ export default function ParentLibraryScreen() {
                     </Animated.View>
                 )}
 
-                {/* ── Tab content ─────────────────────────────────────────────── */}
+                {/* ── Tab content ───────────────────────────────────────────── */}
                 {isLoading && activeTab !== 'catalog' ? (
                     <View style={styles.loadingContainer}>
                         <ActivityIndicator size="large" color="#0469ff" />
                         <Text style={styles.loadingText}>Loading…</Text>
                     </View>
+
                 ) : activeTab === 'borrowed' ? (
                     borrowedBooks.length > 0 ? (
                         borrowedBooks.map((item, index) => (
@@ -444,7 +540,6 @@ export default function ParentLibraryScreen() {
                                 entering={FadeInRight.delay(80 + index * 55).duration(400)}
                             >
                                 <View style={[styles.bookCard, item.isOverdue && styles.bookCardOverdue]}>
-                                    {/* Status strip */}
                                     <View style={[styles.bookStrip, { backgroundColor: item.isOverdue ? '#EF4444' : '#0469ff' }]} />
                                     <View style={styles.bookCardInner}>
                                         <View style={styles.bookCardTop}>
@@ -454,7 +549,7 @@ export default function ParentLibraryScreen() {
                                             </View>
                                             <View style={[
                                                 styles.dueBadge,
-                                                { backgroundColor: item.isOverdue ? '#FEE2E2' : '#EEF4FF' }
+                                                { backgroundColor: item.isOverdue ? '#FEE2E2' : '#EEF4FF' },
                                             ]}>
                                                 {item.isOverdue
                                                     ? <AlertTriangle size={11} color="#EF4444" />
@@ -462,13 +557,12 @@ export default function ParentLibraryScreen() {
                                                 }
                                                 <Text style={[
                                                     styles.dueBadgeText,
-                                                    { color: item.isOverdue ? '#EF4444' : '#0469ff' }
+                                                    { color: item.isOverdue ? '#EF4444' : '#0469ff' },
                                                 ]}>
                                                     {getDaysUntilDue(item.dueDate)}
                                                 </Text>
                                             </View>
                                         </View>
-
                                         <View style={styles.bookCardBottom}>
                                             <View style={styles.metaChip}>
                                                 <Calendar size={12} color="#888" />
@@ -490,6 +584,7 @@ export default function ParentLibraryScreen() {
                     ) : (
                         <EmptyState icon={BookOpen} title="No Books Borrowed" subtitle={`${childData.name} hasn't borrowed any books`} />
                     )
+
                 ) : activeTab === 'catalog' ? (
                     catalogLoading ? (
                         <View style={styles.loadingContainer}>
@@ -498,11 +593,23 @@ export default function ParentLibraryScreen() {
                         </View>
                     ) : catalogBooks?.length > 0 ? (
                         catalogBooks.map((book, index) => (
-                            <CatalogBookCard key={book.id} book={book} index={index} />
+                            // CatalogBookCard is module-level + React.memo, so it NEVER
+                            // re-mounts when the parent re-renders (e.g. modal open/close).
+                            <CatalogBookCard
+                                key={book.id}
+                                book={book}
+                                index={index}
+                                onPress={openBookDetails}
+                            />
                         ))
                     ) : (
-                        <EmptyState icon={Search} title="No Books Found" subtitle={searchQuery ? 'Try a different search term' : 'No books in the library catalog'} />
+                        <EmptyState
+                            icon={Search}
+                            title="No Books Found"
+                            subtitle={searchQuery ? 'Try a different search term' : 'No books in the library catalog'}
+                        />
                     )
+
                 ) : activeTab === 'requests' ? (
                     pendingRequests.length > 0 ? (
                         pendingRequests.map((item, index) => (
@@ -512,7 +619,11 @@ export default function ParentLibraryScreen() {
                             >
                                 <View style={styles.requestCard}>
                                     {item.book.coverImage ? (
-                                        <Image source={{ uri: item.book.coverImage }} style={styles.requestCover} contentFit="cover" />
+                                        <Image
+                                            source={{ uri: item.book.coverImage }}
+                                            style={styles.requestCover}
+                                            contentFit="cover"
+                                        />
                                     ) : (
                                         <View style={[styles.requestCover, styles.noCover]}>
                                             <BookOpen size={18} color="#9CA3AF" />
@@ -523,11 +634,11 @@ export default function ParentLibraryScreen() {
                                             <Text style={styles.bookTitle} numberOfLines={1}>{item.book.title}</Text>
                                             <View style={[
                                                 styles.statusBadge,
-                                                { backgroundColor: item.status === 'APPROVED' ? '#D1FAE5' : '#FEF3C7' }
+                                                { backgroundColor: item.status === 'APPROVED' ? '#D1FAE5' : '#FEF3C7' },
                                             ]}>
                                                 <Text style={[
                                                     styles.statusText,
-                                                    { color: item.status === 'APPROVED' ? '#10B981' : '#F59E0B' }
+                                                    { color: item.status === 'APPROVED' ? '#10B981' : '#F59E0B' },
                                                 ]}>
                                                     {item.status === 'APPROVED' ? 'Approved' : 'Pending'}
                                                 </Text>
@@ -545,7 +656,9 @@ export default function ParentLibraryScreen() {
                     ) : (
                         <EmptyState icon={Clock} title="No Pending Requests" subtitle="No book requests are pending" />
                     )
+
                 ) : (
+                    // History tab
                     returnHistory.length > 0 ? (
                         returnHistory.map((item, index) => (
                             <Animated.View
@@ -573,21 +686,24 @@ export default function ParentLibraryScreen() {
                 )}
             </ScrollView>
 
-            <BookDetailModal />
+            {/* Book detail modal — module-level component, blur overlay, slide-in */}
+            <BookDetailModal
+                visible={showBookModal}
+                innerVisible={innerVisible}
+                selectedBook={selectedBook}
+                childData={childData}
+                isRequesting={isRequesting}
+                insets={insets}
+                onClose={closeBookModal}
+                onRequest={handleRequestBook}
+            />
         </SafeAreaView>
     );
 }
 
-const EmptyState = ({ icon: Icon, title, subtitle }) => (
-    <Animated.View entering={FadeInDown.delay(100).duration(400)} style={styles.emptyState}>
-        <View style={styles.emptyIconBg}>
-            <Icon size={32} color="#ccc" />
-        </View>
-        <Text style={styles.emptyTitle}>{title}</Text>
-        <Text style={styles.emptySubtitle}>{subtitle}</Text>
-    </Animated.View>
-);
-
+// ─────────────────────────────────────────────────────────────────────────────
+// Styles — identical to original
+// ─────────────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#fff' },
 
@@ -762,7 +878,9 @@ const styles = StyleSheet.create({
 
     // Modal
     modalOverlay: {
-        flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end',
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'flex-end',
     },
     modalContent: {
         backgroundColor: '#fff',

@@ -7,12 +7,10 @@ import {
     StyleSheet,
     Dimensions,
     Image,
-    KeyboardAvoidingView,
     Platform,
     ScrollView,
     ActivityIndicator,
     Alert,
-    Keyboard,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import fetchUser from '../../lib/queries/user';
@@ -41,7 +39,7 @@ import { getDeviceInfo } from '../../lib/deviceInfo';
 import { queueReviewPromptAfterLogin } from '../../lib/reviewPrompt';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import { clearTransientAuthState } from '../../lib/authRedirect';
-
+import { KeyboardAwareScrollView } from 'react-native-keyboard-controller';
 // ─── Screen dimensions & responsive helpers ───────────────────────────────────
 const { width: SW, height: SH } = Dimensions.get('screen');
 
@@ -235,15 +233,6 @@ export default function LoginScreen() {
     const activeRole = LOGIN_ROLE_OPTIONS.find(o => o.key === selectedRole) || LOGIN_ROLE_OPTIONS[0];
     const roleColor = ROLE_ACCENT_COLORS[selectedRole] || PRIMARY_COLOR;
     const allowSocial = selectedRole === 'teacher' || selectedRole === 'parent' || selectedRole === 'student' || selectedRole === 'director' || selectedRole === 'principal' || selectedRole === 'accountant' || selectedRole === 'driver' || selectedRole === 'conductor' || selectedRole === 'ADMIN' || selectedRole === 'LIBRARIAN' || selectedRole === 'SUPER_ADMIN';
-
-    // ── keyboard scroll helper (Android) ─────────────────────────────────────
-    useEffect(() => {
-        if (Platform.OS !== 'android') return;
-        const show = Keyboard.addListener('keyboardDidShow', () => {
-            setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
-        });
-        return () => show.remove();
-    }, []);
 
     // ── resolve school context ────────────────────────────────────────────────
     useEffect(() => {
@@ -507,19 +496,15 @@ export default function LoginScreen() {
             <StatusBar style="dark" />
             <AnimatedBackground />
             <View style={s.flex}>
-                <ScrollView
+                <KeyboardAwareScrollView
                     ref={scrollRef}
                     contentContainerStyle={s.scroll}
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
-                    keyboardDismissMode="interactive"
-                    bounces={false}
-                    automaticallyAdjustKeyboardInsets={true}
+                    bottomOffset={20}
                 >
-                    <KeyboardAvoidingView
+                    <View
                         style={s.flex}
-                        behavior="padding"
-                        keyboardVerticalOffset={0}
                     >
                         <View style={s.inner}>
                             {/* Form card */}
@@ -702,8 +687,8 @@ export default function LoginScreen() {
                                 )}
                             </Animated.View>
                         </View>
-                    </KeyboardAvoidingView>
-                </ScrollView>
+                    </View>
+                </KeyboardAwareScrollView>
             </View>
         </SafeAreaView>
     );

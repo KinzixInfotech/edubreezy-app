@@ -27,21 +27,33 @@ export function usePresenceStatus(schoolId, currentUser) {
     useEffect(() => {
         if (!schoolId || !currentUser?.id) return;
 
+        let cancelled = false;
+
+        // Remove any existing channel with the same name to avoid duplicate listeners
+        const existingChannel = supabase.getChannels().find(
+            ch => ch.topic === `realtime:school_presence:${schoolId}`
+        );
+        if (existingChannel) {
+            supabase.removeChannel(existingChannel);
+        }
+
         const channel = supabase.channel(`school_presence:${schoolId}`, {
             config: { presence: { key: currentUser.id } },
         });
 
         channel
             .on('presence', { event: 'sync' }, () => {
+                if (cancelled) return;
                 const state = channel.presenceState();
                 const onlineIds = new Set(Object.keys(state));
                 setOnlineUsers(onlineIds);
             })
             .on('presence', { event: 'join' }, ({ key }) => {
+                if (cancelled) return;
                 setOnlineUsers(prev => new Set([...prev, key]));
             })
             .on('presence', { event: 'leave' }, ({ key }) => {
-                // Record the leave time so "last seen" can be shown in real-time
+                if (cancelled) return;
                 lastSeenMapRef.current[key] = new Date().toISOString();
                 setLastSeenVersion(v => v + 1);
                 setOnlineUsers(prev => {
@@ -51,6 +63,7 @@ export function usePresenceStatus(schoolId, currentUser) {
                 });
             })
             .subscribe(async (status) => {
+                if (cancelled) return;
                 if (status === 'SUBSCRIBED') {
                     await channel.track({
                         id: currentUser.id,
@@ -62,20 +75,20 @@ export function usePresenceStatus(schoolId, currentUser) {
         channelRef.current = channel;
 
         return () => {
+            cancelled = true;
             if (channelRef.current) {
                 supabase.removeChannel(channelRef.current);
                 channelRef.current = null;
             }
         };
     }, [schoolId, currentUser?.id]);
-
     const isUserOnline = useCallback((userId) => {
         return onlineUsers.has(userId);
     }, [onlineUsers]);
 
     const getLastSeen = useCallback((userId) => {
         return lastSeenMapRef.current[userId] || null;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [lastSeenVersion]);
 
     return { onlineUsers, isUserOnline, getLastSeen };

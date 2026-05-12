@@ -31,6 +31,7 @@ import * as Linking from 'expo-linking';
 import { hydrateRecoverySessionFromUrl } from '../lib/passwordRecovery';
 import { queueReviewPromptAfterLogin } from '../lib/reviewPrompt';
 import { clearForcedLogoutDeviceState } from '../lib/authRedirect';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 
 const BADGE_KEY = 'noticeBadgeCount';
 
@@ -749,16 +750,18 @@ function RootLayoutContent() {
 export default function RootLayout() {
     return (
         <GestureHandlerRootView style={{ flex: 1 }}>
-            <QueryClientProvider client={queryClient}>
-                <NotificationProvider>
-                    <ChatProvider>
-                        <AttendanceReminderProvider>
-                            <RootLayoutContent />
-                            <AttendanceReminderModal />
-                        </AttendanceReminderProvider>
-                    </ChatProvider>
-                </NotificationProvider>
-            </QueryClientProvider>
+            <KeyboardProvider>
+                <QueryClientProvider client={queryClient}>
+                    <NotificationProvider>
+                        <ChatProvider>
+                            <AttendanceReminderProvider>
+                                <RootLayoutContent />
+                                <AttendanceReminderModal />
+                            </AttendanceReminderProvider>
+                        </ChatProvider>
+                    </NotificationProvider>
+                </QueryClientProvider>
+            </KeyboardProvider>
         </GestureHandlerRootView>
     );
 }

@@ -13,7 +13,6 @@ import {
     Platform,
     Modal,
     FlatList,
-    Linking,
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -26,17 +25,12 @@ import {
     AlertCircle,
     CheckCircle2,
     FileText,
-    Upload,
     X,
     Clock,
     Users,
-    Eye,
     ChevronRight,
     Check,
-    AlertTriangle,
     ImageIcon,
-    Camera,
-    Paperclip,
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -57,21 +51,19 @@ export default function AssignHomeworkScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [activeTab, setActiveTab] = useState(0);
 
-    // Form state
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
     const [dueDate, setDueDate] = useState(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
     const [showDatePicker, setShowDatePicker] = useState(false);
-    const [uploadedFile, setUploadedFile] = useState(null); // { url, name, size, type }
+    const [uploadedFile, setUploadedFile] = useState(null);
     const [uploadProgress, setUploadProgress] = useState(0);
     const [selectedSubject, setSelectedSubject] = useState(null);
+    const [isUploading, setIsUploading] = useState(false);
 
-    // Submission marking modal state
     const [markingModal, setMarkingModal] = useState(false);
     const [selectedHomework, setSelectedHomework] = useState(null);
     const [submissionChanges, setSubmissionChanges] = useState({});
 
-    // Load user data
     const { data: userData } = useQuery({
         queryKey: ['user-data'],
         queryFn: async () => {
@@ -89,20 +81,12 @@ export default function AssignHomeworkScreen() {
         if (params?.teacherData) {
             try {
                 const data = JSON.parse(params.teacherData);
-                // Check if it's the expected structure (has classId directly)
                 if (data.classId) return data;
-
-                // Check if it has assignments array (e.g. from profile)
-                if (data.sectionsAssigned && Array.isArray(data.sectionsAssigned) && data.sectionsAssigned.length > 0) {
+                if (data.sectionsAssigned && Array.isArray(data.sectionsAssigned) && data.sectionsAssigned.length > 0)
                     return data.sectionsAssigned[0];
-                }
-
-                // Check if it has teacher array (rare but possible wrapping)
-                if (data.teacher && Array.isArray(data.teacher) && data.teacher.length > 0) {
+                if (data.teacher && Array.isArray(data.teacher) && data.teacher.length > 0)
                     return data.teacher[0];
-                }
-
-                return null; // Data exists but doesn't match expected structure, let query fetch
+                return null;
             } catch (e) {
                 console.error('Error parsing teacherData:', e);
                 return null;
@@ -111,7 +95,6 @@ export default function AssignHomeworkScreen() {
         return null;
     }, [params?.teacherData]);
 
-    // Fetch teacher data
     const { data: teacherData, isLoading: teacherLoading } = useQuery({
         queryKey: ['teacher-data', schoolId, userId],
         queryFn: async () => {
@@ -122,7 +105,7 @@ export default function AssignHomeworkScreen() {
                 const result = Array.isArray(teachers) ? teachers[0] : teachers;
                 return result || null;
             } catch (err) {
-                console.error("Error fetching teacher data:", err);
+                console.error('Error fetching teacher data:', err);
                 return null;
             }
         },
@@ -130,11 +113,9 @@ export default function AssignHomeworkScreen() {
         initialData: parsedTeacherData,
         staleTime: 1000 * 60 * 5,
     });
-
     const classId = teacherData?.classId;
     const sectionId = teacherData?.sectionId;
 
-    // Fetch subjects
     const { data: subjects = [] } = useQuery({
         queryKey: ['subjects', classId],
         queryFn: async () => {
@@ -145,16 +126,15 @@ export default function AssignHomeworkScreen() {
         enabled: !!classId,
     });
 
-    // Fetch students count
     const { data: studentsData } = useQuery({
         queryKey: ['students-count', schoolId, classId, sectionId],
         queryFn: async () => {
             if (!classId) return { count: 0 };
-            const params = new URLSearchParams({
+            const p = new URLSearchParams({
                 classId: classId.toString(),
-                ...(sectionId && { sectionId: sectionId.toString() })
+                ...(sectionId && { sectionId: sectionId.toString() }),
             });
-            const res = await api.get(`/schools/${schoolId}/students?${params}`);
+            const res = await api.get(`/schools/${schoolId}/students?${p}`);
             return { count: res.data?.total || 0 };
         },
         enabled: !!schoolId && !!classId,
@@ -162,7 +142,6 @@ export default function AssignHomeworkScreen() {
 
     const studentsCount = studentsData?.count || 0;
 
-    // Fetch teacher's assigned homework
     const { data: myHomework, isLoading: homeworkLoading, refetch: refetchHomework } = useQuery({
         queryKey: ['teacher-homework', schoolId, userId],
         queryFn: async () => {
@@ -174,8 +153,7 @@ export default function AssignHomeworkScreen() {
         staleTime: 1000 * 60 * 2,
     });
 
-    // Fetch submissions for selected homework
-    const { data: submissionsData, isLoading: submissionsLoading, refetch: refetchSubmissions } = useQuery({
+    const { data: submissionsData, isLoading: submissionsLoading } = useQuery({
         queryKey: ['homework-submissions', selectedHomework?.id],
         queryFn: async () => {
             if (!selectedHomework?.id) return { submissions: [], stats: null };
@@ -186,7 +164,6 @@ export default function AssignHomeworkScreen() {
         staleTime: 0,
     });
 
-    // Assign homework mutation
     const assignMutation = useMutation({
         mutationFn: async (data) => {
             const res = await api.post(`/schools/homework`, data);
@@ -200,16 +177,15 @@ export default function AssignHomeworkScreen() {
                 `Homework assigned to ${studentsCount} student(s)`,
                 [
                     { text: 'View Homework', onPress: () => setActiveTab(1) },
-                    { text: 'Assign Another', onPress: resetForm }
+                    { text: 'Assign Another', onPress: resetForm },
                 ]
             );
         },
         onError: (error) => {
             Alert.alert('Error', error.response?.data?.message || 'Failed to assign homework');
-        }
+        },
     });
 
-    // Update submissions mutation
     const updateSubmissionsMutation = useMutation({
         mutationFn: async (data) => {
             const res = await api.patch(`/schools/homework/${selectedHomework.id}/submissions`, data);
@@ -224,20 +200,17 @@ export default function AssignHomeworkScreen() {
         },
         onError: (error) => {
             Alert.alert('Error', error.response?.data?.message || 'Failed to update submissions');
-        }
+        },
     });
-
-    // Upload state (no hooks needed - using direct functions)
-    const [isUploading, setIsUploading] = useState(false);
 
     const handlePickImage = async () => {
         if (!schoolId || !classId) {
             Alert.alert('Error', 'Please wait for class data to load');
             return;
         }
-
         try {
-            await pickAndUploadImage('homework',
+            await pickAndUploadImage(
+                'homework',
                 { schoolId, classId, teacherId: userId, title },
                 {
                     onStart: () => setIsUploading(true),
@@ -248,14 +221,14 @@ export default function AssignHomeworkScreen() {
                                 url: res[0].url,
                                 name: res[0].fileName || res[0].name || 'Image',
                                 size: res[0].size,
-                                type: 'image'
+                                type: 'image',
                             });
                             Alert.alert('Success', 'Image uploaded successfully!');
                         }
                     },
                     onError: (error) => {
                         Alert.alert('Upload Failed', error.message || 'Failed to upload image');
-                    }
+                    },
                 }
             );
         } finally {
@@ -269,10 +242,9 @@ export default function AssignHomeworkScreen() {
             Alert.alert('Error', 'Please wait for class data to load');
             return;
         }
-
-
         try {
-            await pickAndUploadDocument('homework',
+            await pickAndUploadDocument(
+                'homework',
                 { schoolId, classId, teacherId: userId, title },
                 {
                     onStart: () => setIsUploading(true),
@@ -283,14 +255,14 @@ export default function AssignHomeworkScreen() {
                                 url: res[0].url,
                                 name: res[0].fileName || res[0].name || 'Document',
                                 size: res[0].size,
-                                type: 'document'
+                                type: 'document',
                             });
                             Alert.alert('Success', 'Document uploaded successfully!');
                         }
                     },
                     onError: (error) => {
                         Alert.alert('Upload Failed', error.message || 'Failed to upload document');
-                    }
+                    },
                 }
             );
         } finally {
@@ -309,22 +281,10 @@ export default function AssignHomeworkScreen() {
     };
 
     const handleSubmit = () => {
-        if (!title.trim()) {
-            Alert.alert('Required', 'Please enter homework title');
-            return;
-        }
-        if (!description.trim()) {
-            Alert.alert('Required', 'Please enter homework description');
-            return;
-        }
-        if (dueDate <= new Date()) {
-            Alert.alert('Invalid Date', 'Due date must be in the future');
-            return;
-        }
-        if (isUploading) {
-            Alert.alert('Please Wait', 'File upload in progress...');
-            return;
-        }
+        if (!title.trim()) { Alert.alert('Required', 'Please enter homework title'); return; }
+        if (!description.trim()) { Alert.alert('Required', 'Please enter homework description'); return; }
+        if (dueDate <= new Date()) { Alert.alert('Invalid Date', 'Due date must be in the future'); return; }
+        if (isUploading) { Alert.alert('Please Wait', 'File upload in progress...'); return; }
 
         Alert.alert(
             'Confirm Assignment',
@@ -335,8 +295,7 @@ export default function AssignHomeworkScreen() {
                     text: 'Assign',
                     onPress: () => {
                         assignMutation.mutate({
-                            schoolId,
-                            classId,
+                            schoolId, classId,
                             sectionId: sectionId || null,
                             subjectId: selectedSubject || null,
                             teacherId: userId,
@@ -345,10 +304,10 @@ export default function AssignHomeworkScreen() {
                             dueDate: dueDate.toISOString(),
                             fileUrl: uploadedFile?.url || null,
                             fileName: uploadedFile?.name || null,
-                            senderId: userId
+                            senderId: userId,
                         });
-                    }
-                }
+                    },
+                },
             ]
         );
     };
@@ -376,12 +335,7 @@ export default function AssignHomeworkScreen() {
             Alert.alert('No Changes', 'No submissions were modified');
             return;
         }
-
-        const updates = Object.entries(submissionChanges).map(([submissionId, status]) => ({
-            submissionId,
-            status
-        }));
-
+        const updates = Object.entries(submissionChanges).map(([submissionId, status]) => ({ submissionId, status }));
         updateSubmissionsMutation.mutate({ submissions: updates });
     };
 
@@ -393,11 +347,8 @@ export default function AssignHomeworkScreen() {
         return { text: `${days}d left`, color: '#10B981' };
     };
 
-    // Get current submission status considering changes
     const getSubmissionStatus = (submission) => {
-        if (submissionChanges[submission.id] !== undefined) {
-            return submissionChanges[submission.id];
-        }
+        if (submissionChanges[submission.id] !== undefined) return submissionChanges[submission.id];
         return submission.status;
     };
 
@@ -439,7 +390,7 @@ export default function AssignHomeworkScreen() {
                 <View style={styles.headerCenter}>
                     <Text style={styles.headerTitle}>Homework</Text>
                     <Text style={styles.headerSubtitle}>
-                        {teacherData.class?.className} {teacherData.section && `- ${teacherData.section.name}`}
+                        {teacherData.class?.className}{teacherData?.name ? ` ' ${teacherData.name}` : ''}
                     </Text>
                 </View>
                 <View style={{ width: 40 }} />
@@ -451,9 +402,9 @@ export default function AssignHomeworkScreen() {
                     const TabIcon = tab.icon;
                     const isActive = activeTab === index;
                     return (
-                        <HapticTouchable key={tab.label} onPress={() => setActiveTab(index)} style={{ flex: 1 }}>
+                        <HapticTouchable key={tab.label} onPress={() => setActiveTab(index)} style={styles.tabWrapper}>
                             <View style={[styles.tab, isActive && styles.tabActive]}>
-                                <TabIcon size={18} color={isActive ? '#fff' : '#64748B'} />
+                                <TabIcon size={17} color={isActive ? '#fff' : '#64748B'} />
                                 <Text style={[styles.tabText, isActive && styles.tabTextActive]}>
                                     {tab.label}
                                 </Text>
@@ -467,11 +418,11 @@ export default function AssignHomeworkScreen() {
                 // ASSIGN TAB
                 <ScrollView
                     style={styles.content}
+                    contentContainerStyle={{ paddingBottom: 110 }}
                     showsVerticalScrollIndicator={false}
                     keyboardShouldPersistTaps="handled"
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" />}
                 >
-                    {/* Class Info */}
                     <Animated.View entering={FadeInDown.delay(200).duration(400)} style={styles.classInfoCard}>
                         <View style={styles.infoRow}>
                             <Users size={20} color="#0469ff" />
@@ -481,7 +432,6 @@ export default function AssignHomeworkScreen() {
                         </View>
                     </Animated.View>
 
-                    {/* Form */}
                     <View style={styles.form}>
                         <Animated.View entering={FadeInDown.delay(300).duration(400)} style={styles.formGroup}>
                             <Text style={styles.label}>Title *</Text>
@@ -522,11 +472,11 @@ export default function AssignHomeworkScreen() {
                                             >
                                                 <View style={[
                                                     styles.subjectChip,
-                                                    selectedSubject === subject.id && styles.subjectChipActive
+                                                    selectedSubject === subject.id && styles.subjectChipActive,
                                                 ]}>
                                                     <Text style={[
                                                         styles.subjectChipText,
-                                                        selectedSubject === subject.id && styles.subjectChipTextActive
+                                                        selectedSubject === subject.id && styles.subjectChipTextActive,
                                                     ]}>
                                                         {subject.subjectName}
                                                     </Text>
@@ -545,7 +495,7 @@ export default function AssignHomeworkScreen() {
                                     <Calendar size={20} color="#0469ff" />
                                     <Text style={styles.dateButtonText}>
                                         {dueDate.toLocaleDateString('en-US', {
-                                            weekday: 'short', month: 'short', day: 'numeric', year: 'numeric'
+                                            weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
                                         })}
                                     </Text>
                                     <Clock size={16} color="#666" />
@@ -556,7 +506,6 @@ export default function AssignHomeworkScreen() {
                         <Animated.View entering={FadeInDown.delay(500).duration(400)} style={styles.formGroup}>
                             <Text style={styles.label}>Attachment (Optional)</Text>
 
-                            {/* Upload Progress */}
                             {isUploading && (
                                 <View style={styles.uploadProgressContainer}>
                                     <View style={styles.uploadProgressBar}>
@@ -566,15 +515,11 @@ export default function AssignHomeworkScreen() {
                                 </View>
                             )}
 
-                            {/* Uploaded File Preview */}
                             {uploadedFile && !isUploading ? (
                                 <View style={styles.filePreview}>
                                     <View style={styles.filePreviewLeft}>
                                         {uploadedFile.type === 'image' ? (
-                                            <Image
-                                                source={{ uri: uploadedFile.url }}
-                                                style={styles.uploadedImagePreview}
-                                            />
+                                            <Image source={{ uri: uploadedFile.url }} style={styles.uploadedImagePreview} />
                                         ) : (
                                             <View style={styles.fileIconContainer}>
                                                 <FileText size={24} color="#0469ff" />
@@ -596,7 +541,6 @@ export default function AssignHomeworkScreen() {
                                 </View>
                             ) : !isUploading ? (
                                 <View style={styles.uploadOptions}>
-                                    {/* Image Upload */}
                                     <HapticTouchable onPress={handlePickImage} style={{ flex: 1 }}>
                                         <View style={styles.uploadOptionButton}>
                                             <View style={[styles.uploadOptionIcon, { backgroundColor: '#E3F2FD' }]}>
@@ -606,8 +550,6 @@ export default function AssignHomeworkScreen() {
                                             <Text style={styles.uploadOptionHint}>JPG, PNG</Text>
                                         </View>
                                     </HapticTouchable>
-
-                                    {/* Document Upload */}
                                     <HapticTouchable onPress={handlePickDocument} style={{ flex: 1 }}>
                                         <View style={styles.uploadOptionButton}>
                                             <View style={[styles.uploadOptionIcon, { backgroundColor: '#FEF3C7' }]}>
@@ -620,18 +562,15 @@ export default function AssignHomeworkScreen() {
                                 </View>
                             ) : null}
 
-                            <Text style={styles.uploadHint}>
-                                Max file size: 15MB for PDFs, 10MB for images
-                            </Text>
+                            <Text style={styles.uploadHint}>Max file size: 15MB for PDFs, 10MB for images</Text>
                         </Animated.View>
                     </View>
-
-                    <View style={{ height: 120 }} />
                 </ScrollView>
             ) : (
                 // MY HOMEWORK TAB
                 <ScrollView
                     style={styles.content}
+                    contentContainerStyle={{ paddingBottom: 40 }}
                     showsVerticalScrollIndicator={false}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" />}
                 >
@@ -686,7 +625,6 @@ export default function AssignHomeworkScreen() {
                             <Text style={styles.emptySubtitle}>Tap "Assign" tab to create homework</Text>
                         </View>
                     )}
-                    <View style={{ height: 40 }} />
                 </ScrollView>
             )}
 
@@ -704,7 +642,7 @@ export default function AssignHomeworkScreen() {
                 />
             )}
 
-            {/* Submit Button (Assign Tab Only) */}
+            {/* Submit Button — Assign Tab Only */}
             {activeTab === 0 && (
                 <Animated.View entering={FadeInDown.delay(600).duration(400)} style={styles.floatingButton}>
                     <HapticTouchable onPress={handleSubmit} disabled={isUploading || assignMutation.isPending}>
@@ -713,7 +651,7 @@ export default function AssignHomeworkScreen() {
                                 <ActivityIndicator color="#fff" size="small" />
                             ) : (
                                 <>
-                                    <Send size={24} color="#fff" />
+                                    <Send size={22} color="#fff" />
                                     <Text style={styles.submitButtonText}>
                                         {uploadedFile ? 'Assign with Attachment' : 'Assign Homework'}
                                     </Text>
@@ -752,7 +690,6 @@ export default function AssignHomeworkScreen() {
                         </HapticTouchable>
                     </View>
 
-                    {/* Stats Bar */}
                     {submissionsData?.stats && (
                         <View style={styles.statsBar}>
                             <View style={[styles.statItem, { backgroundColor: '#D1FAE5' }]}>
@@ -783,14 +720,13 @@ export default function AssignHomeworkScreen() {
                                 const status = getSubmissionStatus(item);
                                 const isSubmitted = status === 'SUBMITTED' || status === 'EVALUATED';
                                 const hasChanged = submissionChanges[item.id] !== undefined;
-
                                 return (
                                     <Animated.View entering={FadeInRight.delay(index * 30).duration(300)}>
                                         <HapticTouchable onPress={() => toggleSubmissionStatus(item.id, status)}>
                                             <View style={[
                                                 styles.studentRow,
                                                 isSubmitted && styles.studentRowSubmitted,
-                                                hasChanged && styles.studentRowChanged
+                                                hasChanged && styles.studentRowChanged,
                                             ]}>
                                                 <View style={styles.studentInfo}>
                                                     <View style={styles.rollBadge}>
@@ -809,13 +745,12 @@ export default function AssignHomeworkScreen() {
                                                 </View>
                                                 <View style={[
                                                     styles.statusToggle,
-                                                    isSubmitted ? styles.statusSubmitted : styles.statusPending
+                                                    isSubmitted ? styles.statusSubmitted : styles.statusPending,
                                                 ]}>
-                                                    {isSubmitted ? (
-                                                        <Check size={18} color="#fff" />
-                                                    ) : (
-                                                        <X size={18} color="#EF4444" />
-                                                    )}
+                                                    {isSubmitted
+                                                        ? <Check size={18} color="#fff" />
+                                                        : <X size={18} color="#EF4444" />
+                                                    }
                                                 </View>
                                             </View>
                                         </HapticTouchable>
@@ -845,6 +780,8 @@ const styles = StyleSheet.create({
     errorSubtext: { fontSize: 14, color: '#666', textAlign: 'center', marginTop: 8 },
     backButtonCenter: { marginTop: 20, paddingHorizontal: 24, paddingVertical: 12, backgroundColor: '#f5f5f5', borderRadius: 12 },
     backButtonText: { color: '#111', fontSize: 16, fontWeight: '600' },
+
+    // Header
     header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 50, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: '#f0f0f0', backgroundColor: '#fff' },
     backButton: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#f5f5f5', alignItems: 'center', justifyContent: 'center' },
     headerCenter: { flex: 1, alignItems: 'center' },
@@ -852,12 +789,31 @@ const styles = StyleSheet.create({
     headerSubtitle: { fontSize: 13, color: '#666', marginTop: 2 },
 
     // Tabs
-    tabContainer: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 12, gap: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
-    tab: { flex: 1, paddingVertical: 12, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, borderRadius: 10, backgroundColor: '#f5f5f5' },
+    tabContainer: {
+        flexDirection: 'row',
+        paddingHorizontal: 12,
+        paddingVertical: 10,
+        backgroundColor: '#fff',
+        borderBottomWidth: 1,
+        borderBottomColor: '#f0f0f0'
+    },
+    tabWrapper: {
+        flex: 1,
+        marginHorizontal: 5
+    },
+    tab: {
+        height: 50,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: 10,
+        backgroundColor: '#f5f5f5'
+    },
     tabActive: { backgroundColor: '#0469ff' },
-    tabText: { fontSize: 15, fontWeight: '600', color: '#666' },
+    tabText: { fontSize: 14, fontWeight: '600', color: '#64748B', marginLeft: 6 },
     tabTextActive: { color: '#fff' },
 
+    // Content
     content: { flex: 1 },
     classInfoCard: { margin: 16, padding: 16, backgroundColor: '#E3F2FD', borderRadius: 12 },
     infoRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
@@ -867,28 +823,33 @@ const styles = StyleSheet.create({
     label: { fontSize: 15, fontWeight: '600', color: '#111' },
     input: { backgroundColor: '#f8f9fa', borderRadius: 12, padding: 16, fontSize: 15, color: '#111', borderWidth: 1, borderColor: '#e5e7eb' },
     textArea: { height: 120, textAlignVertical: 'top' },
+
+    // Subject chips
     subjectChips: { flexDirection: 'row', gap: 8, marginTop: 8 },
     subjectChip: { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#f8f9fa', borderRadius: 20, borderWidth: 1, borderColor: '#e5e7eb' },
     subjectChipActive: { backgroundColor: '#E3F2FD', borderColor: '#0469ff' },
     subjectChipText: { fontSize: 14, fontWeight: '600', color: '#666' },
     subjectChipTextActive: { color: '#0469ff' },
+
+    // Date
     dateButton: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, backgroundColor: '#f8f9fa', borderRadius: 12, borderWidth: 1, borderColor: '#e5e7eb' },
     dateButtonText: { flex: 1, fontSize: 15, fontWeight: '600', color: '#111' },
-    uploadButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 20, backgroundColor: '#E3F2FD', borderRadius: 12, borderWidth: 2, borderColor: '#0469ff', borderStyle: 'dashed' },
-    uploadButtonText: { fontSize: 15, fontWeight: '600', color: '#0469ff' },
+
+    // File
     filePreview: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, backgroundColor: '#f8f9fa', borderRadius: 12, borderWidth: 1, borderColor: '#e5e7eb' },
     filePreviewLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
     fileInfo: { flex: 1 },
     fileName: { fontSize: 15, fontWeight: '600', color: '#111', marginBottom: 2 },
-    fileSize: { fontSize: 13, color: '#666' },
     removeButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#FEE2E2', alignItems: 'center', justifyContent: 'center' },
-    floatingButton: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: 16, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#f0f0f0' },
-    submitButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 18, backgroundColor: '#0469ff', borderRadius: 16, marginBottom: 20 },
-    submitButtonDisabled: { opacity: 0.6 },
-    submitButtonText: { fontSize: 18, fontWeight: '700', color: '#fff' },
 
-    // Homework Card
-    homeworkCard: { padding: 16, backgroundColor: '#f8f9fa', borderRadius: 12, marginHorizontal: 16, marginBottom: 12 },
+    // Floating button
+    floatingButton: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 32, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#f0f0f0' },
+    submitButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, padding: 17, backgroundColor: '#0469ff', borderRadius: 14 },
+    submitButtonDisabled: { opacity: 0.6 },
+    submitButtonText: { fontSize: 17, fontWeight: '700', color: '#fff' },
+
+    // Homework card
+    homeworkCard: { padding: 16, backgroundColor: '#f8f9fa', borderRadius: 12, marginHorizontal: 16, marginTop: 12, marginBottom: 0 },
     hwHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
     hwIconContainer: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#E3F2FD', alignItems: 'center', justifyContent: 'center' },
     dueBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 12 },
@@ -903,7 +864,7 @@ const styles = StyleSheet.create({
     viewButton: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     viewButtonText: { fontSize: 14, color: '#0469ff', fontWeight: '600' },
 
-    // Empty State
+    // Empty state
     emptyState: { alignItems: 'center', paddingVertical: 60, gap: 12 },
     emptyTitle: { fontSize: 16, fontWeight: '600', color: '#111' },
     emptySubtitle: { fontSize: 14, color: '#666' },
@@ -918,13 +879,13 @@ const styles = StyleSheet.create({
     saveButton: { backgroundColor: '#0469ff', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20 },
     saveButtonText: { fontSize: 14, fontWeight: '700', color: '#fff' },
 
-    // Stats Bar
+    // Stats bar
     statsBar: { flexDirection: 'row', padding: 16, gap: 12 },
     statItem: { flex: 1, alignItems: 'center', padding: 12, borderRadius: 12 },
     statNumber: { fontSize: 24, fontWeight: '700' },
     statLabel: { fontSize: 12, color: '#666', marginTop: 2 },
 
-    // Student Row
+    // Student row
     studentRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 12, backgroundColor: '#f8f9fa', borderRadius: 12, marginBottom: 8 },
     studentRowSubmitted: { backgroundColor: '#D1FAE5' },
     studentRowChanged: { borderWidth: 2, borderColor: '#0469ff' },
@@ -939,86 +900,19 @@ const styles = StyleSheet.create({
     statusSubmitted: { backgroundColor: '#10B981' },
     statusPending: { backgroundColor: '#FEE2E2' },
 
-    // UploadThing Upload Styles
-    uploadOptions: {
-        flexDirection: 'row',
-        gap: 12,
-        marginTop: 8
-    },
-    uploadOptionButton: {
-        flex: 1,
-        padding: 16,
-        backgroundColor: '#f8f9fa',
-        borderRadius: 12,
-        borderWidth: 1,
-        borderColor: '#e5e7eb',
-        alignItems: 'center',
-        gap: 8
-    },
-    uploadOptionIcon: {
-        width: 48,
-        height: 48,
-        borderRadius: 24,
-        alignItems: 'center',
-        justifyContent: 'center'
-    },
-    uploadOptionText: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#111'
-    },
-    uploadOptionHint: {
-        fontSize: 11,
-        color: '#999'
-    },
-    uploadProgressContainer: {
-        marginTop: 12,
-        gap: 8
-    },
-    uploadProgressBar: {
-        height: 6,
-        backgroundColor: '#e5e7eb',
-        borderRadius: 3,
-        overflow: 'hidden'
-    },
-    uploadProgressFill: {
-        height: '100%',
-        backgroundColor: '#0469ff',
-        borderRadius: 3
-    },
-    uploadProgressText: {
-        fontSize: 12,
-        color: '#666',
-        textAlign: 'center'
-    },
-    uploadedImagePreview: {
-        width: 48,
-        height: 48,
-        borderRadius: 8
-    },
-    fileIconContainer: {
-        width: 48,
-        height: 48,
-        borderRadius: 8,
-        backgroundColor: '#E3F2FD',
-        alignItems: 'center',
-        justifyContent: 'center'
-    },
-    fileMetaRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        marginTop: 2
-    },
-    fileUploaded: {
-        fontSize: 12,
-        color: '#10B981',
-        fontWeight: '500'
-    },
-    uploadHint: {
-        fontSize: 11,
-        color: '#999',
-        textAlign: 'center',
-        marginTop: 8
-    },
+    // Upload
+    uploadOptions: { flexDirection: 'row', gap: 12, marginTop: 8 },
+    uploadOptionButton: { flex: 1, padding: 16, backgroundColor: '#f8f9fa', borderRadius: 12, borderWidth: 1, borderColor: '#e5e7eb', alignItems: 'center', gap: 8 },
+    uploadOptionIcon: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' },
+    uploadOptionText: { fontSize: 14, fontWeight: '600', color: '#111' },
+    uploadOptionHint: { fontSize: 11, color: '#999' },
+    uploadProgressContainer: { marginTop: 12, gap: 8 },
+    uploadProgressBar: { height: 6, backgroundColor: '#e5e7eb', borderRadius: 3, overflow: 'hidden' },
+    uploadProgressFill: { height: '100%', backgroundColor: '#0469ff', borderRadius: 3 },
+    uploadProgressText: { fontSize: 12, color: '#666', textAlign: 'center' },
+    uploadedImagePreview: { width: 48, height: 48, borderRadius: 8 },
+    fileIconContainer: { width: 48, height: 48, borderRadius: 8, backgroundColor: '#E3F2FD', alignItems: 'center', justifyContent: 'center' },
+    fileMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+    fileUploaded: { fontSize: 12, color: '#10B981', fontWeight: '500' },
+    uploadHint: { fontSize: 11, color: '#999', textAlign: 'center', marginTop: 8 },
 });

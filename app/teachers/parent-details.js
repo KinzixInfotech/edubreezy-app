@@ -191,7 +191,12 @@ export default function TeacherParentDetailsScreen() {
         activeLetterRef.current = letter;
         setActiveLetter(letter);
         try {
-            listRef.current.scrollToLocation({ sectionIndex: idx, itemIndex: 0, viewOffset: 0, animated: true });
+            listRef.current.scrollToLocation({
+                sectionIndex: idx,
+                itemIndex: 0,
+                viewPosition: 0,
+                animated: true,
+            });
         } catch { }
     }, [sections]);
 
@@ -240,7 +245,7 @@ export default function TeacherParentDetailsScreen() {
         const parents = getVisibleParents(item);
         const hasPhoto = item.profilePicture && item.profilePicture !== 'default.png';
         return (
-            <Animated.View entering={FadeIn.delay(Math.min(index * 20, 300)).duration(300)} style={s.card}>
+            <View style={s.card}>
                 <View style={s.cardHead}>
                     <View style={s.avatarWrap}>
                         {hasPhoto ? <Image source={{ uri: item.profilePicture }} style={s.avatar} contentFit="cover" transition={200} />
@@ -265,7 +270,7 @@ export default function TeacherParentDetailsScreen() {
                         </View>
                     </View>
                 )) : <View style={s.noParent}><Text style={s.noParentTxt}>No parent details found.</Text></View>}
-            </Animated.View>
+            </View>
         );
     };
 
@@ -282,7 +287,7 @@ export default function TeacherParentDetailsScreen() {
     return (
         <View style={s.container}>
             <StatusBar style="dark" />
-            <Animated.View entering={FadeInDown.duration(350)} style={s.header}>
+            <View style={s.header}>
                 <HapticTouchable onPress={() => router.back()}><View style={s.backBtn}><ArrowLeft size={22} color="#111" /></View></HapticTouchable>
                 <View style={s.hdrCenter}>
                     <Text style={s.hdrTitle}>Parent Details</Text>
@@ -295,7 +300,7 @@ export default function TeacherParentDetailsScreen() {
                         <Text style={s.sortTxt}>{sortBy === 'az' ? 'A-Z' : 'Roll'}</Text>
                     </View>
                 </HapticTouchable>
-            </Animated.View>
+            </View>
 
             {/* Search with loading indicator */}
             <View style={s.searchWrap}>
@@ -305,7 +310,12 @@ export default function TeacherParentDetailsScreen() {
             </View>
 
             {/* Filters */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.filterRow}>
+            <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={{ flexShrink: 0 }}
+                contentContainerStyle={s.filterRow}
+            >
                 {FILTERS.map((f) => (
                     <HapticTouchable key={f.key} onPress={() => setFilter(f.key)}>
                         <View style={[s.chip, filter === f.key && s.chipOn]}>
@@ -321,8 +331,12 @@ export default function TeacherParentDetailsScreen() {
                     sections={sections}
                     keyExtractor={(item) => String(item.id || item.studentId)}
                     renderItem={renderItem}
+                    keyboardShouldPersistTaps="handled"
                     renderSectionHeader={renderHeader}
                     stickySectionHeadersEnabled
+                    initialNumToRender={10}
+                    windowSize={5}
+
                     contentContainerStyle={s.listContent}
                     refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#0469ff" />}
                     onScroll={handleScroll}
@@ -336,9 +350,9 @@ export default function TeacherParentDetailsScreen() {
                     }
                     onScrollToIndexFailed={(info) => { setTimeout(() => { try { listRef.current?.scrollToLocation({ sectionIndex: info.index, itemIndex: 0, viewOffset: 0, animated: true }); } catch { } }, 200); }}
                 />
-                {sections.length > 0 && sortBy === 'az' && (
+                {/* {sections.length > 0 && sortBy === 'az' && (
                     <AlphabetSidebar available={availableLetters} active={activeLetter} onPress={scrollToLetter} />
-                )}
+                )} */}
             </View>
         </View>
     );
@@ -356,17 +370,22 @@ const s = StyleSheet.create({
     hdrSub: { fontSize: 12, color: '#64748B', marginTop: 2 },
     sortBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#EEF6FF', paddingHorizontal: 10, paddingVertical: 7, borderRadius: 12 },
     sortTxt: { fontSize: 11, fontWeight: '800', color: '#0469ff' },
-    searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginTop: 12, paddingHorizontal: 14, height: 46, borderRadius: 13, borderWidth: 1, borderColor: '#E2E8F0', backgroundColor: '#F8FAFC' },
+    searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 10, marginHorizontal: 16, marginTop: 8, paddingHorizontal: 14, height: 46, borderRadius: 13, borderWidth: 1, borderColor: '#E2E8F0', backgroundColor: '#F8FAFC' },
     searchInput: { flex: 1, fontSize: 14, color: '#111827' },
-    filterRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingVertical: 10 },
+    filterRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, paddingTop: 6, paddingBottom: 2 },
+    listContent: { paddingHorizontal: 16, paddingBottom: 32, paddingRight: 30 },
     chip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20, backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#E2E8F0' },
     chipOn: { backgroundColor: '#0469ff', borderColor: '#0469ff' },
     chipTxt: { fontSize: 12, fontWeight: '700', color: '#64748B' },
     chipTxtOn: { color: '#fff' },
-    listWrap: { flex: 1, position: 'relative' },
-    secHead: { backgroundColor: '#F8FAFC', paddingHorizontal: 16, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+    listWrap: {
+        flex: 1,
+        position: 'relative',
+        marginTop: 10,
+    },
+    secHead: { backgroundColor: '#F8FAFC', paddingHorizontal: 16, paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
     secHeadTxt: { fontSize: 14, fontWeight: '800', color: '#0469ff', letterSpacing: 0.5 },
-    listContent: { paddingHorizontal: 16, paddingBottom: 32, paddingRight: 30 },
+
     card: { borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 14, padding: 12, marginBottom: 10, backgroundColor: '#fff' },
     cardHead: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
     avatarWrap: { width: 44, height: 44, borderRadius: 22, overflow: 'hidden', backgroundColor: '#E3F2FD', borderWidth: 2, borderColor: '#DBEAFE' },

@@ -674,6 +674,7 @@ export default function SelfAttendance() {
 
             return await api.post(`/schools/${schoolId}/attendance/mark`, buildAttendancePayload('CHECK_IN'));
         },
+
         onSuccess: async (res) => {
             queryClient.invalidateQueries({ queryKey: ['self-attendance-status'] });
             if (res?.data?.queuedOffline) {

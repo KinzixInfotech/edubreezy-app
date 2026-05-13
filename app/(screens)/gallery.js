@@ -1,12 +1,13 @@
 // app/(screens)/gallery.js
 // Pinterest-style school gallery with masonry layout, orientation support, and rich sharing
 
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useRef } from 'react';
 import {
     View,
     Text,
     StyleSheet,
     ScrollView,
+    FlatList,
     RefreshControl,
     Dimensions,
     ActivityIndicator,
@@ -15,9 +16,9 @@ import {
     Platform,
     Modal,
     Share,
+    TouchableOpacity,
     useWindowDimensions,
 } from 'react-native';
-import { GallerySkeleton } from '../components/ScreenSkeleton';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { router, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -26,7 +27,11 @@ import Animated, {
     FadeInDown,
     FadeInUp,
     FadeIn,
-    ZoomIn,
+    FadeOut,
+    useSharedValue,
+    useAnimatedStyle,
+    withTiming,
+    runOnJS,
 } from 'react-native-reanimated';
 import {
     ArrowLeft,
@@ -38,7 +43,8 @@ import {
     X,
     Calendar,
     Clock,
-    MapPin,
+    ChevronLeft,
+    ChevronRight,
     Info,
 } from 'lucide-react-native';
 import * as SecureStore from 'expo-secure-store';
@@ -51,6 +57,8 @@ import HapticTouchable from '../components/HapticTouch';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const COLUMN_GAP = 10;
+const FILMSTRIP_SIZE = 64;
+const FILMSTRIP_GAP = 6;
 
 const CATEGORIES = [
     { key: 'ALL', label: 'All' },
@@ -90,7 +98,6 @@ const GallerySkeletonCustom = ({ numColumns }) => {
 };
 
 const AlbumSkeletonCustom = ({ numColumns }) => {
-    const cols = Array.from({ length: numColumns });
     return (
         <View style={styles.albumsContainer}>
             {Array.from({ length: 6 }).map((_, i) => (
@@ -100,12 +107,189 @@ const AlbumSkeletonCustom = ({ numColumns }) => {
     );
 };
 
+// ── Full-screen iOS-style Image Viewer ────────────────────────────────────────
+const ImageViewer = ({ visible, images, initialIndex, onClose, onDownload, onShare, downloadingId, insets }) => {
+    const { width: W, height: H } = useWindowDimensions();
+    const [currentIndex, setCurrentIndex] = useState(initialIndex);
+    const [infoVisible, setInfoVisible] = useState(false);
+    const filmstripRef = useRef(null);
+
+    // Sync initialIndex when viewer opens
+    React.useEffect(() => {
+        if (visible) {
+            setCurrentIndex(initialIndex);
+            setInfoVisible(false);
+        }
+    }, [visible, initialIndex]);
+
+    // Auto-scroll filmstrip to keep selected thumb visible
+    React.useEffect(() => {
+        if (filmstripRef.current && images.length > 0) {
+            const offset = currentIndex * (FILMSTRIP_SIZE + FILMSTRIP_GAP) - W / 2 + FILMSTRIP_SIZE / 2;
+            filmstripRef.current.scrollToOffset({ offset: Math.max(0, offset), animated: true });
+        }
+    }, [currentIndex, W]);
+
+    const image = images[currentIndex];
+    if (!image) return null;
+
+    const goNext = () => { if (currentIndex < images.length - 1) setCurrentIndex(i => i + 1); };
+    const goPrev = () => { if (currentIndex > 0) setCurrentIndex(i => i - 1); };
+
+    const formatDate = (str) => str ? new Date(str).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : null;
+    const formatTime = (str) => str ? new Date(str).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : null;
+
+    return (
+        <Modal
+            visible={visible}
+            transparent={false}
+            animationType="fade"
+            onRequestClose={onClose}
+            statusBarTranslucent
+        >
+            <StatusBar style="light" />
+            <View style={viewer.root}>
+
+                {/* ── Top bar ── */}
+                <View style={[viewer.topBar, { paddingTop: insets.top + 8 }]}>
+                    <TouchableOpacity onPress={onClose} style={viewer.topBtn} activeOpacity={0.7}>
+                        <X size={22} color="#fff" />
+                    </TouchableOpacity>
+
+                    <View style={viewer.topCenter}>
+                        <Text style={viewer.topCounter}>{currentIndex + 1} / {images.length}</Text>
+                        {image.album?.title && (
+                            <Text style={viewer.topAlbum} numberOfLines={1}>{image.album.title}</Text>
+                        )}
+                    </View>
+
+                    <TouchableOpacity onPress={() => setInfoVisible(v => !v)} style={viewer.topBtn} activeOpacity={0.7}>
+                        <Info size={22} color={infoVisible ? '#EC4899' : '#fff'} />
+                    </TouchableOpacity>
+                </View>
+
+                {/* ── Main image ── */}
+                <View style={viewer.imageContainer}>
+                    <Image
+                        key={image.id}
+                        source={{ uri: image.optimizedUrl || image.originalUrl }}
+                        style={viewer.mainImage}
+                        resizeMode="contain"
+                    />
+
+                    {/* Prev / Next arrows */}
+                    {currentIndex > 0 && (
+                        <TouchableOpacity style={[viewer.arrowBtn, viewer.arrowLeft]} onPress={goPrev} activeOpacity={0.7}>
+                            <ChevronLeft size={26} color="#fff" />
+                        </TouchableOpacity>
+                    )}
+                    {currentIndex < images.length - 1 && (
+                        <TouchableOpacity style={[viewer.arrowBtn, viewer.arrowRight]} onPress={goNext} activeOpacity={0.7}>
+                            <ChevronRight size={26} color="#fff" />
+                        </TouchableOpacity>
+                    )}
+                </View>
+
+                {/* ── Info overlay ── */}
+                {infoVisible && (
+                    <Animated.View entering={FadeIn.duration(200)} exiting={FadeOut.duration(150)} style={viewer.infoOverlay}>
+                        {image.caption && (
+                            <Text style={viewer.infoCaption}>{image.caption}</Text>
+                        )}
+                        <View style={viewer.infoMeta}>
+                            {image.album?.eventDate && (
+                                <View style={viewer.infoMetaRow}>
+                                    <Calendar size={13} color="#EC4899" />
+                                    <Text style={viewer.infoMetaText}>{formatDate(image.album.eventDate)}</Text>
+                                </View>
+                            )}
+                            {image.uploadedAt && (
+                                <View style={viewer.infoMetaRow}>
+                                    <Clock size={13} color="#EC4899" />
+                                    <Text style={viewer.infoMetaText}>
+                                        {formatDate(image.uploadedAt)} · {formatTime(image.uploadedAt)}
+                                    </Text>
+                                </View>
+                            )}
+                        </View>
+                    </Animated.View>
+                )}
+
+                {/* ── Bottom: actions + filmstrip ── */}
+                <View style={[viewer.bottomBar, { paddingBottom: insets.bottom + 10 }]}>
+
+                    {/* Action buttons row */}
+                    <View style={viewer.actionRow}>
+                        <TouchableOpacity
+                            style={viewer.actionBtn}
+                            onPress={() => onDownload(image)}
+                            disabled={!!downloadingId}
+                            activeOpacity={0.7}
+                        >
+                            {downloadingId === image.id
+                                ? <ActivityIndicator size="small" color="#fff" />
+                                : <Download size={20} color="#fff" />
+                            }
+                            <Text style={viewer.actionText}>Save</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                            style={[viewer.actionBtn, viewer.actionBtnPink]}
+                            onPress={() => onShare(image)}
+                            disabled={!!downloadingId}
+                            activeOpacity={0.7}
+                        >
+                            <Share2 size={20} color="#fff" />
+                            <Text style={viewer.actionText}>Share</Text>
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* Filmstrip */}
+                    <FlatList
+                        ref={filmstripRef}
+                        data={images}
+                        keyExtractor={item => item.id}
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={viewer.filmstripContent}
+                        getItemLayout={(_, index) => ({
+                            length: FILMSTRIP_SIZE + FILMSTRIP_GAP,
+                            offset: (FILMSTRIP_SIZE + FILMSTRIP_GAP) * index,
+                            index,
+                        })}
+                        renderItem={({ item, index }) => {
+                            const isActive = index === currentIndex;
+                            return (
+                                <TouchableOpacity
+                                    onPress={() => setCurrentIndex(index)}
+                                    activeOpacity={0.8}
+                                    style={[
+                                        viewer.filmThumb,
+                                        isActive && viewer.filmThumbActive,
+                                    ]}
+                                >
+                                    <Image
+                                        source={{ uri: item.thumbnailUrl || item.optimizedUrl || item.originalUrl }}
+                                        style={viewer.filmThumbImage}
+                                        resizeMode="cover"
+                                    />
+                                    {!isActive && <View style={viewer.filmThumbDim} />}
+                                </TouchableOpacity>
+                            );
+                        }}
+                    />
+                </View>
+            </View>
+        </Modal>
+    );
+};
+
+// ── Main Screen ───────────────────────────────────────────────────────────────
 export default function GalleryScreen() {
     const { width: W, height: H } = useWindowDimensions();
     const insets = useSafeAreaInsets();
     const isLandscape = W > H;
     const numColumns = isLandscape ? 3 : 2;
-    const COLUMN_WIDTH = (W - 32 - COLUMN_GAP * (numColumns - 1)) / numColumns;
 
     const params = useLocalSearchParams();
     const queryClient = useQueryClient();
@@ -114,8 +298,8 @@ export default function GalleryScreen() {
     const [downloadingId, setDownloadingId] = useState(null);
     const [viewMode, setViewMode] = useState('ALBUMS');
     const [selectedAlbum, setSelectedAlbum] = useState(null);
-    const [selectedImage, setSelectedImage] = useState(null);
-    const [imageModalVisible, setImageModalVisible] = useState(false);
+    const [viewerVisible, setViewerVisible] = useState(false);
+    const [viewerIndex, setViewerIndex] = useState(0);
 
     const { data: userData } = useQuery({
         queryKey: ['user-data'],
@@ -177,7 +361,6 @@ export default function GalleryScreen() {
         return (imagesData?.images || []).filter(img => img.albumId === albumId).length;
     }, [imagesData]);
 
-    // Split into N columns for masonry
     const masonryColumns = useMemo(() => {
         const cols = Array.from({ length: numColumns }, () => []);
         allImages.forEach((img, idx) => cols[idx % numColumns].push(img));
@@ -195,7 +378,7 @@ export default function GalleryScreen() {
     };
 
     const handleBack = () => {
-        if (imageModalVisible) { setImageModalVisible(false); return; }
+        if (viewerVisible) { setViewerVisible(false); return; }
         if (selectedAlbum) { setSelectedAlbum(null); setViewMode('ALBUMS'); return; }
         if (viewMode === 'PHOTOS') { setViewMode('ALBUMS'); return; }
         router.back();
@@ -212,8 +395,9 @@ export default function GalleryScreen() {
     }, [queryClient]);
 
     const openImageViewer = (image) => {
-        setSelectedImage(image);
-        setImageModalVisible(true);
+        const idx = allImages.findIndex(img => img.id === image.id);
+        setViewerIndex(idx >= 0 ? idx : 0);
+        setViewerVisible(true);
     };
 
     const handleDownload = async (image) => {
@@ -269,11 +453,7 @@ export default function GalleryScreen() {
                 : null;
             const caption = image.caption ? `\n📝 ${image.caption}` : '';
             const dateStr = eventDate ? `\n📅 ${eventDate}` : '';
-            const uploadedStr = image.uploadedAt
-                ? `\nUploaded: ${new Date(image.uploadedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}`
-                : '';
-
-            const shareMessage = `📸 ${albumTitle}${caption}${dateStr}${uploadedStr}\n\nShared via EduBreezy School ERP — ${schoolName}`;
+            const shareMessage = `📸 ${albumTitle}${caption}${dateStr}\n\nShared via EduBreezy School ERP — ${schoolName}`;
 
             if (await Sharing.isAvailableAsync()) {
                 await Sharing.shareAsync(fileUri, {
@@ -289,147 +469,7 @@ export default function GalleryScreen() {
         }
     };
 
-    const formatDate = (str) => {
-        if (!str) return null;
-        return new Date(str).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
-    };
-
-    const formatTime = (str) => {
-        if (!str) return null;
-        return new Date(str).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
-    };
-
-    // ── Image detail modal ───────────────────────────────────────────────────
-    const ImageDetailModal = () => {
-        const { width: mW, height: mH } = useWindowDimensions();
-        const mLandscape = mW > mH;
-        const imgHeight = mLandscape ? mH * 0.55 : mH * 0.45;
-
-        return (
-            <Modal
-                visible={imageModalVisible}
-                transparent
-                animationType="fade"
-                onRequestClose={() => setImageModalVisible(false)}
-                statusBarTranslucent
-            >
-                <View style={styles.modalBackdrop}>
-                    <StatusBar style="light" />
-                    <Animated.View
-                        entering={FadeInUp.duration(300).springify(false)}
-                        style={[
-                            styles.modalSheet,
-                            mLandscape && { flexDirection: 'row', maxHeight: mH * 0.95 }
-                        ]}
-                    >
-                        {selectedImage && (
-                            <>
-                                {/* Image */}
-                                <Image
-                                    source={{ uri: selectedImage.optimizedUrl || selectedImage.originalUrl }}
-                                    style={[
-                                        styles.modalImage,
-                                        { height: imgHeight },
-                                        mLandscape && { width: mW * 0.5, height: '100%', borderTopRightRadius: 0, borderBottomLeftRadius: 20 }
-                                    ]}
-                                    resizeMode="cover"
-                                />
-
-                                {/* Info panel */}
-                                <ScrollView
-                                    style={mLandscape ? { flex: 1 } : undefined}
-                                    showsVerticalScrollIndicator={false}
-                                >
-                                    <View style={[styles.modalInfo, { paddingBottom: 20 + insets.bottom }]}>
-                                        {/* Album / event name */}
-                                        {(selectedImage.album?.title || selectedAlbum?.title) && (
-                                            <View style={styles.modalEventBadge}>
-                                                <Folder size={13} color="#EC4899" />
-                                                <Text style={styles.modalEventText}>
-                                                    {selectedImage.album?.title || selectedAlbum?.title}
-                                                </Text>
-                                            </View>
-                                        )}
-
-                                        {/* Caption */}
-                                        {selectedImage.caption && (
-                                            <Text style={styles.modalCaption}>{selectedImage.caption}</Text>
-                                        )}
-
-                                        {/* Meta rows */}
-                                        <View style={styles.modalMetaGrid}>
-                                            {selectedImage.album?.eventDate && (
-                                                <View style={styles.modalMetaRow}>
-                                                    <View style={styles.modalMetaIcon}><Calendar size={14} color="#EC4899" /></View>
-                                                    <View>
-                                                        <Text style={styles.modalMetaLabel}>Event Date</Text>
-                                                        <Text style={styles.modalMetaValue}>{formatDate(selectedImage.album.eventDate)}</Text>
-                                                    </View>
-                                                </View>
-                                            )}
-                                            {selectedImage.uploadedAt && (
-                                                <View style={styles.modalMetaRow}>
-                                                    <View style={styles.modalMetaIcon}><Clock size={14} color="#EC4899" /></View>
-                                                    <View>
-                                                        <Text style={styles.modalMetaLabel}>Uploaded</Text>
-                                                        <Text style={styles.modalMetaValue}>
-                                                            {formatDate(selectedImage.uploadedAt)} · {formatTime(selectedImage.uploadedAt)}
-                                                        </Text>
-                                                    </View>
-                                                </View>
-                                            )}
-                                            {selectedImage.album?.category && (
-                                                <View style={styles.modalMetaRow}>
-                                                    <View style={styles.modalMetaIcon}><Info size={14} color="#EC4899" /></View>
-                                                    <View>
-                                                        <Text style={styles.modalMetaLabel}>Category</Text>
-                                                        <Text style={styles.modalMetaValue}>
-                                                            {CATEGORIES.find(c => c.key === selectedImage.album.category)?.label || selectedImage.album.category}
-                                                        </Text>
-                                                    </View>
-                                                </View>
-                                            )}
-                                        </View>
-
-                                        {/* EduBreezy watermark */}
-                                        <View style={styles.modalBrandRow}>
-                                            <Text style={styles.modalBrandText}>📚 Shared via EduBreezy School ERP</Text>
-                                        </View>
-
-                                        {/* Actions */}
-                                        <View style={styles.modalActions}>
-                                            <HapticTouchable style={{ flex: 1 }} onPress={() => handleDownload(selectedImage)} disabled={!!downloadingId}>
-                                                <View style={styles.modalActionBtn}>
-                                                    {downloadingId === selectedImage.id
-                                                        ? <ActivityIndicator size="small" color="#fff" />
-                                                        : <Download size={20} color="#fff" />
-                                                    }
-                                                    <Text style={styles.modalActionText}>Save</Text>
-                                                </View>
-                                            </HapticTouchable>
-                                            <HapticTouchable style={{ flex: 1 }} onPress={() => handleShare(selectedImage)} disabled={!!downloadingId}>
-                                                <View style={[styles.modalActionBtn, { backgroundColor: '#EC4899' }]}>
-                                                    <Share2 size={20} color="#fff" />
-                                                    <Text style={styles.modalActionText}>Share</Text>
-                                                </View>
-                                            </HapticTouchable>
-                                        </View>
-                                    </View>
-                                </ScrollView>
-                            </>
-                        )}
-
-                        {/* Close */}
-                        <HapticTouchable onPress={() => setImageModalVisible(false)} style={styles.modalClose}>
-                            <View style={styles.modalCloseBtn}><X size={20} color="#fff" /></View>
-                        </HapticTouchable>
-                    </Animated.View>
-                </View>
-            </Modal>
-        );
-    };
-
-    // ── Masonry item ─────────────────────────────────────────────────────────
+    // ── Masonry item ──────────────────────────────────────────────────────────
     const MasonryItem = ({ image, delay = 0, colIdx }) => {
         const charSum = image.id.split('').reduce((s, c) => s + c.charCodeAt(0), 0);
         const heights = [200, 240, 180, 260, 220, 280, 190, 250];
@@ -531,7 +571,6 @@ export default function GalleryScreen() {
                 )}
             </LinearGradient>
 
-            {/* In landscape: show toggle in a compact bar */}
             {isLandscape && !selectedAlbum && (
                 <View style={styles.landscapeBar}>
                     <View style={styles.landscapeToggle}>
@@ -550,27 +589,6 @@ export default function GalleryScreen() {
                 </View>
             )}
 
-            {/* Category filter
-            {!selectedAlbum && !isLoading && !imagesLoading && (
-                <ScrollView
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    style={styles.categoryScroll}
-                    contentContainerStyle={styles.categoryScrollContent}
-                >
-                    {CATEGORIES.map((cat) => (
-                        <HapticTouchable key={cat.key} onPress={() => setSelectedCategory(cat.key)}>
-                            <View style={[styles.categoryPill, selectedCategory === cat.key && styles.categoryPillActive]}>
-                                <Text style={[styles.categoryPillText, selectedCategory === cat.key && styles.categoryPillTextActive]}>
-                                    {cat.label}
-                                </Text>
-                            </View>
-                        </HapticTouchable>
-                    ))}
-                </ScrollView>
-            )} */}
-
-            {/* Selected album header */}
             {selectedAlbum && (
                 <View style={styles.albumHeader}>
                     <HapticTouchable onPress={handleBack} style={styles.albumHeaderBack}>
@@ -658,14 +676,185 @@ export default function GalleryScreen() {
                 )}
             </ScrollView>
 
-            <ImageDetailModal />
+            {/* Full-screen viewer */}
+            <ImageViewer
+                visible={viewerVisible}
+                images={allImages}
+                initialIndex={viewerIndex}
+                onClose={() => setViewerVisible(false)}
+                onDownload={handleDownload}
+                onShare={handleShare}
+                downloadingId={downloadingId}
+                insets={insets}
+            />
         </View>
     );
 }
 
+// ── Viewer styles ─────────────────────────────────────────────────────────────
+const viewer = StyleSheet.create({
+    root: {
+        flex: 1,
+        backgroundColor: '#000',
+    },
+    // Top bar
+    topBar: {
+        position: 'absolute',
+        top: 0, left: 0, right: 0,
+        zIndex: 10,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 12,
+        paddingBottom: 12,
+        background: 'transparent',
+    },
+    topBtn: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    topCenter: {
+        flex: 1,
+        alignItems: 'center',
+        paddingHorizontal: 8,
+    },
+    topCounter: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#fff',
+    },
+    topAlbum: {
+        fontSize: 12,
+        color: 'rgba(255,255,255,0.6)',
+        marginTop: 2,
+    },
+    // Main image
+    imageContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    mainImage: {
+        width: '100%',
+        height: '100%',
+    },
+    // Arrows
+    arrowBtn: {
+        position: 'absolute',
+        top: '50%',
+        marginTop: -24,
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        backgroundColor: 'rgba(0,0,0,0.45)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        zIndex: 5,
+    },
+    arrowLeft: { left: 12 },
+    arrowRight: { right: 12 },
+    // Info overlay (above filmstrip)
+    infoOverlay: {
+        position: 'absolute',
+        bottom: 160,
+        left: 0,
+        right: 0,
+        paddingHorizontal: 20,
+        paddingVertical: 14,
+        backgroundColor: 'rgba(0,0,0,0.65)',
+        zIndex: 6,
+    },
+    infoCaption: {
+        fontSize: 15,
+        fontWeight: '600',
+        color: '#fff',
+        marginBottom: 8,
+        lineHeight: 22,
+    },
+    infoMeta: {
+        gap: 6,
+    },
+    infoMetaRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+    infoMetaText: {
+        fontSize: 13,
+        color: 'rgba(255,255,255,0.8)',
+        fontWeight: '500',
+    },
+    // Bottom bar
+    bottomBar: {
+        backgroundColor: 'rgba(0,0,0,0.85)',
+        paddingTop: 14,
+        gap: 14,
+        borderTopWidth: StyleSheet.hairlineWidth,
+        borderTopColor: 'rgba(255,255,255,0.08)',
+    },
+    // Action row
+    actionRow: {
+        flexDirection: 'row',
+        gap: 12,
+        paddingHorizontal: 20,
+    },
+    actionBtn: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        backgroundColor: 'rgba(255,255,255,0.15)',
+        paddingVertical: 11,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.12)',
+    },
+    actionBtnPink: {
+        backgroundColor: '#EC4899',
+        borderColor: '#EC4899',
+    },
+    actionText: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#fff',
+    },
+    // Filmstrip
+    filmstripContent: {
+        paddingHorizontal: 16,
+        gap: FILMSTRIP_GAP,
+        alignItems: 'center',
+    },
+    filmThumb: {
+        width: FILMSTRIP_SIZE,
+        height: FILMSTRIP_SIZE,
+        borderRadius: 10,
+        overflow: 'hidden',
+        marginRight: FILMSTRIP_GAP,
+        borderWidth: 2,
+        borderColor: 'transparent',
+    },
+    filmThumbActive: {
+        borderColor: '#EC4899',
+        borderWidth: 2.5,
+    },
+    filmThumbImage: {
+        width: '100%',
+        height: '100%',
+    },
+    filmThumbDim: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'rgba(0,0,0,0.4)',
+    },
+});
+
+// ── Gallery styles ────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f8f9fa', overflow: 'hidden' },
-    // Header
     header: { paddingHorizontal: 16, paddingBottom: 20, borderBottomLeftRadius: 28, borderBottomRightRadius: 28, overflow: 'hidden' },
     headerDecor: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
     decorIcon1: { position: 'absolute', top: 25, right: 60, fontSize: 24, opacity: 0.15 },
@@ -687,33 +876,18 @@ const styles = StyleSheet.create({
     viewToggleContainer: { alignItems: 'center' },
     viewToggle: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: 4 },
     toggleBtn: { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 16 },
-    toggleBtnActive: { backgroundColor: '#fff', borderRadius: 20, },
+    toggleBtnActive: { backgroundColor: '#fff', borderRadius: 20 },
     toggleBtnLandscapeActive: { backgroundColor: '#FCE7F3' },
     toggleText: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.9)' },
     toggleTextActive: { color: '#DB2777' },
-
-    // Landscape bar
     landscapeBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#fff', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
     landscapeToggle: { flexDirection: 'row', backgroundColor: '#f5f5f5', borderRadius: 16, padding: 3, gap: 2 },
     landscapeStats: { fontSize: 12, color: '#999', fontWeight: '500' },
-
-    // Category
-    categoryScroll: { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#eee' },
-    categoryScrollContent: { paddingHorizontal: 16, gap: 8, flexDirection: 'row', },
-    categoryPill: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#f5f5f5', borderWidth: 1.5, borderColor: 'transparent' },
-    categoryPillActive: { backgroundColor: '#FCE7F3', borderColor: '#EC4899' },
-    categoryPillText: { fontSize: 13, fontWeight: '600', color: '#666' },
-    categoryPillTextActive: { color: '#EC4899' },
-
-    // Album header
     albumHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#f0f0f0' },
     albumHeaderBack: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
     albumHeaderTitle: { fontSize: 16, fontWeight: '700', color: '#111', flex: 1 },
     albumHeaderCount: { fontSize: 13, color: '#999', fontWeight: '500' },
-
     content: { flex: 1, paddingHorizontal: 16, paddingTop: 8 },
-
-    // Masonry
     masonryContainer: { flexDirection: 'row' },
     masonryColumn: { flex: 1, gap: COLUMN_GAP },
     masonryItem: { borderRadius: 18, overflow: 'hidden', backgroundColor: '#f0f0f0', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 12, elevation: 5, marginBottom: 10 },
@@ -723,8 +897,6 @@ const styles = StyleSheet.create({
     imageOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 10, paddingBottom: 10, paddingTop: 4 },
     imageCaption: { fontSize: 11, color: '#fff', fontWeight: '600', lineHeight: 15 },
     imageAlbumLabel: { fontSize: 11, fontWeight: '600', color: 'rgba(255,255,255,0.9)' },
-
-    // Albums grid
     albumsContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, paddingBottom: 20, justifyContent: 'space-between' },
     albumCardWrapper: {},
     albumCard: { borderRadius: 18, overflow: 'hidden', height: 190, backgroundColor: '#f0f0f0', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8, elevation: 4 },
@@ -735,37 +907,12 @@ const styles = StyleSheet.create({
     albumDate: { fontSize: 11, color: 'rgba(255,255,255,0.8)', marginBottom: 4 },
     albumMeta: { flexDirection: 'row', alignItems: 'center', gap: 5 },
     albumCount: { fontSize: 11, color: 'rgba(255,255,255,0.9)', fontWeight: '500' },
-
-    // Empty
     emptyContainer: { flex: 1, alignItems: 'center', paddingVertical: 32 },
     emptyText: { fontSize: 16, color: '#999' },
     emptyState: { alignItems: 'center', paddingVertical: 80, gap: 12 },
     emptyIcon: { width: 96, height: 96, borderRadius: 48, backgroundColor: '#FCE7F3', alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
     emptyTitle: { fontSize: 20, fontWeight: '700', color: '#111' },
     emptySubtitle: { fontSize: 14, color: '#666', textAlign: 'center', paddingHorizontal: 40, lineHeight: 22 },
-
-    // Skeleton
     skeletonCard: { borderRadius: 18, backgroundColor: '#e8e8e8', marginBottom: 10, overflow: 'hidden' },
     skeletonAlbum: { height: 190, borderRadius: 18, backgroundColor: '#e8e8e8' },
-
-    // Modal
-    modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.88)', justifyContent: 'flex-end' },
-    modalSheet: { backgroundColor: '#fff', borderTopLeftRadius: 28, borderTopRightRadius: 28, maxHeight: '90%', overflow: 'hidden' },
-    modalImage: { width: '100%', borderTopLeftRadius: 28, borderTopRightRadius: 28 },
-    modalInfo: { padding: 20 },
-    modalEventBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FCE7F3', alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, marginBottom: 10 },
-    modalEventText: { fontSize: 12, fontWeight: '700', color: '#EC4899' },
-    modalCaption: { fontSize: 16, fontWeight: '600', color: '#111', marginBottom: 14, lineHeight: 22 },
-    modalMetaGrid: { gap: 12, marginBottom: 14 },
-    modalMetaRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-    modalMetaIcon: { width: 32, height: 32, borderRadius: 10, backgroundColor: '#FCE7F3', alignItems: 'center', justifyContent: 'center' },
-    modalMetaLabel: { fontSize: 11, color: '#999', fontWeight: '600' },
-    modalMetaValue: { fontSize: 13, fontWeight: '600', color: '#333', marginTop: 1 },
-    modalBrandRow: { backgroundColor: '#f8f9fa', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 16 },
-    modalBrandText: { fontSize: 12, color: '#888', textAlign: 'center', fontWeight: '500' },
-    modalActions: { flexDirection: 'row', gap: 12 },
-    modalActionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#333', paddingVertical: 14, borderRadius: 14 },
-    modalActionText: { fontSize: 14, fontWeight: '700', color: '#fff' },
-    modalClose: { position: 'absolute', top: 16, right: 16 },
-    modalCloseBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center' },
 });
